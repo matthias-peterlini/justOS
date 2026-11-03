@@ -23,6 +23,7 @@ mod linux;
 mod mem;
 mod net;
 mod rand;
+mod sandbox;
 mod shell;
 mod store;
 mod sync;

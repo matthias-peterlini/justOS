@@ -14,6 +14,7 @@ mod notes;
 mod photos;
 mod picker;
 mod prefs;
+pub mod prompt;
 mod reminders;
 pub mod search;
 pub mod store;

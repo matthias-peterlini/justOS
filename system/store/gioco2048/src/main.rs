@@ -1,5 +1,5 @@
 //! 2048: slide the tiles with the arrows; two equal tiles that meet become
-//! one. Reach 2048. The best score is kept in `sys:/home/.2048`.
+//! one. Reach 2048. The best score is kept in the app's own folder.
 
 #![no_std]
 #![no_main]
@@ -19,7 +19,11 @@ const BOARD: i32 = N as i32 * CELL + (N as i32 + 1) * GAP;
 const W: i32 = BOARD + 48;
 const H: i32 = BOARD + 150;
 const SLIDE_MS: u64 = 110;
-const BEST: &str = "sys:/home/.2048";
+
+/// Where the best score is kept.
+fn best_file() -> alloc::string::String {
+    arcrt::app::data_file("best")
+}
 
 /// A tile moving from one cell to another (for the animation).
 #[derive(Clone, Copy)]
@@ -163,7 +167,7 @@ impl Game {
             self.since = arcui::now_ms();
             if self.score > self.best {
                 self.best = self.score;
-                let _ = arcrt::fs::write(BEST, format!("{}", self.best).as_bytes());
+                let _ = arcrt::fs::write(&best_file(), format!("{}", self.best).as_bytes());
             }
             self.over = !self.can_move();
         }
@@ -266,7 +270,7 @@ impl Game {
 }
 
 fn main(_args: &str) -> i32 {
-    let best = arcrt::fs::read_to_string(BEST).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+    let best = arcrt::fs::read_to_string(&best_file()).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
     let Ok(mut win) = Window::new("2048", W, H) else { return 1 };
     let mut game = Game::new(best);
     loop {

@@ -97,6 +97,8 @@ pub fn errno(e: ArcError) -> i64 {
         ArcError::Closed => err::EPIPE,
         ArcError::Full => err::EAGAIN,
         ArcError::TooLarge => err::EINVAL,
+        ArcError::Denied => err::EACCES,
+        ArcError::Cancelled => err::EINTR,
     }
 }
 

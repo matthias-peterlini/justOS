@@ -37,22 +37,45 @@ si accorgono di un Ctrl+C. Il primo servizio è `arc.notify` nel kernel
 (`{"title": …, "text": …}` mostra una notifica); `ports` nella shell elenca
 le porte con nome, `ipc test` le prova (anche in `make test`).
 
-Ancora da fare: allegare handle qualsiasi ai messaggi (oggi viaggia solo
-quello della risposta) e decidere chi può trovare quale porta, che arriva
-con l'identità delle app.
+Con l'identità delle app, un'app nella sandbox può creare solo porte con il
+proprio nome (`<app_id>` o `<app_id>.*`); i nomi `arc.*` restano al
+sistema. Ancora da fare: allegare handle qualsiasi ai messaggi (oggi viaggia
+solo quello della risposta).
 
-### 2. Identità delle app e sandbox
+### 2. Identità delle app e sandbox ✅
 
-Ogni app installata ha un `app_id` (`org.arcos.counter`: ArcScript lo usa
-già nei pacchetti `.arc`). Il kernel associa l'`app_id` al processo quando
-lo avvia da `sys:/apps` e da lì decide cosa può fare:
+Ogni app installata ha un `app_id` (`kernel/src/sandbox.rs`, chiamate 37–39
+in `arcdk::syscall`, libreria `arcrt::app`):
 
-- file: solo la propria cartella `sys:/home/.apps/<app_id>` e ciò che
-  l'utente sceglie con il selettore di file del sistema (un *portale*, come
-  in Flatpak e nella sandbox di macOS: il selettore gira fuori dall'app e
-  le consegna un handle);
-- dispositivi (fotocamera, microfono, posizione) e rete: solo con un
-  permesso concesso.
+- le app native in `sys:/apps` lo prendono dalla chiave `app_id=` del loro
+  `<nome>.info` (altrimenti `org.arcos.<nome>`), i pacchetti `.arc` da
+  `arcc`, che chiama `APP_ENTER` prima di eseguirli; i processi figli
+  ereditano l'app del padre. Gli id sono minuscoli e `arc.` è riservato.
+- file: la propria cartella `sys:/home/.apps/<app_id>` (anche la cartella di
+  partenza), in sola lettura i caratteri, i certificati, i suoni e le app;
+  le cartelle della home (Documenti, Immagini, Musica…) e gli altri dischi
+  solo con un permesso (`files:Immagini`, `files:ram:`); tutto il resto è
+  negato con `Denied`.
+- il selettore di file del sistema (`PICK_FILE`, un *portale* come in Flatpak
+  e nella sandbox di macOS) gira fuori dall'app: il file scelto dall'utente
+  diventa accessibile all'app per il resto della sua vita, senza altri
+  permessi.
+- dispositivi (fotocamera, microfono, posizione) e rete: si chiedono al
+  servizio `arc.permissions` (`{"request": "camera"}` → `{"granted": …}`).
+
+La prima volta il sistema chiede con una finestra «Privacy» (Consenti / Non
+consentire); la risposta resta in `sys:/system/permissions.json`. *Impostazioni
+→ Sistema → Privacy delle app* elenca le risposte, le cambia e le dimentica;
+dal terminale lo fa `perms`. Senza interfaccia grafica le richieste nuove
+sono negate con un suggerimento (`perms allow <app> <permesso>`). `sandbox
+test` prova tutto (anche in `make test`). Disegno salva in Immagini (dopo il
+permesso) e con Ctrl+Maiusc+S / Ctrl+O usa il selettore; 2048 e Serpente
+tengono il record nella propria cartella.
+
+Limiti onesti: i programmi Linux e Windows non sono nella sandbox (girano
+come programmi di sistema); per fotocamera, microfono e posizione c'è il
+permesso ma non ancora i driver; il file scelto nel selettore vale solo
+finché l'app resta aperta.
 
 ### 3. Grafica accelerata
 
@@ -109,7 +132,7 @@ chiamate `WIN_CREATE`/`WIN_PRESENT`/`WIN_EVENT`.
 | WebGL, DRM (Widevine) | ⬜ / ⛔ |
 | Negozio grafico con installazione in un clic | ✅ (`sys:/store`, pacchetti `.app`) |
 | Aggiornamenti delle app in background | ⬜ |
-| Permessi in stile mobile | ⬜ (dopo IPC e sandbox) |
+| Permessi in stile mobile | ✅ cartelle, dischi, fotocamera, microfono, posizione, rete (`arc.permissions`) |
 | Programmi Linux (ELF) | 🟡 solo collegati staticamente (musl), senza `ld.so` (`kernel/src/linux`, `make test-linux`) |
 | Programmi Windows (PE) | 🟡 console e finestre semplici (`winrun`) |
 | Android (DEX/APK) | 🟡 `dalvik`, programmi semplici |
@@ -215,7 +238,7 @@ dallo stesso interprete (`_BST`, `_TMP`). Stima: 3–4 mesi.
 | Avviso di una nuova versione (release di GitHub) | ✅ |
 | Aggiornamento atomico con ritorno indietro | ⬜ |
 | Password con sale e 20 000 passaggi di SHA-256, blocco automatico | ✅ |
-| Richieste di permesso (fotocamera, microfono, cartelle) | ⬜ |
+| Richieste di permesso (fotocamera, microfono, cartelle) | ✅ |
 
 **Aggiornamenti atomici A/B.** Il disco ha già una partizione EFI e una
 ArcFS; il kernel e i file di sistema vanno in due partizioni di sistema (A
@@ -233,19 +256,20 @@ ArcBoot (BIOS e UEFI, `boot/`) va esteso a leggere lo slot e il contatore.
 Stima: 1–2 mesi. Gli snapshot del file system (alla APFS o Btrfs) sono
 un'alternativa più elegante ma richiedono il copy-on-write in ArcFS.
 
-**Permessi.** Dopo IPC e identità delle app: un servizio `arc.permissions`
-con la tabella delle concessioni (`sys:/system/permissions.json`); quando
-un'app apre la fotocamera o una cartella fuori dalla sua, il kernel sospende
-la chiamata e chiede al servizio, che mostra la finestra «*Counter* vuole
-usare la fotocamera — Consenti / Non consentire» e ricorda la risposta;
-*Impostazioni → Privacy* elenca e revoca.
+**Permessi.** Fatto (vedi «Identità delle app e sandbox»): quando un'app
+apre una cartella fuori dalla sua, il kernel sospende la chiamata e mostra
+«*Disegno* vuole usare la cartella Immagini — Consenti / Non consentire»;
+la risposta resta in `sys:/system/permissions.json`, il servizio
+`arc.permissions` risponde per fotocamera, microfono, posizione e rete,
+*Impostazioni → Privacy delle app* elenca, cambia e revoca. Manca: i
+permessi dichiarati nel manifest del Negozio.
 
 ## Ordine consigliato
 
 | Fase | Contenuto | Durata indicativa |
 |---|---|---|
-| 1 | identità delle app (IPC a porte, desktop virtuali e schede in File: fatti) | 2 mesi |
-| 2 | sandbox e permessi, aggiornamenti delle app in background, trascinamento | 2–3 mesi |
+| 1 | ✅ IPC a porte, identità delle app, desktop virtuali, schede in File | fatto |
+| 2 | aggiornamenti delle app in background, trascinamento (sandbox e permessi: fatti) | 1–2 mesi |
 | 3 | interprete AML: sospensione, batteria, temperatura | 3–4 mesi |
 | 4 | aggiornamenti A/B, HiDPI, indice dei file | 2–3 mesi |
 | 5 | strato Linux completo (JavaScript in `arcweb`: fatto), poi Servo | 6–12 mesi |

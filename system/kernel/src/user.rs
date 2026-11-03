@@ -9,6 +9,11 @@
 //! file), which talk to [`crate::linux`] through `syscall`, and Windows
 //! programs (`.exe`), which `winrun.app` loads and runs, and Android apps
 //! and Java programs (`.apk`, `.dex`, `.jar`), which `dalvik.app` runs.
+//!
+//! A process started from an installed app carries that app's identity
+//! ([`crate::sandbox::App`]); its file and port calls are checked against
+//! the app's sandbox, and files it picked in the system picker are kept in
+//! `picked`.
 
 use crate::arch::{cpu, gdt, idt::TrapFrame};
 use crate::fs::{self, Path};
@@ -78,6 +83,10 @@ struct Process {
     cwd: Path,
     state: State,
     kill: bool,
+    /// The app it runs as, in its sandbox (None: a system program).
+    app: Option<crate::sandbox::App>,
+    /// Files the user chose for it in the file picker (and may it write).
+    picked: Vec<(Path, bool)>,
 }
 
 static PROCS: IrqLock<BTreeMap<u32, Process>> = IrqLock::new(BTreeMap::new());
@@ -148,15 +157,27 @@ fn quoted(path: &Path) -> String {
     }
 }
 
+/// The app a new program runs as: its own, if it is an installed app;
+/// else the app of the program starting it, so an app cannot leave its
+/// sandbox by starting another program. An app starts in its own folder.
+fn app_for(path: &Path, cwd: Path) -> (Option<crate::sandbox::App>, Path) {
+    if let Some(app) = crate::sandbox::for_program(path) {
+        let home = crate::sandbox::prepare(&app).unwrap_or(cwd);
+        return (Some(app), home);
+    }
+    (current_app(), cwd)
+}
+
 /// Starts a program. Returns its process id.
 pub fn spawn(path: &Path, args: &str, cwd: Path) -> Result<u32, Error> {
     let name = path.name();
+    let (app, cwd) = app_for(path, cwd);
     if is_script(name) {
         // `arcc run <file> <args>`, under the script's own name.
         let runner = fs::abs(SCRIPT_RUNNER).map_err(fs_error)?;
         let image = fs::read_file(&runner).map_err(fs_error)?;
         let shown = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
-        return start(image, String::from(shown), &alloc::format!("run {} {args}", quoted(path)), cwd, Kind::Native, path);
+        return start(image, String::from(shown), &alloc::format!("run {} {args}", quoted(path)), cwd, Kind::Native, path, app);
     }
     let mut magic = [0u8; 4];
     fs::read_at(path, 0, &mut magic).map_err(fs_error)?;
@@ -173,15 +194,16 @@ pub fn spawn(path: &Path, args: &str, cwd: Path) -> Result<u32, Error> {
         let runner = fs::abs(runner).map_err(fs_error)?;
         let image = fs::read_file(&runner).map_err(fs_error)?;
         let shown = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
-        return start(image, String::from(shown), &alloc::format!("{} {args}", quoted(path)), cwd, Kind::Native, path);
+        return start(image, String::from(shown), &alloc::format!("{} {args}", quoted(path)), cwd, Kind::Native, path, app);
     }
     let image = fs::read_file(path).map_err(fs_error)?;
     let kind = if name.to_ascii_lowercase().ends_with(".app") { Kind::Native } else { Kind::Linux };
     let shown = if kind == Kind::Native { &name[..name.len() - 4] } else { name };
-    start(image, String::from(shown), args, cwd, kind, path)
+    start(image, String::from(shown), args, cwd, kind, path, app)
 }
 
-fn start(image: Vec<u8>, name: String, args: &str, cwd: Path, kind: Kind, exe: &Path) -> Result<u32, Error> {
+#[allow(clippy::too_many_arguments)]
+fn start(image: Vec<u8>, name: String, args: &str, cwd: Path, kind: Kind, exe: &Path, app: Option<crate::sandbox::App>) -> Result<u32, Error> {
     if image.len() < 64 || &image[..4] != b"\x7fELF" {
         return Err(Error::BadProgram);
     }
@@ -205,6 +227,8 @@ fn start(image: Vec<u8>, name: String, args: &str, cwd: Path, kind: Kind, exe: &
             cwd,
             state: State::Running,
             kill: false,
+            app,
+            picked: Vec::new(),
         },
     );
     let start = Box::into_raw(Box::new(Start { image, args: String::from(args), kind, exe: alloc::format!("{exe}") }));
@@ -505,7 +529,7 @@ pub fn run_foreground(path: &Path, args: &str, cwd: Path) -> Result<i64, Error> 
 /// how the shell runs `ls` out of a single `busybox` image.
 pub fn run_applet_foreground(path: &Path, argv0: &str, args: &str, cwd: Path) -> Result<i64, Error> {
     let image = fs::read_file(path).map_err(fs_error)?;
-    let pid = start(image, String::from(argv0), args, cwd, Kind::Linux, path)?;
+    let pid = start(image, String::from(argv0), args, cwd, Kind::Linux, path, current_app())?;
     *FOREGROUND.lock() = Some(pid);
     let code = wait(pid);
     *FOREGROUND.lock() = None;
@@ -611,6 +635,11 @@ pub(crate) fn user_str<'a>(ptr: u64, len: u64) -> Result<&'a str, Error> {
 fn user_path(ptr: u64, len: u64) -> Result<Path, Error> {
     let text = user_str(ptr, len)?;
     Path::parse(text, &cwd()?).map_err(fs_error)
+}
+
+/// `path`, if the calling process's sandbox lets it change it.
+fn writable(path: Path) -> Result<Path, Error> {
+    crate::sandbox::check(&path, true).map(|_| path)
 }
 
 /// The current folder of the calling process.
@@ -746,6 +775,46 @@ fn port_of(h: u64) -> Result<(u32, bool), Error> {
     })?
 }
 
+/// The app process `pid` runs as.
+pub(crate) fn app_of(pid: u32) -> Option<crate::sandbox::App> {
+    PROCS.lock().get(&pid).and_then(|p| p.app.clone())
+}
+
+/// The app the calling thread's process runs as.
+pub(crate) fn current_app() -> Option<crate::sandbox::App> {
+    app_of(task::current_pid())
+}
+
+/// The calling process's sandbox: its app and the files picked for it
+/// (None: no sandbox).
+pub(crate) fn sandbox() -> Option<(crate::sandbox::App, Vec<(Path, bool)>)> {
+    let pid = task::current_pid();
+    let procs = PROCS.lock();
+    let p = procs.get(&pid)?;
+    Some((p.app.clone()?, p.picked.clone()))
+}
+
+/// `APP_ENTER`: the calling process becomes `app`, for good.
+fn enter_app(app: crate::sandbox::App) -> Result<(), Error> {
+    let pid = task::current_pid();
+    if let Some(cur) = app_of(pid) {
+        return if cur.id == app.id { Ok(()) } else { Err(Error::Denied) };
+    }
+    let home = crate::sandbox::prepare(&app).ok_or(Error::Io)?;
+    let mut procs = PROCS.lock();
+    let p = procs.get_mut(&pid).ok_or(Error::Unknown)?;
+    match &p.app {
+        // Another thread was first.
+        Some(cur) if cur.id != app.id => Err(Error::Denied),
+        Some(_) => Ok(()),
+        None => {
+            p.app = Some(app);
+            p.cwd = home;
+            Ok(())
+        }
+    }
+}
+
 /// The name of a process (0 is the kernel).
 pub(crate) fn process_name(pid: u32) -> Option<String> {
     if pid == 0 {
@@ -798,6 +867,7 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
         sys::OPEN => {
             let path = user_path(a[0], a[1])?;
             let mode = a[2];
+            crate::sandbox::check(&path, mode != sys::MODE_READ)?;
             match fs::stat(&path) {
                 Ok(st) if st.kind == arcfs::Kind::Dir => return Err(Error::IsDir),
                 Ok(_) => {
@@ -829,6 +899,13 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
         }
         sys::PORT_CREATE => {
             let name = user_str(a[0], a[1])?;
+            // An app names its ports after itself: it cannot pose as the
+            // system's services or another app's.
+            if let Some(app) = current_app() {
+                if !name.is_empty() && name != app.id && !name.strip_prefix(app.id.as_str()).is_some_and(|r| r.starts_with('.')) {
+                    return Err(Error::Denied);
+                }
+            }
             let id = crate::ipc::create(task::current_pid(), (!name.is_empty()).then_some(name))?;
             install(Handle::Port { id, own: true }).inspect_err(|_| crate::ipc::close(id))
         }
@@ -881,8 +958,47 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
             buf[..n].copy_from_slice(&name.as_bytes()[..n]);
             Ok(name.len() as u64)
         }
+        sys::APP_ID => {
+            let id = current_app().ok_or(Error::NotFound)?.id;
+            let buf = user_slice(a[0], a[1])?;
+            let n = id.len().min(buf.len());
+            buf[..n].copy_from_slice(&id.as_bytes()[..n]);
+            Ok(id.len() as u64)
+        }
+        sys::APP_ENTER => {
+            let id = user_str(a[0], a[1])?;
+            let name = user_str(a[2], a[3])?.trim();
+            if !crate::sandbox::valid_id(id) || name.chars().count() > 64 {
+                return Err(Error::InvalidName);
+            }
+            let name = if name.is_empty() { id } else { name };
+            enter_app(crate::sandbox::App { id: id.to_ascii_lowercase(), name: name.to_string(), icon: String::from("window") }).map(|_| 0)
+        }
+        sys::PICK_FILE => {
+            let save = a[0] == sys::PICK_SAVE;
+            let suggested = user_str(a[1], a[2])?.to_string();
+            user_slice(a[3], a[4])?;
+            if !crate::gui::active() {
+                return Err(Error::Unknown);
+            }
+            let who = current_app().map(|a| a.name).unwrap_or_else(current_name);
+            let chosen = crate::gui::pick_file(&who, save, &suggested).ok_or(Error::Cancelled)?;
+            let path = fs::abs(&chosen).map_err(fs_error)?;
+            // What the user chose, the app may use (and save over).
+            let pid = task::current_pid();
+            if let Some(p) = PROCS.lock().get_mut(&pid) {
+                if p.app.is_some() && p.picked.len() < 256 {
+                    p.picked.push((path, true));
+                }
+            }
+            let buf = user_slice(a[3], a[4])?;
+            let n = chosen.len().min(buf.len());
+            buf[..n].copy_from_slice(&chosen.as_bytes()[..n]);
+            Ok(chosen.len() as u64)
+        }
         sys::LIST_DIR => {
             let path = user_path(a[0], a[1])?;
+            crate::sandbox::check(&path, false)?;
             let mut text = String::new();
             for (e, st) in fs::list_dir(&path).map_err(fs_error)? {
                 let kind = if st.kind == arcfs::Kind::Dir { 'd' } else { 'f' };
@@ -893,11 +1009,11 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
             buf[..n].copy_from_slice(&text.as_bytes()[..n]);
             Ok(text.len() as u64)
         }
-        sys::REMOVE => fs::remove(&user_path(a[0], a[1])?).map(|_| 0).map_err(fs_error),
-        sys::MAKE_DIR => fs::make_dir(&user_path(a[0], a[1])?).map(|_| 0).map_err(fs_error),
+        sys::REMOVE => fs::remove(&writable(user_path(a[0], a[1])?)?).map(|_| 0).map_err(fs_error),
+        sys::MAKE_DIR => fs::make_dir(&writable(user_path(a[0], a[1])?)?).map(|_| 0).map_err(fs_error),
         sys::RENAME => {
-            let from = user_path(a[0], a[1])?;
-            let to = user_path(a[2], a[3])?;
+            let from = writable(user_path(a[0], a[1])?)?;
+            let to = writable(user_path(a[2], a[3])?)?;
             fs::rename(&from, &to).map(|_| 0).map_err(fs_error)
         }
         sys::UPTIME => Ok(crate::time::uptime_ms()),
@@ -915,6 +1031,7 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
             let args = user_str(a[2], a[3])?.to_string();
             let cwd = cwd()?;
             let path = find_program(&name, &cwd).ok_or(Error::NotFound)?;
+            crate::sandbox::check(&path, false)?;
             spawn(&path, &args, cwd).map(|p| p as u64)
         }
         sys::WAIT => wait(a[0] as u32).map(|c| c as u64).ok_or(Error::NotFound),
@@ -967,6 +1084,7 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
         }
         sys::SET_CWD => {
             let path = user_path(a[0], a[1])?;
+            crate::sandbox::check(&path, false)?;
             if !fs::is_dir(&path) {
                 return Err(Error::NotDir);
             }

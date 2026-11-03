@@ -203,6 +203,80 @@ pub fn start_services() {
     if crate::task::spawn("arc.notify", notify_service).is_none() {
         crate::warn!("ipc", "could not start arc.notify");
     }
+    if crate::task::spawn("arc.permissions", permissions_service).is_none() {
+        crate::warn!("ipc", "could not start arc.permissions");
+    }
+}
+
+/// `arc.permissions`, the sandbox's table ([`crate::sandbox`]):
+///
+/// - `{"request": "camera"}`: may the sending app use it? Asks the user
+///   the first time. `{"granted": true}`; programs without a sandbox may
+///   always.
+/// - `{"check": "files:Immagini"}`: `{"state": "allow" | "deny" | "ask"}`,
+///   without asking.
+///
+/// And from programs without a sandbox only (the system's tools):
+/// `{"list": true}` (every answer), `{"set": perm, "app": id, "allow":
+/// true | false | null}` and `{"forget": id}`.
+fn permissions_service() {
+    use crate::sandbox;
+    use arcjson::Value;
+    let port = match create(0, Some("arc.permissions")) {
+        Ok(p) => p,
+        Err(e) => {
+            crate::warn!("ipc", "arc.permissions: {}", e.as_str());
+            return;
+        }
+    };
+    let error = |e: &str| Value::object(alloc::vec![("error", Value::string(e))]);
+    loop {
+        let Ok(m) = recv(port, 0, None, &|| false) else { continue };
+        let app = crate::user::app_of(m.sender);
+        let v = arcjson::parse_bytes(&m.data).unwrap_or(Value::Null);
+        let answer = if let Some(perm) = v.get("request").as_str().or(v.get("check").as_str()) {
+            if !sandbox::known(perm) {
+                error("permesso sconosciuto")
+            } else if v.get("request").as_str().is_some() {
+                let granted = app.as_ref().is_none_or(|a| sandbox::allowed(a, perm));
+                Value::object(alloc::vec![("granted", Value::Bool(granted))])
+            } else {
+                let state = match app.as_ref().map(|a| sandbox::state(&a.id, perm)) {
+                    None | Some(Some(true)) => "allow",
+                    Some(Some(false)) => "deny",
+                    Some(None) => "ask",
+                };
+                Value::object(alloc::vec![("state", Value::string(state))])
+            }
+        } else if app.is_some() {
+            error("solo i programmi di sistema")
+        } else if v.get("list").as_bool() == Some(true) {
+            let apps = sandbox::all()
+                .into_iter()
+                .map(|g| {
+                    let perms = g.perms.iter().map(|(p, allow)| (p.as_str(), Value::Bool(*allow))).collect();
+                    Value::object(alloc::vec![("id", Value::string(&g.id)), ("name", Value::string(&g.name)), ("perms", Value::object(perms))])
+                })
+                .collect();
+            Value::object(alloc::vec![("apps", Value::Arr(apps))])
+        } else if let Some(perm) = v.get("set").as_str() {
+            let id = v.get("app").str();
+            if !sandbox::valid_id(id) || !sandbox::known(perm) {
+                error("app o permesso non validi")
+            } else {
+                sandbox::set(id, v.get("name").str(), perm, v.get("allow").as_bool());
+                Value::object(alloc::vec![("ok", Value::Bool(true))])
+            }
+        } else if let Some(id) = v.get("forget").as_str() {
+            Value::object(alloc::vec![("ok", Value::Bool(sandbox::forget(id)))])
+        } else {
+            error("atteso {\"request\": …} o {\"check\": …}")
+        };
+        if let Some(r) = m.reply {
+            let _ = send(r, alloc::format!("{answer}").into_bytes(), 0, None);
+            drop_sender(r);
+        }
+    }
 }
 
 /// `arc.notify`: `{"title": "…", "text": "…"}` shows a notification on the
@@ -220,7 +294,7 @@ fn notify_service() {
         let Ok(m) = recv(port, 0, None, &|| false) else { continue };
         let answer = match arcjson::parse_bytes(&m.data) {
             Some(v) if v.get("text").as_str().is_some() => {
-                let from = crate::user::process_name(m.sender).unwrap_or_default();
+                let from = crate::user::app_of(m.sender).map(|a| a.name).or_else(|| crate::user::process_name(m.sender)).unwrap_or_default();
                 let title = v.get("title").as_str().filter(|t| !t.is_empty()).unwrap_or(&from);
                 let text = v.get("text").str();
                 crate::debug!("ipc", "notification from {} ({}): {title}: {text}", from, m.sender);

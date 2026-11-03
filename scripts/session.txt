@@ -27,6 +27,11 @@ hello --crash
 # messages between programs
 ports
 ipc test
+# apps and their sandbox
+sandbox test
+perms allow org.arcos.esempio files:Immagini
+perms
+perms forget org.arcos.esempio
 mem
 # drivers
 kbd

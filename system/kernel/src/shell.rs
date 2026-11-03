@@ -63,6 +63,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("ps", "", "running programs and threads"),
     ("kill", "<pid>", "stop a program"),
     ("ports", "", "named message ports and who owns them"),
+    ("perms", "[allow|deny|ask <app> <perm>]", "what apps may use outside their sandbox"),
     ("run", "<program> [args]", "start a program (also just: <program>)"),
     ("irq", "", "interrupt lines and message interrupts"),
     ("net", "", "network interfaces and addresses"),
@@ -752,6 +753,42 @@ impl Shell {
                     println!("  {owner:<5}  {queued:>6}  {name} {DIM}({who}){RESET}");
                 }
             }
+            "perms" => match (rest.first().copied(), rest.get(1).copied(), rest.get(2).copied()) {
+                (None, _, _) => {
+                    let all = crate::sandbox::all();
+                    if all.is_empty() {
+                        println!("{DIM}no app has asked for anything yet{RESET}");
+                    }
+                    for g in all {
+                        match g.name.as_str() {
+                            "" => println!("{}", g.id),
+                            name => println!("{name} {DIM}{}{RESET}", g.id),
+                        }
+                        for (p, allow) in g.perms {
+                            let (mark, word) = if allow { ("\x1b[92m+", "allowed") } else { ("\x1b[91m-", "denied") };
+                            println!("  {mark}{RESET} {p:<22} {DIM}{word}{RESET}");
+                        }
+                    }
+                }
+                (Some(op @ ("allow" | "deny" | "ask")), Some(id), Some(perm)) => {
+                    if !crate::sandbox::valid_id(id) || !crate::sandbox::known(perm) {
+                        println!("{ERR}perms: not an app id or a permission (files:<folder>, files:<disk>:, camera, microphone, location, network){RESET}");
+                    } else {
+                        let answer = match op {
+                            "allow" => Some(true),
+                            "deny" => Some(false),
+                            _ => None,
+                        };
+                        crate::sandbox::set(id, "", perm, answer);
+                    }
+                }
+                (Some("forget"), Some(id), None) => {
+                    if !crate::sandbox::forget(id) {
+                        println!("{DIM}nothing known about {id}{RESET}");
+                    }
+                }
+                _ => println!("usage: perms | perms allow|deny|ask <app_id> <permission> | perms forget <app_id>"),
+            },
             "uptime" => {
                 let s = time::uptime_ms() / 1000;
                 println!("up {}h {:02}m {:02}s", s / 3600, s / 60 % 60, s % 60);

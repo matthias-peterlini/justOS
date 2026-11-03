@@ -228,6 +228,19 @@ pub fn notify(title: &str, body: &str, icon: &str) {
     }
 }
 
+/// Asks the user whether `app` may use `what` ("la cartella Immagini"), in
+/// a dialog of the system; waits for the answer (None: the asking program
+/// was stopped).
+pub fn ask_permission(app: &crate::sandbox::App, what: &str) -> Option<bool> {
+    apps::prompt::permission(app, what)
+}
+
+/// The system's file picker, for a program (`app` names it): a file to
+/// open, or (`save`) where to save `name`. None if the user closed it.
+pub fn pick_file(app: &str, save: bool, name: &str) -> Option<alloc::string::String> {
+    apps::prompt::pick(app, save, name)
+}
+
 fn take_notification() -> Option<(alloc::string::String, alloc::string::String, alloc::string::String)> {
     let mut q = NOTIFICATIONS.lock();
     if q.is_empty() {

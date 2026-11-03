@@ -37,7 +37,11 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
   `rootfs/system/gui/wallpapers/CREDITS.txt`).
 - **Al sicuro e aggiornato**: una password blocca lo schermo (all'avvio,
   con logo+L o dopo qualche minuto di pausa), Stamp salva una schermata in
-  Immagini, e arcOS avvisa quando su GitHub c'è una versione nuova.
+  Immagini, e arcOS avvisa quando su GitHub c'è una versione nuova. Le app
+  del Negozio girano in una sandbox: vedono solo la propria cartella e i
+  file scelti dall'utente, e per le altre cartelle chiedono il permesso
+  («Disegno vuole usare la cartella Immagini»), che si rivede in
+  *Impostazioni → Privacy delle app*.
 - **Doppio clic e via**: un programma parte, un pacchetto (`.deb`,
   `.tar.gz`, `.zip`, `.pkg` di macOS…) si installa da solo.
 - **Le app di ogni giorno**: File, Editor di testo, Note, Promemoria,

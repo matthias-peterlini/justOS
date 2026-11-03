@@ -175,6 +175,14 @@ fn cmd_run(args: &Args) -> i32 {
     let name = package.manifest.get("name").unwrap_or("ArcScript").to_owned();
     let title = package.manifest.get("title").unwrap_or(&name).to_owned();
     let app_id = package.manifest.get("app_id").map_or_else(|| arcc_core::package::app_id(&name), str::to_owned);
+    // A finished package runs as its app, in the app's sandbox; a source
+    // being written runs as whoever started it.
+    if path.ends_with(".arc") {
+        if let Err(e) = arcrt::app::enter(&app_id, &title) {
+            eprintln!("{path}: cannot run as {app_id}: {}", e.as_str());
+            return EXIT_BAD_PACKAGE;
+        }
+    }
     let mut vm = match Vm::with_host(package.program, Box::new(host::ArcHost)) {
         Ok(vm) => vm,
         Err(e) => {

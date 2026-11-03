@@ -92,6 +92,8 @@ pub struct PackageInfo {
     pub source: String,
     /// What opening it types in the terminal (text programs).
     pub open: String,
+    /// Who the app is to the sandbox (`app_id=`; else `org.arcos.<id>`).
+    pub app_id: String,
 }
 
 pub fn parse_info(text: &str, id: &str) -> PackageInfo {
@@ -113,8 +115,12 @@ pub fn parse_info(text: &str, id: &str) -> PackageInfo {
             "color" => p.color = parse_color(&v),
             "source" => p.source = v,
             "open" => p.open = v,
+            "app_id" if crate::sandbox::valid_id(&v) => p.app_id = v.to_ascii_lowercase(),
             _ => {}
         }
+    }
+    if p.app_id.is_empty() {
+        p.app_id = crate::sandbox::default_id(id);
     }
     p.native = p.platform == Platform::Arcos;
     if p.command.is_empty() {

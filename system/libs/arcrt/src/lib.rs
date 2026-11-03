@@ -16,13 +16,14 @@
 //! ```
 //!
 //! `alloc` works (`String`, `Vec`, `format!`); [`fs`], [`console`],
-//! [`time`], [`process`] and [`ipc`] (messages between programs) wrap the
-//! system calls.
+//! [`time`], [`process`], [`ipc`] (messages between programs) and [`app`]
+//! (the app's sandbox, the file picker, permissions) wrap the system calls.
 
 #![no_std]
 
 extern crate alloc;
 
+pub mod app;
 pub mod console;
 pub mod fs;
 mod heap;

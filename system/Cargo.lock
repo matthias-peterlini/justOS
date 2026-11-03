@@ -312,6 +312,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sandbox"
+version = "1.0.0"
+dependencies = [
+ "arcrt",
+]
+
+[[package]]
 name = "sdhci"
 version = "1.0.0"
 dependencies = [

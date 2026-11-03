@@ -1,6 +1,8 @@
 //! Disegno: draw with the mouse. Pencil, brush, eraser, lines, rectangles,
 //! circles and the paint bucket; a palette, three sizes, undo, and saving to
-//! the Immagini folder (QOI pictures, which Foto and Anteprima open).
+//! the Immagini folder (QOI pictures, which Foto and Anteprima open), with
+//! the user's permission; Ctrl+Maiusc+S saves and Ctrl+O opens through the
+//! system's file picker.
 
 #![no_std]
 #![no_main]
@@ -11,9 +13,12 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use arcrt::Error;
 use arcui::{qoi, ui, Canvas, Event, Font, Key, Rect, Window};
 
 arcrt::main!(main);
+
+const PICTURES: &str = "sys:/home/Immagini";
 
 const W: i32 = 880;
 const H: i32 = 540;
@@ -219,32 +224,67 @@ impl App {
         }
     }
 
-    fn save(&mut self) {
-        let dir = "sys:/home/Immagini";
-        let _ = arcrt::fs::make_dir(dir);
-        let path = match &self.saved_as {
-            Some(p) => p.clone(),
-            None => {
-                let mut n = 1;
-                loop {
-                    let p = format!("{dir}/Disegno {n}.qoi");
-                    if arcrt::fs::File::open(&p).is_err() {
-                        break p;
-                    }
-                    n += 1;
-                }
+    /// A new name in Immagini; None if Disegno may not use the folder (the
+    /// system asks the user the first time).
+    fn next_in_pictures() -> Option<String> {
+        if arcrt::fs::make_dir(PICTURES) == Err(Error::Denied) {
+            return None;
+        }
+        let mut n = 1;
+        loop {
+            let p = format!("{PICTURES}/Disegno {n}.qoi");
+            match arcrt::fs::File::open(&p) {
+                Ok(_) => n += 1,
+                Err(Error::Denied) => return None,
+                Err(_) => return Some(p),
             }
+        }
+    }
+
+    /// Saves where it was saved before, else in Immagini, else (or with
+    /// `choose`) where the user says in the system's file picker.
+    fn save(&mut self, choose: bool) {
+        let path = match &self.saved_as {
+            Some(p) if !choose => Some(p.clone()),
+            _ if choose => None,
+            _ => Self::next_in_pictures(),
+        };
+        let path = match path {
+            Some(p) => p,
+            None => match arcrt::app::pick_save("Disegno.qoi") {
+                Ok(p) => p,
+                Err(_) => return,
+            },
         };
         let data = qoi::encode(&self.paper);
         self.note = match arcrt::fs::write(&path, &data) {
             Ok(()) => {
                 let name = String::from(path.rsplit('/').next().unwrap_or(&path));
+                let place = if path.starts_with(PICTURES) { " in Immagini" } else { "" };
                 self.saved_as = Some(path);
-                format!("Salvato in Immagini come «{name}»")
+                format!("Salvato{place} come «{name}»")
             }
             Err(e) => format!("Non salvato: {}", e.as_str()),
         };
         self.note_until = arcui::now_ms() + 3000;
+    }
+
+    /// Opens a picture the user chooses in the system's file picker.
+    fn open(&mut self) {
+        let Ok(path) = arcrt::app::pick_open() else { return };
+        match arcrt::fs::read(&path).ok().and_then(|d| qoi::decode(&d)) {
+            Some(img) => {
+                self.remember();
+                self.paper.px.fill(0xFFFF_FFFF);
+                let r = Rect::new(0, 0, img.w.min(self.paper.w), img.h.min(self.paper.h));
+                self.paper.blit(&img, 0, 0, r);
+                self.saved_as = Some(path);
+            }
+            None => {
+                self.note = String::from("Non è un'immagine QOI");
+                self.note_until = arcui::now_ms() + 3000;
+            }
+        }
     }
 
     fn draw(&self, win: &mut Window) {
@@ -333,7 +373,7 @@ fn main(_args: &str) -> i32 {
                     app.remember();
                     app.paper.px.fill(0xFFFF_FFFF);
                 } else if buttons()[2].contains(x, y) {
-                    app.save();
+                    app.save(false);
                 } else if paper_rect().contains(x, y) {
                     let at = App::to_paper(x, y);
                     app.remember();
@@ -381,8 +421,10 @@ fn main(_args: &str) -> i32 {
                     if let Some(px) = app.undo.pop() {
                         app.paper.px = px;
                     }
-                } else if k.ctrl && matches!(k.key, Key::Char('s')) {
-                    app.save();
+                } else if k.ctrl && matches!(k.key, Key::Char('s' | 'S')) {
+                    app.save(k.shift);
+                } else if k.ctrl && matches!(k.key, Key::Char('o' | 'O')) {
+                    app.open();
                 } else {
                     dirty = false;
                 }

@@ -117,6 +117,8 @@ fn main(args: &str) -> i32 {
 | `fs` | `File` (`open`, `create`, `append`, `read`, `write`, `seek`, `size`, `read_to_end`), `read`, `read_to_string`, `write`, `list_dir`, `make_dir`, `remove`, `rename`, `current_dir`, `set_current_dir` |
 | `process` | `exit`, `spawn`, `wait`, `yield_now`, `sysinfo` |
 | `time` | `uptime_ms`, `sleep_ms`, `now`, `date` |
+| `ipc` | `Port` (`create`, `lookup`, `send`, `recv`, `call`), messaggi tra programmi |
+| `app` | `id`, `data_dir`, `data_file`, `pick_open`, `pick_save`, `request`, `permission`: identità e sandbox |
 | radice | `main!`, `split_args` (argomenti, con le virgolette) |
 
 ### Le chiamate di sistema
@@ -164,6 +166,12 @@ File e cartelle aperti sono **handle** numerici, non descrittori Unix.
 | 34 | `PORT_RECV` | riceve un messaggio, con il mittente e dove rispondere |
 | 35 | `PORT_CALL` | invia una richiesta e aspetta la risposta |
 | 36 | `PROC_NAME` | il nome di un processo |
+| 37 | `APP_ID` | l'`app_id` del programma (vuoto per i programmi di sistema) |
+| 38 | `APP_ENTER` | entra nella sandbox di un'app (una volta sola, senza ritorno) |
+| 39 | `PICK_FILE` | il selettore di file del sistema (`PICK_OPEN` o `PICK_SAVE`) |
+
+Due errori riguardano la sandbox: `Denied` (permesso negato) e `Cancelled`
+(l'utente ha chiuso il selettore).
 
 ## Messaggi tra programmi
 
@@ -189,6 +197,48 @@ Il kernel dice a chi riceve il pid di chi ha scritto (`m.sender`), che un
 programma non può falsificare. Il sistema offre `arc.notify`: un messaggio
 `{"title": "…", "text": "…"}` mostra una notifica sulla scrivania. Dalla
 shell: `ipc notify Titolo testo`, `ipc call <porta> <testo>`, `ports`.
+
+Un'app nella sandbox può creare solo porte con il proprio nome
+(`<app_id>` o `<app_id>.qualcosa`).
+
+## Sandbox delle app
+
+Un programma installato in `sys:/apps` con un `<nome>.info` di tipo `native`
+(come quelli del Negozio) è un'**app**: ha un `app_id`, dalla chiave
+`app_id=org.esempio.saluto` del `.info` o, se manca, `org.arcos.<nome>`. I
+pacchetti `.arc` lo prendono dal manifest. Gli strumenti di sistema
+(`sys:/apps/*.app` senza `.info`) non sono nella sandbox. I processi avviati
+da un'app restano nella sua sandbox.
+
+Un'app può:
+
+- leggere e scrivere nella propria cartella `sys:/home/.apps/<app_id>`, che è
+  anche la cartella di partenza (`arcrt::app::data_file("record")`);
+- leggere le app, i caratteri, i certificati, i suoni e le icone di sistema;
+- usare le cartelle della home (`files:Immagini`, `files:Documenti`…) o un
+  altro disco (`files:ram:`) dopo che l'utente ha detto sì: la prima volta
+  il sistema mostra la domanda e sospende la chiamata;
+- aprire o salvare il file che l'utente sceglie nel selettore, senza altri
+  permessi:
+
+```rust
+match arcrt::app::pick_save("Disegno.qoi") {
+    Ok(percorso) => arcrt::fs::write(&percorso, &dati)?,
+    Err(Error::Cancelled) => {}            // l'utente ha annullato
+    Err(e) => return Err(e),
+}
+```
+
+Il resto restituisce `Denied`. Fotocamera, microfono, posizione e rete si
+chiedono al servizio `arc.permissions`: `arcrt::app::request("camera")`
+restituisce `Ok(true)` se l'utente consente, `permission("camera")` dice la
+risposta già data senza chiedere. Le risposte stanno in
+`sys:/system/permissions.json`; si cambiano in *Impostazioni → Sistema →
+Privacy delle app* o con `perms` nel terminale (`perms allow
+org.arcos.disegno files:Immagini`, `perms forget <app>`). Per provare un
+programma nella sandbox: `sandbox run <app_id> <programma>`.
+
+I programmi Linux e Windows non sono (ancora) nella sandbox.
 
 ## Programmi con una finestra
 

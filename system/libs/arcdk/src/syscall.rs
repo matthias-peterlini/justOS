@@ -102,6 +102,26 @@ pub const PORT_CALL: u64 = 35;
 /// message).
 pub const PROC_NAME: u64 = 36;
 
+// Apps: an installed arcOS app runs as itself (its `app_id`, such as
+// `org.arcos.disegno`) in a sandbox: it reads and writes only its own folder,
+// `sys:/home/.apps/<app_id>`; other folders need the user's permission, and
+// single files come through the system's file picker.
+
+/// (buf, cap) -> length of the calling program's app id. `NotFound` if it
+/// runs without one (a system program).
+pub const APP_ID: u64 = 37;
+/// (id, len, name, len): from now on the program runs as app `id` (shown
+/// as `name`), in its sandbox. One way: an app cannot become another
+/// (`Denied`). For runners such as `arcc` before they start a package.
+pub const APP_ENTER: u64 = 38;
+/// (mode, name, len, buf, cap) -> length of the path chosen: the system's
+/// file picker, outside the app. `PICK_OPEN` a file to open, `PICK_SAVE` a
+/// place to save (`name` is the suggestion). The app may then use that
+/// file, and only that. `Cancelled` if the user closed it.
+pub const PICK_FILE: u64 = 39;
+pub const PICK_OPEN: u64 = 0;
+pub const PICK_SAVE: u64 = 1;
+
 pub const PORT_MSG_MAX: u64 = 64 << 10;
 pub const PORT_QUEUE_MAX: usize = 64;
 /// `PORT_RECV` timeout: wait until a message comes.
@@ -166,6 +186,10 @@ pub enum Error {
     /// A port's queue is full.
     Full = 17,
     TooLarge = 18,
+    /// The app's sandbox does not allow it (or the user said no).
+    Denied = 19,
+    /// The user closed the dialog.
+    Cancelled = 20,
 }
 
 impl Error {
@@ -188,6 +212,8 @@ impl Error {
             16 => Error::Closed,
             17 => Error::Full,
             18 => Error::TooLarge,
+            19 => Error::Denied,
+            20 => Error::Cancelled,
             _ => Error::Unknown,
         }
     }
@@ -212,6 +238,8 @@ impl Error {
             Error::Closed => "the other side is gone",
             Error::Full => "queue full",
             Error::TooLarge => "too large",
+            Error::Denied => "permission denied",
+            Error::Cancelled => "cancelled",
         }
     }
 }

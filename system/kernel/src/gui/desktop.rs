@@ -2703,6 +2703,10 @@ impl Desktop {
                 for app in super::window::take_new() {
                     self.open(l, app, false);
                 }
+                // Questions of the sandbox, and file pickers for programs.
+                for app in super::apps::prompt::take_new() {
+                    self.open(l, app, false);
+                }
                 while let Some((title, body, icon)) = super::take_notification() {
                     self.notify(l, title, body, icon);
                 }

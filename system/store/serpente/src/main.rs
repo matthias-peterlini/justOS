@@ -19,7 +19,11 @@ const TOP: i32 = 56;
 const PAD: i32 = 14;
 const W: i32 = COLS * CELL + 2 * PAD;
 const H: i32 = ROWS * CELL + TOP + PAD;
-const BEST: &str = "sys:/home/.serpente";
+
+/// Where the best score is kept (the app's own folder).
+fn best_file() -> alloc::string::String {
+    arcrt::app::data_file("best")
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum State {
@@ -92,7 +96,7 @@ impl Game {
             self.state = State::Over;
             if self.score > self.best {
                 self.best = self.score;
-                let _ = arcrt::fs::write(BEST, format!("{}", self.best).as_bytes());
+                let _ = arcrt::fs::write(&best_file(), format!("{}", self.best).as_bytes());
             }
             return;
         }
@@ -179,7 +183,7 @@ impl Game {
 }
 
 fn main(_args: &str) -> i32 {
-    let best = arcrt::fs::read_to_string(BEST).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+    let best = arcrt::fs::read_to_string(&best_file()).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
     let Ok(mut win) = Window::new("Serpente", W, H) else { return 1 };
     let mut game = Game::new(best);
     let mut dirty = true;
