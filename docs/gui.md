@@ -145,8 +145,21 @@ scritto da zero come il resto: tokenizer e albero HTML con le regole di
 chiusura implicita, CSS con selettori, media query, `@import`, `@supports`,
 annidamento, variabili, `calc()`/`min()`/`max()`/`clamp()`; layout a blocchi
 e in linea, float, flexbox, grid, tabelle, liste, campi dei moduli; immagini
-PNG, JPEG (anche progressive) e GIF. JavaScript non c'è: i siti che ne hanno
-bisogno per mostrare il contenuto restano parziali.
+PNG, JPEG (anche progressive) e GIF.
+
+JavaScript lo esegue `arcjs` (`system/libs/arcjs`), un interprete ad albero
+scritto da zero in Rust `no_std`: ES2020 circa (classi, closure,
+destrutturazione, spread, template, generatori, `async`/`await`, Promise,
+Map/Set, espressioni regolari, JSON, Date, Intl essenziale). `arcweb`
+(`script.rs`) gli dà la pagina: `document` e i nodi (alberi, selettori,
+`innerHTML`, `classList`, `style`, `dataset`), eventi con cattura e
+propagazione, timer, `location`/`history`, `localStorage`, `fetch` e
+`XMLHttpRequest`. Gli script di una pagina girano su un thread loro (stack
+da 2 MiB), che poi ogni 15 ms passa agli script i clic, i tasti e i timer
+scaduti; un ciclo infinito viene interrotto dopo un tetto di passi e la
+pagina resta usabile. Ciò che gli script scrivono in `console` va nel
+giornale (`log`). Limiti: niente JIT (le pagine pesanti sono lente), `await`
+è sincrono, niente canvas, WebSocket, worker e moduli ES.
 
 Ogni pagina si carica su un thread suo (pagina, fogli di stile, poi le
 immagini quattro alla volta) e viene impaginata di nuovo quando arrivano le

@@ -18,6 +18,7 @@ arctls = { path = "libs/arctls" }
 arczip = { path = "libs/arczip" }
 arcjson = { path = "libs/arcjson" }
 arcweb = { path = "libs/arcweb" }
+arcjs = { path = "libs/arcjs" }
 arcui = { path = "libs/arcui" }
 arcdrv = { path = "libs/arcdrv" }
 arcrt = { path = "libs/arcrt" }

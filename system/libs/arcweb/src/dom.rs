@@ -56,6 +56,62 @@ impl Dom {
         id
     }
 
+    /// A node outside the tree (made by a script).
+    pub fn create(&mut self, data: Data) -> NodeId {
+        self.nodes.push(Node { data, parent: None, children: Vec::new() });
+        self.nodes.len() - 1
+    }
+
+    /// Takes a node out of its parent.
+    pub fn detach(&mut self, id: NodeId) {
+        if let Some(p) = self.nodes[id].parent.take() {
+            self.nodes[p].children.retain(|&c| c != id);
+        }
+    }
+
+    /// Whether `a` is `b` or one of its ancestors.
+    pub fn contains(&self, a: NodeId, b: NodeId) -> bool {
+        let mut cur = Some(b);
+        while let Some(n) = cur {
+            if n == a {
+                return true;
+            }
+            cur = self.nodes[n].parent;
+        }
+        false
+    }
+
+    /// Puts `child` under `parent`, before `before` (or last). Refuses to
+    /// put a node inside itself.
+    pub fn insert(&mut self, parent: NodeId, child: NodeId, before: Option<NodeId>) -> bool {
+        if self.contains(child, parent) {
+            return false;
+        }
+        self.detach(child);
+        let at = before.and_then(|b| self.nodes[parent].children.iter().position(|&c| c == b)).unwrap_or(self.nodes[parent].children.len());
+        self.nodes[parent].children.insert(at, child);
+        self.nodes[child].parent = Some(parent);
+        true
+    }
+
+    /// Whether a node is in the document.
+    pub fn attached(&self, id: NodeId) -> bool {
+        self.contains(Self::ROOT, id)
+    }
+
+    /// A copy of a node (and of everything under it when `deep`), outside
+    /// the tree.
+    pub fn clone_node(&mut self, id: NodeId, deep: bool) -> NodeId {
+        let copy = self.create(self.nodes[id].data.clone());
+        if deep {
+            for c in self.nodes[id].children.clone() {
+                let cc = self.clone_node(c, true);
+                self.insert(copy, cc, None);
+            }
+        }
+        copy
+    }
+
     pub fn element(&self, id: NodeId) -> Option<&Element> {
         match &self.nodes.get(id)?.data {
             Data::Element(e) => Some(e),

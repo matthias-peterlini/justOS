@@ -7,7 +7,7 @@ use crate::fonts::WebFonts;
 use crate::layout::{self, Item, Layout, Pictures, Target};
 use crate::style::{self, Styles};
 use crate::{html, url};
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use arcgfx::{Canvas, Rect};
@@ -39,6 +39,26 @@ pub enum Hit {
     Changed,
     /// A <select>: (node, options, chosen index).
     Choose(NodeId, Vec<String>, usize),
+    /// A script listens: the click waits for it (see [`Document::events`]).
+    Script,
+}
+
+/// Something that happened on the page, for its scripts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Event {
+    pub node: NodeId,
+    /// "click", "input", "change".
+    pub kind: &'static str,
+    /// The browser waits to do what the click does until the scripts had
+    /// their say (they may cancel it).
+    pub deferred: bool,
+}
+
+/// A script of the page, in document order.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Script {
+    Inline(String),
+    External(String),
 }
 
 pub struct Document {
@@ -58,6 +78,13 @@ pub struct Document {
     pub focus: Option<NodeId>,
     /// Caret position (in characters) in the focused field.
     pub caret: usize,
+    /// Scripts run on the page: clicks and typing become [`Event`]s.
+    pub scripted: bool,
+    /// Nodes scripts listen on for clicks ([`Dom::ROOT`] for the document
+    /// and the window).
+    pub listened: BTreeSet<NodeId>,
+    /// Events waiting for the scripts.
+    pub events: Vec<Event>,
 }
 
 impl Document {
@@ -89,6 +116,9 @@ impl Document {
             stale: false,
             focus: None,
             caret: 0,
+            scripted: false,
+            listened: BTreeSet::new(),
+            events: Vec::new(),
         };
         d.read_head();
         d
@@ -101,6 +131,20 @@ impl Document {
         if let Some(t) = self.dom.find("title") {
             self.title = self.dom.text(t).split_whitespace().collect::<Vec<_>>().join(" ");
         }
+        self.read_sheets();
+        // The pictures of <img> elements.
+        for n in self.dom.descendants(Dom::ROOT) {
+            if matches!(self.dom.tag(n), "img") || (self.dom.tag(n) == "input" && self.dom.attr(n, "type").is_some_and(|t| t.eq_ignore_ascii_case("image"))) {
+                if let Some(src) = layout::image_src(&self.dom, n) {
+                    let u = url::join(&self.base, &src);
+                    self.picture_slot(&u);
+                }
+            }
+        }
+    }
+
+    /// Reads the <style> and <link rel=stylesheet> elements into `sheets`.
+    fn read_sheets(&mut self) {
         for n in self.dom.descendants(Dom::ROOT) {
             match self.dom.tag(n) {
                 "style" => {
@@ -120,15 +164,6 @@ impl Document {
                     }
                 }
                 _ => {}
-            }
-        }
-        // The pictures of <img> elements.
-        for n in self.dom.descendants(Dom::ROOT) {
-            if matches!(self.dom.tag(n), "img") || (self.dom.tag(n) == "input" && self.dom.attr(n, "type").is_some_and(|t| t.eq_ignore_ascii_case("image"))) {
-                if let Some(src) = layout::image_src(&self.dom, n) {
-                    let u = url::join(&self.base, &src);
-                    self.picture_slot(&u);
-                }
             }
         }
         // Imports of inline sheets.
@@ -263,6 +298,31 @@ impl Document {
         self.laid_width = width;
         self.stale = false;
         self.prescale();
+    }
+
+    /// Reads the stylesheets again after a script added or removed <style>
+    /// or <link> elements. Sheets already fetched are kept; new ones are
+    /// asked for by [`Document::wanted_sheets`].
+    pub fn reread_styles(&mut self) {
+        let mut fetched = BTreeMap::new();
+        for s in core::mem::take(&mut self.sheets) {
+            if let Sheet::External { url, sheet, asked } = s {
+                if sheet.is_some() || asked {
+                    fetched.insert(url, (sheet, asked));
+                }
+            }
+        }
+        self.read_sheets();
+        for s in &mut self.sheets {
+            if let Sheet::External { url, sheet, asked } = s {
+                if let Some((old, was)) = fetched.remove(url.as_str()) {
+                    *sheet = old;
+                    *asked = was;
+                }
+            }
+        }
+        self.styles = None;
+        self.stale = true;
     }
 
     /// Restyles after the page changed (a <details> opened).
@@ -482,7 +542,57 @@ impl Document {
     /// The target at a page point.
     pub fn target_at(&self, x: i32, y: i32) -> Option<Target> {
         let l = self.layout.as_ref()?;
-        l.targets.iter().rev().find(|(r, _)| r.contains(x, y)).map(|(_, t)| *t)
+        let mut hits = l.targets.iter().rev().filter(|(r, _)| r.contains(x, y)).map(|(_, t)| *t);
+        let first = hits.next()?;
+        if !matches!(first, Target::Block(_)) {
+            return Some(first);
+        }
+        // A link or a control around a box still takes the click.
+        Some(hits.find(|t| !matches!(t, Target::Block(_))).unwrap_or(first))
+    }
+
+    /// The scripts of the page, in order. Modules and data blocks are left
+    /// out.
+    pub fn scripts(&self) -> Vec<Script> {
+        let mut out = Vec::new();
+        for n in self.dom.descendants(Dom::ROOT) {
+            if self.dom.tag(n) != "script" {
+                continue;
+            }
+            let ty = self.dom.attr(n, "type").unwrap_or("").trim().to_ascii_lowercase();
+            if !matches!(ty.as_str(), "" | "text/javascript" | "application/javascript" | "text/ecmascript" | "application/x-javascript") {
+                continue;
+            }
+            match self.dom.attr(n, "src") {
+                Some(src) if !src.trim().is_empty() => out.push(Script::External(url::join(&self.base, src.trim()))),
+                Some(_) => {}
+                None => out.push(Script::Inline(self.dom.text(n))),
+            }
+        }
+        out
+    }
+
+    /// Whether a script listens for clicks on a node or around it.
+    fn listens(&self, n: NodeId) -> bool {
+        let mut cur = Some(n);
+        while let Some(c) = cur {
+            if self.listened.contains(&c) || self.dom.attr(c, "onclick").is_some() {
+                return true;
+            }
+            cur = self.dom.nodes[c].parent;
+        }
+        false
+    }
+
+    /// What a click on a node does by itself (scripts aside).
+    pub fn default_click(&mut self, n: NodeId) -> Option<Hit> {
+        if matches!(self.dom.tag(n), "a" | "area" | "input" | "button" | "select" | "textarea" | "summary" | "label") {
+            self.activate(n)
+        } else {
+            // A box inside a link.
+            let link = self.dom.closest(n, "a")?;
+            self.activate(link)
+        }
     }
 
     /// The address of the link at a page point (for the status line).
@@ -496,15 +606,46 @@ impl Document {
     /// A click at a page point.
     pub fn click(&mut self, x: i32, y: i32) -> Option<Hit> {
         let t = self.target_at(x, y);
+        if self.scripted {
+            if let Some(n) = t.map(Target::node).filter(|&n| self.listens(n)) {
+                // Following a link or sending a form waits for the scripts;
+                // fields and toggles answer at once.
+                let defer = match t {
+                    Some(Target::Link(_) | Target::Block(_)) => true,
+                    Some(Target::Control(c)) => matches!(self.dom.tag(c), "button" | "input") && matches!(self.dom.attr(c, "type").unwrap_or(if self.dom.tag(c) == "button" { "submit" } else { "text" }).to_ascii_lowercase().as_str(), "submit" | "image"),
+                    _ => false,
+                };
+                if defer {
+                    self.focus = None;
+                    self.events.push(Event { node: n, kind: "click", deferred: true });
+                    return Some(Hit::Script);
+                }
+                let hit = self.default_click(n);
+                self.events.push(Event { node: n, kind: "click", deferred: false });
+                if hit == Some(Hit::Changed) {
+                    self.events.push(Event { node: n, kind: "change", deferred: false });
+                }
+                if !matches!(hit, Some(Hit::Focus(_))) {
+                    self.focus = None;
+                }
+                return hit.or(Some(Hit::Script));
+            }
+        }
         let hit = match t {
             Some(Target::Link(n)) | Some(Target::Control(n)) => self.activate(n),
             Some(Target::Summary(n)) | Some(Target::Label(n)) => self.activate(n),
+            Some(Target::Block(n)) => self.dom.closest(n, "a").and_then(|a| self.activate(a)),
             None => None,
         };
         if !matches!(hit, Some(Hit::Focus(_))) && hit != Some(Hit::Changed) {
             self.focus = None;
         }
         hit
+    }
+
+    /// The form a control sends.
+    pub fn form_of(&self, from: NodeId) -> Option<NodeId> {
+        self.dom.attr(from, "form").and_then(|id| self.dom.descendants(Dom::ROOT).into_iter().find(|&e| self.dom.attr(e, "id") == Some(id))).or_else(|| self.dom.closest(from, "form"))
     }
 
     fn activate(&mut self, n: NodeId) -> Option<Hit> {
@@ -620,6 +761,9 @@ impl Document {
                 self.dom.remove_attr(o, "selected");
             }
         }
+        if self.scripted {
+            self.events.push(Event { node: n, kind: "change", deferred: false });
+        }
     }
 
     /// A key typed into the focused field: text, or one of "\u{8}"
@@ -646,6 +790,10 @@ impl Document {
             "→" => self.caret = (self.caret + 1).min(chars.len()),
             "home" => self.caret = 0,
             "end" => self.caret = chars.len(),
+            "\n" if !multiline && self.scripted => {
+                self.events.push(Event { node: n, kind: "submit", deferred: true });
+                return Some(Hit::Script);
+            }
             "\n" if !multiline => return self.submit(n),
             text => {
                 let max: usize = self.dom.attr(n, "maxlength").and_then(|v| v.parse().ok()).unwrap_or(usize::MAX);
@@ -662,13 +810,16 @@ impl Document {
             }
         }
         let v: String = chars.into_iter().collect();
+        if self.scripted && v != self.value(n) {
+            self.events.push(Event { node: n, kind: "input", deferred: false });
+        }
         self.set_value(n, &v);
         None
     }
 
     /// Sends the form an element is in.
     pub fn submit(&self, from: NodeId) -> Option<Hit> {
-        let form = self.dom.attr(from, "form").and_then(|id| self.dom.descendants(Dom::ROOT).into_iter().find(|&e| self.dom.attr(e, "id") == Some(id))).or_else(|| self.dom.closest(from, "form"))?;
+        let form = self.form_of(from)?;
         let mut pairs: Vec<(String, String)> = Vec::new();
         for e in self.dom.descendants(form) {
             let Some(el) = self.dom.element(e) else { continue };

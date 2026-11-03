@@ -1038,6 +1038,9 @@ impl Cell {
     fn with<T>(&self, f: impl FnOnce(f32) -> T) -> T {
         f(self.0.get())
     }
+    pub fn get(&self) -> f32 {
+        self.0.get()
+    }
     pub fn set(&self, v: f32) {
         self.0.set(v)
     }

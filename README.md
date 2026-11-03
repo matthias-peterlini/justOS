@@ -225,7 +225,7 @@ shutdown / restart
 | `system/drivers/` | i driver, uno per cartella, ognuno con il suo `driver.manifest` |
 | `system/apps/` | i programmi, tra cui `winrun` (programmi Windows), `dalvik` (Java e Android) e `arcc` (ArcScript) |
 | `system/store/` | le app del Negozio (giochi e Disegno), con icona e scheda |
-| `system/libs/` | le librerie: ABI dei driver (`arcdk`, `arcdrv`), programmi (`arcrt`), finestre (`arcui`), disegno (`arcgfx`), ArcFS, USB, virtio, ArcScript, TLS (`arctls`), web (`arcweb`), Dalvik (`arcdex`) |
+| `system/libs/` | le librerie: ABI dei driver (`arcdk`, `arcdrv`), programmi (`arcrt`), finestre (`arcui`), disegno (`arcgfx`), ArcFS, USB, virtio, ArcScript, TLS (`arctls`), web (`arcweb`), JavaScript (`arcjs`), Dalvik (`arcdex`) |
 | `tools/arctool/` | strumento host: crea pacchetti, immagini e CD, legge e scrive volumi ArcFS |
 | `tools/assets/` | i generatori di caratteri, icone, sfondi, suoni e musica |
 | `tools/qemu/` | modelli per QEMU di dispositivi che QEMU non ha (Realtek RTL8169, RTL8168, RTL8125) |

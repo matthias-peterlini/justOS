@@ -273,8 +273,9 @@ impl Builder {
             Token::Text(t) => {
                 if self.raw.is_some() {
                     let cur = *self.stack.last().unwrap_or(&self.head);
-                    // Scripts and templates are not kept.
-                    if !matches!(self.dom.tag(cur), "script" | "template" | "iframe" | "noembed" | "noframes") {
+                    // Templates and frames are not kept (scripts are, for
+                    // the script engine).
+                    if !matches!(self.dom.tag(cur), "template" | "iframe" | "noembed" | "noframes") {
                         self.text(cur, &t);
                     }
                     return;

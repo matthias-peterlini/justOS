@@ -1,10 +1,11 @@
 //! ticly browser: tabs, an address bar and web pages drawn by [`arcweb`]
-//! (HTML and CSS, PNG, JPEG and GIF pictures; no scripts), in the look of
+//! (HTML and CSS, PNG, JPEG and GIF pictures, JavaScript), in the look of
 //! the ticly browser. A page loads on a thread of its own: the page, its
 //! stylesheets, then its pictures four at a time; the page is laid out
-//! again as they come in and when the window changes size. Cookies are kept
-//! while arcOS runs. The start page searches with DuckDuckGo and leads into
-//! ticly.
+//! again as they come in and when the window changes size. Its scripts run
+//! on another thread, which then hands them the page's events and timers.
+//! Cookies are kept while arcOS runs. The start page searches with
+//! DuckDuckGo and leads into ticly.
 
 use super::ticly as tui;
 use crate::dev::input::{Key, KeyEvent};
@@ -21,7 +22,9 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use arcweb::document::Script;
 use arcweb::dom::NodeId;
+use arcweb::script::Scripts;
 use arcweb::{Document, Hit, WebFonts};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
@@ -36,6 +39,10 @@ const ACCEPT_PAGE: &str = "text/html,application/xhtml+xml,application/xml;q=0.9
 const ACCEPT_LANGUAGE: &str = "it-IT,it;q=0.9,en;q=0.8";
 /// Laying out a deep page recurses a lot.
 const STACK: u64 = 512 << 10;
+/// The script interpreter recurses even more.
+const SCRIPT_STACK: u64 = 2 << 20;
+/// How often a page's events and timers are looked at.
+const SCRIPT_TICK_MS: u64 = 15;
 /// Threads fetching the pictures of a page.
 const PICTURE_THREADS: usize = 4;
 const MAX_TABS: usize = 12;
@@ -166,8 +173,10 @@ fn fetch(address: &str, method: &str, body: Option<&str>, accept: &str) -> Resul
         if !cookies.is_empty() {
             headers.push(("Cookie", &cookies));
         }
-        if body.is_some() {
-            headers.push(("Content-Type", "application/x-www-form-urlencoded"));
+        if let Some(b) = &body {
+            // Forms send fields; scripts mostly send JSON.
+            let json = b.trim_start().starts_with(['{', '[']);
+            headers.push(("Content-Type", if json { "application/json" } else { "application/x-www-form-urlencoded" }));
         }
         let req = Request { method: &method, url: &url, headers: &headers, body: body.as_deref().map(str::as_bytes) };
         let r = http::fetch_once(&req)?;
@@ -272,6 +281,9 @@ struct Page {
     pictures: (usize, usize),
     /// Where <meta http-equiv=refresh> sends the page.
     redirect: Option<String>,
+    /// What the page's scripts asked the window to do (open an address,
+    /// send a form).
+    hits: Vec<Hit>,
 }
 
 type Shared = Arc<Mutex<Page>>;
@@ -335,8 +347,15 @@ fn load(page: Shared, address: String, method: String, body: Option<String>) {
         p.url = got.url.clone();
         p.title = doc.title.clone();
         p.redirect = doc.refresh();
+        let scripts = doc.scripts();
         p.doc = Some(doc);
         p.version += 1;
+        if !scripts.is_empty() {
+            let pg = page.clone();
+            if crate::task::spawn_big("web-script", SCRIPT_STACK, move || run_scripts(pg, scripts)).is_none() {
+                crate::warn!("web", "no memory for the scripts of {}", got.url);
+            }
+        }
     }
     pictures(&page);
     let mut p = page.lock();
@@ -396,6 +415,90 @@ fn picture_worker(page: &Shared, queue: &IrqLock<Vec<String>>) {
         p.pictures.0 += 1;
         p.version += 1;
     }
+}
+
+/// Steady milliseconds for the page's scripts.
+fn script_now() -> f64 {
+    crate::time::uptime_ms() as f64
+}
+
+/// `fetch` and `XMLHttpRequest` of the page's scripts.
+fn script_fetch(method: &str, url: &str, body: Option<&str>) -> Result<(u16, String, String, String), String> {
+    let g = fetch(url, method, body, "*/*")?;
+    Ok((g.status, g.content_type, String::from_utf8_lossy(&g.body).into_owned(), g.url))
+}
+
+/// Writes what the page's scripts printed to the journal.
+fn log_console(s: &mut Scripts) {
+    for line in s.take_console() {
+        crate::debug!("web-js", "{line}");
+    }
+}
+
+/// Runs the scripts of a page, then its events and timers, until the tab
+/// leaves the page (on a thread of its own: the interpreter recurses deeply
+/// and a slow script must not hold up the window). The page is locked
+/// while a script runs; the window only ever tries the lock.
+fn run_scripts(page: Shared, list: Vec<Script>) {
+    let mut sources = Vec::new();
+    for s in list {
+        match s {
+            Script::Inline(src) => sources.push(src),
+            Script::External(u) => {
+                if let Some(g) = fetch(&u, "GET", None, "*/*").ok().filter(|g| g.status < 400) {
+                    sources.push(String::from_utf8_lossy(&g.body).into_owned());
+                }
+            }
+        }
+        if page.lock().stop {
+            return;
+        }
+    }
+    let epoch = crate::time::unix_now() as f64 * 1000.0 - script_now();
+    let mut scripts = {
+        let mut p = page.lock();
+        let Some(doc) = p.doc.as_mut() else { return };
+        Scripts::new(doc, script_now(), epoch, Some(script_fetch))
+    };
+    // Each script on its own, so the window can paint in between.
+    for src in sources.iter().map(|s| Some(s.as_str())).chain([None]) {
+        let mut p = page.lock();
+        if p.stop {
+            return;
+        }
+        let Some(doc) = p.doc.as_mut() else { return };
+        match src {
+            Some(src) => scripts.run(doc, src, script_now()),
+            None => scripts.loaded(doc, script_now()),
+        }
+        publish(&mut p, &mut scripts);
+        drop(p);
+        log_console(&mut scripts);
+        crate::task::yield_now();
+    }
+    loop {
+        crate::task::sleep_ms(SCRIPT_TICK_MS);
+        let Some(mut p) = page.try_lock() else { continue };
+        if p.stop {
+            return;
+        }
+        let Some(doc) = p.doc.as_mut() else { return };
+        if scripts.pump(doc, script_now()) {
+            publish(&mut p, &mut scripts);
+            drop(p);
+            log_console(&mut scripts);
+        }
+    }
+}
+
+/// Shows what the scripts changed.
+fn publish(p: &mut Page, scripts: &mut Scripts) {
+    if let Some(d) = &p.doc {
+        p.url = d.url.clone();
+        p.title = d.title.clone();
+    }
+    p.hits.extend(scripts.take_hits());
+    p.version += 1;
 }
 
 /// Lays a page out again for the window's size (on its own thread).
@@ -785,7 +888,8 @@ impl Browser {
                 self.open(url, &method, body);
             }
             Some(Hit::Focus(_)) => self.focus = Focus::Page,
-            Some(Hit::Changed) => {}
+            // The page's scripts take it from here.
+            Some(Hit::Changed | Hit::Script) => {}
             Some(Hit::Choose(n, opts, sel)) => {
                 let c = Self::content(self.area);
                 let h = (opts.len().min(10) as i32) * 34 + 12;
@@ -1560,6 +1664,7 @@ impl App for Browser {
         let throttle = self.ticks % 4 == 0;
         let t = &mut self.tabs[self.cur];
         let mut redirect = None;
+        let mut hits = Vec::new();
         if let Some(page) = t.page.clone() {
             if let Some(mut p) = page.try_lock() {
                 if p.version != t.painted.0 || p.loading != t.loading {
@@ -1579,7 +1684,13 @@ impl App for Browser {
                 if !p.loading {
                     redirect = p.redirect.take();
                 }
+                hits = core::mem::take(&mut p.hits);
             }
+        }
+        // What the page's scripts asked for (the last navigation wins).
+        if let Some(h) = hits.into_iter().rfind(|h| matches!(h, Hit::Open(_) | Hit::Submit { .. })) {
+            self.handle_hit(Some(h));
+            return true;
         }
         if let Some(u) = redirect {
             // Replace the entry that redirected.

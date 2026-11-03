@@ -79,6 +79,13 @@ name = "arcgfx"
 version = "0.6.0"
 
 [[package]]
+name = "arcjs"
+version = "0.6.0"
+dependencies = [
+ "arcc-core",
+]
+
+[[package]]
 name = "arcjson"
 version = "0.6.0"
 
@@ -121,6 +128,7 @@ name = "arcweb"
 version = "0.6.0"
 dependencies = [
  "arcgfx",
+ "arcjs",
  "arczip",
 ]
 

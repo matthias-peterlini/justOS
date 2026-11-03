@@ -171,7 +171,7 @@ photos:
 	tools/assets/gen_thumbs.py rootfs/system/gui/wallpapers
 
 check:
-	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs -p arcgfx -p arctls -p arczip -p arcjson -p arcc-core -p arc-vm -p arcweb -p arcdex
+	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs -p arcgfx -p arctls -p arczip -p arcjson -p arcc-core -p arc-vm -p arcweb -p arcjs -p arcdex
 	cd tools && $(CARGO) test --release
 
 clean:

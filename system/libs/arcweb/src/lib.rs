@@ -3,13 +3,12 @@
 //! It reads HTML into a tree ([`html`], [`dom`]), applies CSS ([`css`],
 //! [`style`]), lays the page out in boxes and lines ([`layout`]) and paints
 //! it on an [`arcgfx::Canvas`]. Pictures come from its own PNG, JPEG and GIF
-//! decoders ([`image`]). It runs no scripts: pages are shown as their HTML
-//! and CSS describe them, which is what most articles, documentation,
-//! search results and forms need.
+//! decoders ([`image`]). Page scripts run on the `arcjs` interpreter through
+//! [`script`], which gives them the document, events, timers and `fetch`.
 //!
-//! The engine does no input or output: the host fetches the stylesheets and
-//! pictures a [`Document`] asks for and hands them back, and draws with the
-//! faces of a [`fonts::WebFonts`] atlas.
+//! The engine does no input or output: the host fetches the stylesheets,
+//! scripts and pictures a [`Document`] asks for and hands them back, and
+//! draws with the faces of a [`fonts::WebFonts`] atlas.
 
 #![no_std]
 
@@ -24,6 +23,7 @@ pub mod fonts;
 pub mod html;
 pub mod image;
 pub mod layout;
+pub mod script;
 pub mod style;
 pub mod url;
 

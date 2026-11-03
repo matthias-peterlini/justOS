@@ -99,7 +99,7 @@ chiamate `WIN_CREATE`/`WIN_PRESENT`/`WIN_EVENT`.
 
 | Cosa | Stato |
 |---|---|
-| Browser | 🟡 ticly browser con `arcweb`: HTML, CSS, immagini, moduli, cookie, HTTPS (`arctls`); niente JavaScript |
+| Browser | 🟡 ticly browser con `arcweb`: HTML, CSS, immagini, moduli, cookie, HTTPS (`arctls`), JavaScript (`arcjs`, interprete senza JIT) |
 | WebGL, DRM (Widevine) | ⬜ / ⛔ |
 | Negozio grafico con installazione in un clic | ✅ (`sys:/store`, pacchetti `.app`) |
 | Aggiornamenti delle app in background | ⬜ |
@@ -119,8 +119,9 @@ FreeType/HarfBuzz, una GPU per il compositing. La strada praticabile:
    permessi, `epoll`, socket);
 2. portare **WebKitGTK** o **Servo** sopra quello strato, disegnando in una
    finestra `WIN_*` (Servo è Rust e più piccolo: è la scommessa migliore);
-3. JavaScript intanto: un interprete piccolo in `arcweb` (QuickJS, in C,
-   porta il 90% dei siti semplici) è un passo intermedio di un mese.
+3. ✅ JavaScript intanto: `arcjs`, un interprete scritto da zero in Rust,
+   con il DOM di `arcweb` (eventi, timer, `fetch`); basta per i siti
+   semplici, non per le applicazioni web pesanti.
 
 **Widevine non si può avere**: Google lo concede solo ai produttori di
 browser e sistemi con cui ha un contratto, ed è un binario chiuso per
@@ -241,7 +242,7 @@ usare la fotocamera — Consenti / Non consentire» e ricorda la risposta;
 | 2 | sandbox e permessi, aggiornamenti delle app in background, trascinamento | 2–3 mesi |
 | 3 | interprete AML: sospensione, batteria, temperatura | 3–4 mesi |
 | 4 | aggiornamenti A/B, HiDPI, indice dei file | 2–3 mesi |
-| 5 | strato Linux completo, JavaScript in `arcweb`, poi Servo | 6–12 mesi |
+| 5 | strato Linux completo (JavaScript in `arcweb`: fatto), poi Servo | 6–12 mesi |
 | 6 | Wi-Fi (un chip), Bluetooth HID e audio | 6–9 mesi |
 | 7 | accelerazione grafica (virgl, poi hardware vero) | 12 mesi e oltre |
 

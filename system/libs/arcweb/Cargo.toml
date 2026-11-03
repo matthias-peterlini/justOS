@@ -8,6 +8,7 @@ authors.workspace = true
 
 [dependencies]
 arcgfx = { workspace = true }
+arcjs = { workspace = true }
 arczip = { workspace = true }
 
 [lints]

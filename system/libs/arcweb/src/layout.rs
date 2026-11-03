@@ -65,6 +65,16 @@ pub enum Target {
     Control(NodeId),
     Summary(NodeId),
     Label(NodeId),
+    /// Any other block box: for scripts listening for clicks.
+    Block(NodeId),
+}
+
+impl Target {
+    pub fn node(self) -> NodeId {
+        match self {
+            Target::Link(n) | Target::Control(n) | Target::Summary(n) | Target::Label(n) | Target::Block(n) => n,
+        }
+    }
 }
 
 /// The pictures of a page: index by address and natural size when loaded.
@@ -502,6 +512,9 @@ impl<'a> Ctx<'a> {
         let cy = y + e.b[0] + e.p[0];
         let cw = (w - e.h()).max(0.0);
         let mark = self.mark_items();
+        // Before what is inside, so deeper targets win.
+        let block_target = self.targets.len();
+        self.targets.push((Rect::new(0, 0, 0, 0), Target::Block(n)));
         let clip = s.overflow_hidden && !s.height.is_auto() && self.dom.tag(n) != "html" && self.dom.tag(n) != "body";
         if clip {
             self.items.push(Item::ClipPush(Rect::new(0, 0, 0, 0)));
@@ -541,6 +554,7 @@ impl<'a> Ctx<'a> {
         let bh = ch + e.v();
         let rect = r(x, y, w, bh);
         self.deco_end(&slots, rect);
+        self.targets[block_target].0 = rect;
         if clip {
             if let Item::ClipPush(cr) = &mut self.items[mark.0] {
                 *cr = r(x + e.b[3], y + e.b[0], w - e.b[1] - e.b[3], bh - e.b[0] - e.b[2]);
