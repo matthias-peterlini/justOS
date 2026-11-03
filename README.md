@@ -57,7 +57,8 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
   web (HTML, CSS, immagini) scritto da zero.
 - **Un Negozio con app vere**: giochi (2048, Campo minato, Serpente, Sudoku,
   Tris) e Disegno, programmi separati che si installano con un clic e aprono
-  le loro finestre.
+  le loro finestre, e si aggiornano da sole in background da un indice
+  firmato (Ed25519), quando le chiudi.
 - **I driver si installano da soli**: dischi SATA e NVMe, USB 1/2/3,
   schede di rete Intel e Realtek, lettori di schede SD, audio HD e AC'97,
   schede video delle macchine virtuali con cambio di risoluzione, e lo
@@ -215,6 +216,7 @@ play sys:/system/sounds/avvio.wav
 volume 60
 net / ping 10.0.2.2    rete
 install sudoku         un programma dal Negozio
+updates check          aggiornamenti delle app
 cd sys:/home/arcscript
 hello.as               un programma ArcScript
 shutdown / restart

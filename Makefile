@@ -23,6 +23,9 @@
 #   make assets     regenerate fonts, icons, wallpapers and sounds (Python, Pillow, numpy)
 #   make photos     download the photo wallpapers from Wikimedia Commons
 #   make check      unit tests of the shared libraries and the host tool
+#   make updates    the signed index of app updates (build/updates), with the
+#                   private key in UPDATES_KEY; scripts/publish-updates.sh
+#                   puts it online
 
 PROFILE  ?= release
 CARGO    ?= cargo
@@ -47,12 +50,17 @@ IMAGE    := $(BUILD)/arcos.img
 ISO      := $(BUILD)/arcos.iso
 # Size of the live CD's system volume (it lives in memory).
 LIVE_SIZE ?= 24M
+# App updates: the signing key (kept out of the repository) and where the
+# index is published (kernel/src/appupdate.rs looks there).
+UPDATES_KEY ?= $(HOME)/.arcos-keys/updates.key
+UPDATES_URL ?= https://raw.githubusercontent.com/matthias-peterlini/ArcOs/updates
+VERSION  := $(shell sed -n 's/^version = "\(.*\)"/\1/p' system/Cargo.toml | head -1)
 
 ifeq ($(PROFILE),release)
 CARGO_PROFILE := --release
 endif
 
-.PHONY: photos all uefi system tools root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript test-compat test-audio test-display test-acpi test-net test-linux shots assets check clean $(PACKAGES)
+.PHONY: photos all uefi system tools root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript test-compat test-audio test-display test-acpi test-net test-linux shots assets check updates clean $(PACKAGES)
 
 all: image
 
@@ -173,6 +181,10 @@ photos:
 check:
 	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs -p arcgfx -p arctls -p arczip -p arcjson -p arcc-core -p arc-vm -p arcweb -p arcjs -p arcdex
 	cd tools && $(CARGO) test --release
+
+updates: root tools
+	rm -rf $(BUILD)/updates
+	$(ARCTOOL) updates $(ROOT)/store $(BUILD)/updates --key $(UPDATES_KEY) --base-url $(UPDATES_URL) --system $(VERSION)
 
 clean:
 	rm -rf $(BUILD)

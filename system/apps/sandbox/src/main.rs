@@ -52,6 +52,11 @@ fn main(args: &str) -> i32 {
         "probe" => probe(),
         // For the test: does the program run as this app?
         "is" => i32::from(app::id().as_deref() != Some(w(1))),
+        // For `updates test`: an app that stays open for a while.
+        "wait" => {
+            arcrt::time::sleep_ms(w(1).parse().unwrap_or(1000));
+            0
+        }
         _ => {
             println!("usage: sandbox | sandbox run <app_id> <program> [args] | sandbox test");
             2

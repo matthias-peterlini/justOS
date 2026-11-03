@@ -1,15 +1,15 @@
 //! X25519 key agreement (RFC 7748): a Montgomery ladder over GF(2^255 - 19)
 //! with five 51-bit limbs, in constant time.
 
-type Fe = [u64; 5];
+pub(crate) type Fe = [u64; 5];
 const MASK: u64 = (1 << 51) - 1;
 
-fn load(b: &[u8; 32]) -> Fe {
+pub(crate) fn load(b: &[u8; 32]) -> Fe {
     let le = |i: usize| u64::from_le_bytes(b[i..i + 8].try_into().unwrap());
     [le(0) & MASK, (le(6) >> 3) & MASK, (le(12) >> 6) & MASK, (le(19) >> 1) & MASK, (le(24) >> 12) & MASK]
 }
 
-fn carry(mut f: Fe) -> Fe {
+pub(crate) fn carry(mut f: Fe) -> Fe {
     for _ in 0..2 {
         for i in 0..4 {
             f[i + 1] += f[i] >> 51;
@@ -21,7 +21,7 @@ fn carry(mut f: Fe) -> Fe {
     f
 }
 
-fn store(f: Fe) -> [u8; 32] {
+pub(crate) fn store(f: Fe) -> [u8; 32] {
     let mut f = carry(f);
     // Subtract p if f >= p.
     let mut q = (f[0] + 19) >> 51;
@@ -54,11 +54,11 @@ fn store(f: Fe) -> [u8; 32] {
     out
 }
 
-fn add(a: Fe, b: Fe) -> Fe {
+pub(crate) fn add(a: Fe, b: Fe) -> Fe {
     [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3], a[4] + b[4]]
 }
 
-fn sub(a: Fe, b: Fe) -> Fe {
+pub(crate) fn sub(a: Fe, b: Fe) -> Fe {
     // Add 2p first so nothing goes negative.
     carry([
         a[0] + 0xFFFFFFFFFFFDA - b[0],
@@ -69,7 +69,7 @@ fn sub(a: Fe, b: Fe) -> Fe {
     ])
 }
 
-fn mul(a: Fe, b: Fe) -> Fe {
+pub(crate) fn mul(a: Fe, b: Fe) -> Fe {
     let m = |x: u64, y: u64| x as u128 * y as u128;
     let b19 = [b[0], b[1] * 19, b[2] * 19, b[3] * 19, b[4] * 19];
     let r0 = m(a[0], b[0]) + m(a[1], b19[4]) + m(a[2], b19[3]) + m(a[3], b19[2]) + m(a[4], b19[1]);
@@ -90,7 +90,7 @@ fn mul(a: Fe, b: Fe) -> Fe {
     carry(out)
 }
 
-fn sq(a: Fe) -> Fe {
+pub(crate) fn sq(a: Fe) -> Fe {
     mul(a, a)
 }
 
@@ -111,7 +111,7 @@ fn mul_small(a: Fe, k: u64) -> Fe {
     carry(out)
 }
 
-fn invert(z: Fe) -> Fe {
+pub(crate) fn invert(z: Fe) -> Fe {
     // z^(p-2) with the usual addition chain.
     let z2 = sq(z);
     let z9 = mul(sq(sq(z2)), z);

@@ -87,6 +87,8 @@ struct Process {
     app: Option<crate::sandbox::App>,
     /// Files the user chose for it in the file picker (and may it write).
     picked: Vec<(Path, bool)>,
+    /// The program file it was started from.
+    exe: Path,
 }
 
 static PROCS: IrqLock<BTreeMap<u32, Process>> = IrqLock::new(BTreeMap::new());
@@ -229,6 +231,7 @@ fn start(image: Vec<u8>, name: String, args: &str, cwd: Path, kind: Kind, exe: &
             kill: false,
             app,
             picked: Vec::new(),
+            exe: exe.clone(),
         },
     );
     let start = Box::into_raw(Box::new(Start { image, args: String::from(args), kind, exe: alloc::format!("{exe}") }));
@@ -567,6 +570,13 @@ pub fn check_kill(frame: &TrapFrame) {
 
 pub fn count() -> usize {
     PROCS.lock().values().filter(|p| p.state == State::Running).count()
+}
+
+/// Whether a running process was started from the program file `exe`
+/// (an app being updated waits until it is closed).
+pub fn running(exe: &Path) -> bool {
+    let same = |p: &Path| p.volume.eq_ignore_ascii_case(&exe.volume) && p.inner.eq_ignore_ascii_case(&exe.inner);
+    PROCS.lock().values().any(|p| p.state == State::Running && same(&p.exe))
 }
 
 // ----------------------------------------------------------------------------

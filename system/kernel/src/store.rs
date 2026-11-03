@@ -94,6 +94,9 @@ pub struct PackageInfo {
     pub open: String,
     /// Who the app is to the sandbox (`app_id=`; else `org.arcos.<id>`).
     pub app_id: String,
+    /// What it says it will ask for (`permissions=files:Immagini, camera`),
+    /// shown on its page; an update that adds one waits for the user.
+    pub permissions: Vec<String>,
 }
 
 pub fn parse_info(text: &str, id: &str) -> PackageInfo {
@@ -116,6 +119,7 @@ pub fn parse_info(text: &str, id: &str) -> PackageInfo {
             "source" => p.source = v,
             "open" => p.open = v,
             "app_id" if crate::sandbox::valid_id(&v) => p.app_id = v.to_ascii_lowercase(),
+            "permissions" => p.permissions = v.split(',').map(str::trim).filter(|s| crate::sandbox::known(s)).map(String::from).collect(),
             _ => {}
         }
     }
@@ -488,7 +492,23 @@ pub fn start_install(app: CatalogApp) {
 }
 
 fn install_remote(app: &CatalogApp) -> Result<(), String> {
-    set_phase(&app.id, "Cerco la versione");
+    let id = app.id.clone();
+    let mut report = |done: u64, total: Option<u64>| {
+        if let Some(j) = JOBS.lock().get_mut(&id) {
+            j.done = done;
+            j.total = total;
+        }
+        true
+    };
+    let (version, url, program) = download_release(app, &mut |phase| set_phase(&app.id, phase), &mut report)?;
+    save(app, &version, &url, &program)
+}
+
+/// Downloads the newest release of a catalog program and takes the program
+/// out: (its version, where it came from, the program). `phase` hears what
+/// it is doing, `report` how far the download is.
+pub fn download_release(app: &CatalogApp, phase: &mut dyn FnMut(&'static str), report: http::Progress<'_>) -> Result<(String, String, Vec<u8>), String> {
+    phase("Cerco la versione");
     let (version, url, asset_name) = if !app.url.is_empty() {
         (String::new(), app.url.clone(), app.url.rsplit('/').next().unwrap_or("").to_string())
     } else {
@@ -500,34 +520,28 @@ fn install_remote(app: &CatalogApp) -> Result<(), String> {
             .ok_or_else(|| format!("no {} build in the latest release", app.platform.name()))?;
         (tag, pick.url.clone(), pick.name.clone())
     };
-    set_phase(&app.id, "Scarico");
-    let id = app.id.clone();
-    let mut report = |done: u64, total: Option<u64>| {
-        if let Some(j) = JOBS.lock().get_mut(&id) {
-            j.done = done;
-            j.total = total;
-        }
-        true
-    };
-    let r = http::fetch(&http::Request::get(&url), &mut report)?;
+    phase("Scarico");
+    let r = http::fetch(&http::Request::get(&url), report)?;
     if !r.ok() {
         return Err(format!("the download failed ({})", r.status));
     }
-    set_phase(&app.id, "Installo");
+    phase("Installo");
     let (_, program) = unpack(&r.body, &asset_name, &app.file, &app.command, app.platform)?;
-    save(app, &version, &url, &program)
+    Ok((version, url, program))
 }
 
-/// Writes an installed program with its `info` and icon into `sys:/apps`.
-fn save(app: &CatalogApp, version: &str, url: &str, program: &[u8]) -> Result<(), String> {
-    let file = match app.platform {
+/// Where a catalog program is installed.
+pub fn program_file(app: &CatalogApp) -> String {
+    match app.platform {
         Platform::Windows => format!("{APPS}/{}.exe", app.command),
         _ => format!("{APPS}/{}", app.command),
-    };
-    let fp = path(&file).map_err(|e| e.to_string())?;
-    fs::write_file(&fp, program).map_err(|e| format!("{file}: {e}"))?;
-    let info = format!(
-        "name={}\ncategory={}\nabout={}\nversion={}\ndeveloper={}\ntype={}\ncommand={}\nprogram={file}\ncolor={:06x}\nsource={url}\nopen={}\n",
+    }
+}
+
+/// The `info` of a catalog program installed from `url`.
+pub fn info_text(app: &CatalogApp, version: &str, url: &str) -> String {
+    format!(
+        "name={}\ncategory={}\nabout={}\nversion={}\ndeveloper={}\ntype={}\ncommand={}\nprogram={}\ncolor={:06x}\nsource={url}\nopen={}\n",
         app.name,
         app.category,
         app.about,
@@ -535,9 +549,49 @@ fn save(app: &CatalogApp, version: &str, url: &str, program: &[u8]) -> Result<()
         app.developer,
         app.platform.key(),
         app.command,
+        program_file(app),
         app.color & 0xFF_FFFF,
         app.open,
-    );
+    )
+}
+
+/// How to get a newer release of an installed Linux or Windows program:
+/// its catalog entry, or the GitHub project it was downloaded from.
+pub fn catalog_app_for(p: &PackageInfo) -> Option<CatalogApp> {
+    if p.native {
+        return None;
+    }
+    if let Some(app) = catalog().into_iter().find(|a| a.id == p.id && !a.github.is_empty() && a.url.is_empty()) {
+        return Some(app);
+    }
+    // "https://github.com/<owner>/<repo>/releases/download/<tag>/<file>"
+    let rest = p.source.strip_prefix("https://github.com/")?;
+    let mut parts = rest.split('/');
+    let (owner, repo) = (parts.next()?, parts.next()?);
+    if parts.next() != Some("releases") {
+        return None;
+    }
+    Some(CatalogApp {
+        id: p.id.clone(),
+        name: p.name.clone(),
+        category: p.category.clone(),
+        platform: p.platform,
+        developer: p.developer.clone(),
+        about: p.about.clone(),
+        github: format!("{owner}/{repo}"),
+        command: p.command.clone(),
+        open: p.open.clone(),
+        color: p.color,
+        ..Default::default()
+    })
+}
+
+/// Writes an installed program with its `info` and icon into `sys:/apps`.
+fn save(app: &CatalogApp, version: &str, url: &str, program: &[u8]) -> Result<(), String> {
+    let file = program_file(app);
+    let fp = path(&file).map_err(|e| e.to_string())?;
+    fs::write_file(&fp, program).map_err(|e| format!("{file}: {e}"))?;
+    let info = info_text(app, version, url);
     fs::write_file(&path(&format!("{APPS}/{}.info", app.id)).map_err(|e| e.to_string())?, info.as_bytes()).map_err(|e| e.to_string())?;
     let icon = crate::gui::res::make_icon(&app.name, app.color, app.platform);
     let _ = fs::write_file(&path(&format!("{APPS}/{}.qoi", app.id)).map_err(|e| e.to_string())?, &icon);

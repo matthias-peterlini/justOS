@@ -9,12 +9,15 @@
 //! arctool iso <out.iso> (the same, --efi required) [--size 16M]   a live CD
 //! arctool fs <image> ls [path] | cat <path> | put <local> <path> | get <path> <local>
 //!               | mkdir <path> | rm <path> | check
+//! arctool updates <store dir> <out dir> --key <file> --base-url <url>   the signed index of app updates
+//! arctool pubkey <key file>
 //! ```
 
 mod disk;
 mod elf;
 mod fat;
 mod iso;
+mod updates;
 
 use arcdk::manifest::Manifest;
 use arcdk::package::{self, Package};
@@ -44,8 +47,10 @@ fn main() -> ExitCode {
         Some("iso") => cmd_iso(&args[1..]),
         Some("fs") => cmd_fs(&args[1..]),
         Some("mkfs") => cmd_mkfs(&args[1..]),
+        Some("updates") => updates::cmd_updates(&args[1..]),
+        Some("pubkey") => updates::cmd_pubkey(&args[1..]),
         _ => Err(String::from(
-            "usage:\n  arctool pack <driver.manifest> <module> <out.adp>\n  arctool inspect <file.adp>\n  arctool image <out.img> --stage1 <bin> --stage2 <bin> --kernel <elf> --drivers <dir> [--efi <BOOTX64.efi>] [--size 128M] [--files <dir>]\n  arctool iso <out.iso> --stage1 <bin> --stage2 <bin> --kernel <elf> --drivers <dir> --efi <BOOTX64.efi> [--size 16M] [--files <dir>]\n  arctool fs <image> ls [path] | cat <path> | put <local> <path> | get <path> <local> | mkdir <path> | rm <path> | check\n  arctool mkfs <image> [--size 64M] [--label Data]",
+            "usage:\n  arctool pack <driver.manifest> <module> <out.adp>\n  arctool inspect <file.adp>\n  arctool image <out.img> --stage1 <bin> --stage2 <bin> --kernel <elf> --drivers <dir> [--efi <BOOTX64.efi>] [--size 128M] [--files <dir>]\n  arctool iso <out.iso> --stage1 <bin> --stage2 <bin> --kernel <elf> --drivers <dir> --efi <BOOTX64.efi> [--size 16M] [--files <dir>]\n  arctool fs <image> ls [path] | cat <path> | put <local> <path> | get <path> <local> | mkdir <path> | rm <path> | check\n  arctool mkfs <image> [--size 64M] [--label Data]\n  arctool updates <store dir> <out dir> --key <file> --base-url <url> [--serial <n>]\n  arctool pubkey <key file>",
         )),
     };
     match result {

@@ -1,8 +1,10 @@
 //! Negozio: arcOS apps that come with the system, and real Linux and Windows
 //! programs from the internet (the catalog, or any GitHub project found by
 //! searching). Each has a page; one click downloads, installs, opens or
-//! removes it, with a ring that fills as the download goes.
+//! removes it, with a ring that fills as the download goes. Aggiornamenti
+//! lists the new versions of installed apps ([`crate::appupdate`]).
 
+use crate::appupdate::{self, Update};
 use crate::dev::input::{Key, KeyEvent};
 use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::res;
@@ -17,7 +19,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 const SIDEBAR: i32 = 210;
-const SECTIONS: [(&str, &str); 8] = [
+const SECTIONS: [(&str, &str); 9] = [
     ("Scopri", "g-grid"),
     ("Giochi", "games"),
     ("Creatività", "photos"),
@@ -26,8 +28,28 @@ const SECTIONS: [(&str, &str); 8] = [
     ("Internet", "g-wifi"),
     ("Windows", "window"),
     ("Installate", "download"),
+    ("Aggiornamenti", "refresh"),
 ];
+const UPDATES: usize = 8;
 const CARD_H: i32 = 86;
+
+/// An update not installed yet for the app `id`.
+fn update_for(id: &str) -> Option<Update> {
+    appupdate::list().into_iter().find(|u| u.id == id && u.state != appupdate::State::Installed)
+}
+
+/// "oggi alle 18:20", "3/11 alle 9:05" or "mai".
+fn when(t: u64) -> String {
+    if t == 0 {
+        return String::from("mai");
+    }
+    let (d, today) = (crate::time::from_epoch(t), crate::time::from_epoch(crate::time::now()));
+    if (d.year, d.month, d.day) == (today.year, today.month, today.day) {
+        format!("oggi alle {}:{:02}", d.hour, d.min)
+    } else {
+        format!("{}/{} alle {}:{:02}", d.day, d.month, d.hour, d.min)
+    }
+}
 
 /// Something the store shows: an app on this computer or one from the
 /// internet.
@@ -102,7 +124,8 @@ impl Item {
             4 => cat == "Strumenti",
             5 => cat == "Internet",
             6 => self.platform() == Platform::Windows,
-            _ => self.installed().is_some(),
+            7 => self.installed().is_some(),
+            _ => false,
         }
     }
 }
@@ -265,21 +288,22 @@ impl Store {
             return ("", false);
         }
         match it.installed() {
+            Some(_) if update_for(it.id()).is_some_and(|u| matches!(u.state, appupdate::State::Available | appupdate::State::Failed(_))) => ("Aggiorna", true),
             Some(_) => ("Apri", false),
             None => ("Ottieni", true),
         }
     }
 
     fn draw_button(&self, c: &mut Canvas, r: Rect, it: &Item) {
-        if let Some(j) = store::job(it.id()).filter(|j| j.result.is_none()) {
-            let (cx, cy) = (r.x + r.w / 2, r.y + r.h / 2);
-            let frac = match j.total {
-                Some(t) if t > 0 => (j.done * 1000 / t) as u32,
-                _ => ((crate::time::uptime_ms() / 3) % 1000) as u32,
-            };
-            c.arc(cx, cy, 14, 3, 1000, 0x33FF_FFFF);
-            c.arc(cx, cy, 14, 3, frac.max(30), 0xFFFF_FFFF);
-            c.fill_round(Rect::new(cx - 4, cy - 4, 8, 8), 2, 0xFFFF_FFFF);
+        let progress = match store::job(it.id()).filter(|j| j.result.is_none()) {
+            Some(j) => Some((j.done, j.total)),
+            None => match update_for(it.id()).map(|u| u.state) {
+                Some(appupdate::State::Downloading { done, total }) => Some((done, total)),
+                _ => None,
+            },
+        };
+        if let Some((done, total)) = progress {
+            draw_ring(c, r, done, total);
             return;
         }
         let (label, primary) = self.button_state(it);
@@ -290,6 +314,9 @@ impl Store {
     fn act(&mut self, it: &Item) -> Action {
         if store::job(it.id()).is_some_and(|j| j.result.is_none()) {
             return Action::None;
+        }
+        if self.button_state(it).0 == "Aggiorna" {
+            return self.update(it.id());
         }
         if let Some(p) = it.installed() {
             return if p.gui { Action::Spawn(store::program_path(&p)) } else { Action::Run(p.open.clone()) };
@@ -311,6 +338,136 @@ impl Store {
                 Action::Redraw
             }
         }
+    }
+
+    /// Updates one app ("all": every one) in the background.
+    fn update(&mut self, id: &str) -> Action {
+        if !crate::net::online() && update_for(id).is_some_and(|u| u.state != appupdate::State::Ready) {
+            return Action::Notify(String::from("Aggiornamenti"), String::from("Serve una connessione a internet."), "store");
+        }
+        appupdate::install_in_background(id);
+        Action::Redraw
+    }
+
+    // ------------------------------------------------------------------------
+    // Aggiornamenti
+
+    fn check_btn(area: Rect) -> Rect {
+        let c = Self::content(area);
+        Rect::new(c.right() - 150, c.y + 12, 136, 34)
+    }
+
+    fn all_btn(area: Rect) -> Rect {
+        let c = Self::content(area);
+        Rect::new(c.right() - 296, c.y + 12, 136, 34)
+    }
+
+    fn auto_row(area: Rect) -> Rect {
+        let c = Self::content(area);
+        Rect::new(c.x + 12, c.y + 84, c.w - 24, 60)
+    }
+
+    fn auto_toggle(area: Rect) -> Rect {
+        let r = Self::auto_row(area);
+        Rect::new(r.right() - 70, r.y + 15, 52, 30)
+    }
+
+    fn update_rows(&self, area: Rect, n: usize) -> Vec<Rect> {
+        let c = Self::content(area);
+        (0..n).map(|i| Rect::new(c.x + 12, c.y + 158 + i as i32 * (CARD_H + 10) - self.scroll, c.w - 24, CARD_H)).collect()
+    }
+
+    fn draw_updates(&mut self, c: &mut Canvas, area: Rect) {
+        let ct = Self::content(area);
+        text::draw(c, Font::Title, ct.x + 14, ct.y + 8, "Aggiornamenti", TEXT);
+        let list = appupdate::list();
+        let open = list.iter().filter(|u| u.state != appupdate::State::Installed).count();
+        let check = Self::check_btn(area);
+        if appupdate::checking() {
+            let t = ((crate::time::uptime_ms() / 2) % 1000) as u32;
+            c.arc(check.x + 20, check.y + 17, 10, 3, 1000, 0x26FF_FFFF);
+            c.arc(check.x + 20, check.y + 17, 10, 3, 250 + t / 4, 0xFFFF_FFFF);
+            text::draw(c, Font::Body, check.x + 40, check.y + 7, "Controllo…", TEXT_DIM);
+        } else {
+            ui::button(c, check, "Controlla ora", false, self.hover == Some(check));
+        }
+        if open > 1 {
+            let all = Self::all_btn(area);
+            ui::button(c, all, "Aggiorna tutte", true, self.hover == Some(all));
+        }
+        let mut line = format!("Ultimo controllo: {}", when(appupdate::last_check()));
+        if let Some(e) = appupdate::last_error() {
+            line.push_str(&format!(" · {e}"));
+        }
+        text::draw(c, Font::Small, ct.x + 16, ct.y + 56, &text::fit(Font::Small, &line, ct.w - 40), TEXT_FAINT);
+        let row = Self::auto_row(area);
+        c.fill_round(row, 16, ui::PANEL);
+        text::draw(c, Font::Strong, row.x + 18, row.y + 11, "Aggiorna le app automaticamente", TEXT);
+        text::draw(c, Font::Small, row.x + 18, row.y + 33, "Una volta al giorno; un'app aperta si aggiorna quando la chiudi", TEXT_DIM);
+        ui::toggle(c, Self::auto_toggle(area), appupdate::auto());
+        if list.is_empty() {
+            text::draw_centered(c, Font::Body, ct.x + ct.w / 2, ct.y + 200, "Le tue app sono aggiornate", TEXT_FAINT);
+        }
+        let saved = c.clip();
+        c.set_clip(saved.intersect(&Rect::new(ct.x, ct.y + 152, ct.w, ct.h - 152)));
+        for (r, u) in self.update_rows(area, list.len()).into_iter().zip(list.iter()) {
+            if r.bottom() < ct.y + 152 || r.y > ct.bottom() {
+                continue;
+            }
+            c.fill_round(r, 18, ui::PANEL);
+            match store::icon(&u.id) {
+                Some(icon) => res::draw_icon(c, &icon, 58, r.x + 14, r.y + 14),
+                None => res::draw_icon(c, "window", 58, r.x + 14, r.y + 14),
+            }
+            text::draw(c, Font::Strong, r.x + 86, r.y + 14, &text::fit(Font::Strong, &u.name, r.w - 240), TEXT);
+            text::draw(c, Font::Small, r.x + 86, r.y + 38, &format!("Versione {} (prima {})", u.version, u.current), TEXT_DIM);
+            let note = if !u.new_permissions.is_empty() && u.state != appupdate::State::Installed {
+                let what: Vec<String> = u.new_permissions.iter().map(|p| crate::sandbox::describe(p)).collect();
+                format!("Chiede anche: {}", what.join(", "))
+            } else {
+                match &u.state {
+                    appupdate::State::Ready if u.in_use() => String::from("Si installa quando chiudi l'app"),
+                    appupdate::State::Ready => String::from("Scaricato"),
+                    appupdate::State::Installed => String::from("Aggiornata"),
+                    appupdate::State::Failed(e) => format!("Non riuscito: {e}"),
+                    appupdate::State::Downloading { .. } => String::from("Scarico…"),
+                    appupdate::State::Available => String::new(),
+                }
+            };
+            text::draw(c, Font::Small, r.x + 86, r.y + 58, &text::fit(Font::Small, &note, r.w - 220), TEXT_FAINT);
+            let btn = Self::get_btn(r);
+            match &u.state {
+                appupdate::State::Downloading { done, total } => draw_ring(c, btn, *done, *total),
+                appupdate::State::Installed => {}
+                appupdate::State::Ready if !u.needs_approval() && u.in_use() => {}
+                _ => ui::button(c, btn, "Aggiorna", true, self.hover == Some(btn)),
+            }
+        }
+        c.set_clip(saved);
+    }
+
+    fn press_updates(&mut self, area: Rect, ax: i32, ay: i32) -> Action {
+        if Self::check_btn(area).contains(ax, ay) && !appupdate::checking() {
+            if !crate::net::online() {
+                return Action::Notify(String::from("Aggiornamenti"), String::from("Serve una connessione a internet."), "store");
+            }
+            appupdate::check_in_background();
+            return Action::Redraw;
+        }
+        let list = appupdate::list();
+        if list.iter().filter(|u| u.state != appupdate::State::Installed).count() > 1 && Self::all_btn(area).contains(ax, ay) {
+            return self.update("all");
+        }
+        if Self::auto_toggle(area).contains(ax, ay) || Self::auto_row(area).contains(ax, ay) {
+            appupdate::set_auto(!appupdate::auto());
+            return Action::Redraw;
+        }
+        for (r, u) in self.update_rows(area, list.len()).into_iter().zip(list.iter()) {
+            if Self::get_btn(r).contains(ax, ay) && u.state != appupdate::State::Installed && !matches!(u.state, appupdate::State::Downloading { .. }) {
+                return self.update(&u.id);
+            }
+        }
+        Action::Redraw
     }
 
     fn remove(&mut self, it: &Item) -> Action {
@@ -449,7 +606,9 @@ impl Store {
         c.fill(Rect::new(ct.x + 16, ct.y + 206, ct.w - 32, 1), ui::SEPARATOR);
         let installed = it.installed();
         let (version, size, license, kind) = match it {
-            Item::Local(p) => (p.version.clone(), format!("{}", Size(p.size)), String::from("—"), String::from(if p.gui { "App" } else { "Terminale" })),
+            Item::Local(p) => (
+                installed.as_ref().map(|i| i.version.clone()).filter(|v| !v.is_empty()).unwrap_or_else(|| p.version.clone()),
+                format!("{}", Size(p.size)), String::from("—"), String::from(if p.gui { "App" } else { "Terminale" })),
             Item::Remote(a) => (
                 installed.as_ref().map(|p| p.version.clone()).filter(|v| !v.is_empty()).unwrap_or_else(|| String::from("Ultima")),
                 String::from(if a.github.is_empty() { "—" } else { "GitHub" }),
@@ -479,6 +638,17 @@ impl Store {
             body.push_str("\n\n");
             body.push_str(&details);
         }
+        let declared = match it {
+            Item::Local(p) => p.permissions.clone(),
+            Item::Remote(_) => Vec::new(),
+        };
+        if !declared.is_empty() {
+            let what: Vec<String> = declared.iter().map(|p| crate::sandbox::describe(p)).collect();
+            body.push_str(&format!("\n\nPermessi: può chiederti di usare {}. Lo decidi tu la prima volta, e puoi cambiarlo in Impostazioni, alla voce Privacy delle app.", what.join(", ")));
+        }
+        if let Some(u) = update_for(it.id()) {
+            body.push_str(&format!("\n\nÈ disponibile la versione {} (hai la {}).", u.version, u.current));
+        }
         if let Item::Remote(a) = it {
             body.push_str(&format!("\n\nSi usa nel Terminale con il comando «{}».", a.command));
             if a.platform == Platform::Windows {
@@ -499,6 +669,18 @@ impl Store {
             }
         }
     }
+}
+
+/// The ring that fills as a download goes, in place of a button.
+fn draw_ring(c: &mut Canvas, r: Rect, done: u64, total: Option<u64>) {
+    let (cx, cy) = (r.x + r.w / 2, r.y + r.h / 2);
+    let frac = match total {
+        Some(t) if t > 0 => (done * 1000 / t) as u32,
+        _ => ((crate::time::uptime_ms() / 3) % 1000) as u32,
+    };
+    c.arc(cx, cy, 14, 3, 1000, 0x33FF_FFFF);
+    c.arc(cx, cy, 14, 3, frac.max(30), 0xFFFF_FFFF);
+    c.fill_round(Rect::new(cx - 4, cy - 4, 8, 8), 2, 0xFFFF_FFFF);
 }
 
 /// A tile in a colour with initials (an app with no picture yet).
@@ -579,6 +761,15 @@ impl App for Store {
             }
             res::draw_icon(c, icon, 20, r.x + 10, r.y + 8);
             text::draw(c, if i == self.section { Font::Strong } else { Font::Body }, r.x + 40, r.y + 9, name, TEXT);
+            let n = if i == UPDATES { appupdate::pending_count() } else { 0 };
+            if n > 0 {
+                let label = format!("{n}");
+                let w = text::width(Font::Small, &label) + 12;
+                let badge = Rect::new(r.right() - w - 8, r.y + 8, w, 20);
+                c.fill_round(badge, 10, 0xFFE0_662E);
+                let (sh, _) = text::metrics(Font::Small);
+                text::draw_centered(c, Font::Small, badge.x + w / 2, badge.y + (20 - sh) / 2, &label, 0xFFFF_FFFF);
+            }
         }
         let ct = Self::content(area);
         let saved = c.clip();
@@ -595,6 +786,11 @@ impl App for Store {
                 return;
             }
             View::List => {}
+        }
+        if self.section == UPDATES && self.search.is_empty() {
+            self.draw_updates(c, area);
+            c.set_clip(saved);
+            return;
         }
         let title = if self.search.is_empty() { SECTIONS[self.section].0 } else { "Risultati" };
         text::draw(c, Font::Title, ct.x + 14, ct.y + 8, title, TEXT);
@@ -714,6 +910,9 @@ impl App for Store {
             }
             View::List => {}
         }
+        if self.section == UPDATES && self.search.is_empty() {
+            return self.press_updates(area, ax, ay);
+        }
         if self.show_banner() {
             let b = Self::banner(area);
             if let Some(fi) = self.featured() {
@@ -755,6 +954,13 @@ impl App for Store {
                 targets.push(Self::back_btn(area));
                 if let Remote::Repos(_, r) = &*REMOTE.lock() {
                     targets.extend(Self::repo_rows(area, r.len(), self.scroll));
+                }
+            }
+            View::List if self.section == UPDATES && self.search.is_empty() => {
+                targets.push(Self::check_btn(area));
+                targets.push(Self::all_btn(area));
+                for r in self.update_rows(area, appupdate::list().len()) {
+                    targets.push(Self::get_btn(r));
                 }
             }
             View::List => {
@@ -803,6 +1009,7 @@ impl App for Store {
                 Remote::Repos(_, r) => r.len() as i32 * 70,
                 _ => 0,
             },
+            _ if self.section == UPDATES && self.search.is_empty() => appupdate::list().len() as i32 * (CARD_H + 10) + 160,
             _ => (self.shown().len() as i32 + 1) / 2 * (CARD_H + 12) + 300,
         };
         self.scroll = (self.scroll + lines * 40).clamp(0, (n - 300).max(0));
@@ -810,7 +1017,10 @@ impl App for Store {
     }
 
     fn animating(&self) -> bool {
-        self.watching.iter().any(|id| store::job(id).is_some()) || matches!(self.view, View::GitHub) && matches!(*REMOTE.lock(), Remote::Busy)
+        self.watching.iter().any(|id| store::job(id).is_some())
+            || matches!(self.view, View::GitHub) && matches!(*REMOTE.lock(), Remote::Busy)
+            || appupdate::checking()
+            || appupdate::list().iter().any(|u| matches!(u.state, appupdate::State::Downloading { .. }))
     }
 
     fn frame(&mut self) -> bool {
@@ -839,6 +1049,7 @@ impl App for Store {
             self.note.clear();
             return true;
         }
-        matches!(self.view, View::GitHub)
+        // Updates change from the service's thread.
+        matches!(self.view, View::GitHub) || self.section == UPDATES || appupdate::pending_count() > 0
     }
 }

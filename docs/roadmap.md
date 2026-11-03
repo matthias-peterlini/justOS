@@ -131,7 +131,7 @@ chiamate `WIN_CREATE`/`WIN_PRESENT`/`WIN_EVENT`.
 | Browser | 🟡 ticly browser con `arcweb`: HTML, CSS, immagini, moduli, cookie, HTTPS (`arctls`), JavaScript (`arcjs`, interprete senza JIT) |
 | WebGL, DRM (Widevine) | ⬜ / ⛔ |
 | Negozio grafico con installazione in un clic | ✅ (`sys:/store`, pacchetti `.app`) |
-| Aggiornamenti delle app in background | ⬜ |
+| Aggiornamenti delle app in background | ✅ indice firmato Ed25519, servizio `arc.updates`, sezione Aggiornamenti del Negozio |
 | Permessi in stile mobile | ✅ cartelle, dischi, fotocamera, microfono, posizione, rete (`arc.permissions`) |
 | Programmi Linux (ELF) | 🟡 solo collegati staticamente (musl), senza `ld.so` (`kernel/src/linux`, `make test-linux`) |
 | Programmi Windows (PE) | 🟡 console e finestre semplici (`winrun`) |
@@ -158,18 +158,22 @@ Windows/macOS/Linux/Android. Senza, Netflix, Disney+ e simili non
 riprodurranno video in alta definizione (alcuni per nulla). È un limite da
 dichiarare, come per ogni sistema non commerciale.
 
-**Negozio e aggiornamenti.** Il Negozio installa già da `sys:/store`; il
-controllo degli aggiornamenti del sistema chiede le release a GitHub
-(`update.rs`). Passi:
+**Negozio e aggiornamenti.** Fatto:
 
-1. un indice remoto firmato (`index.json` + firma Ed25519, `arctls` ha già le
-   primitive) con versioni e hash delle app;
-2. un servizio `arc.updates` che una volta al giorno confronta l'indice con
-   le app installate e scarica in background; la sostituzione avviene alla
-   chiusura dell'app;
-3. i permessi dichiarati nel manifest (`permissions = ["camera",
-   "files:Immagini"]`) mostrati nella pagina del Negozio.
+1. ✅ un indice remoto firmato: `make updates` scrive `index.json` (numero
+   di serie, versione, URL, SHA-256 e dimensione di ogni app) e la sua
+   firma Ed25519 (`arctls::ed25519`); `scripts/publish-updates.sh` lo
+   pubblica sul ramo `updates` del repository. arcOS rifiuta un indice con
+   una firma sbagliata o un numero di serie più vecchio dell'ultimo visto;
+2. ✅ il servizio `arc.updates` (`kernel/src/appupdate.rs`) controlla una
+   volta al giorno, scarica in background e sostituisce un'app quando è
+   chiusa; le app installate da GitHub si confrontano con l'ultima release;
+3. ✅ i permessi dichiarati nel manifest (`permissions=camera,files:Immagini`
+   nel file `info`) sono mostrati nella pagina del Negozio; un
+   aggiornamento che ne chiede di nuovi aspetta il consenso.
 
+Manca: la firma anche per i programmi Linux e Windows (oggi solo HTTPS) e
+il ritorno alla versione precedente.
 ## 3. Plug and play
 
 | Cosa | Stato |
@@ -261,15 +265,15 @@ apre una cartella fuori dalla sua, il kernel sospende la chiamata e mostra
 «*Disegno* vuole usare la cartella Immagini — Consenti / Non consentire»;
 la risposta resta in `sys:/system/permissions.json`, il servizio
 `arc.permissions` risponde per fotocamera, microfono, posizione e rete,
-*Impostazioni → Privacy delle app* elenca, cambia e revoca. Manca: i
-permessi dichiarati nel manifest del Negozio.
+*Impostazioni → Privacy delle app* elenca, cambia e revoca; il Negozio
+mostra i permessi dichiarati nel manifest di ogni app.
 
 ## Ordine consigliato
 
 | Fase | Contenuto | Durata indicativa |
 |---|---|---|
 | 1 | ✅ IPC a porte, identità delle app, desktop virtuali, schede in File | fatto |
-| 2 | aggiornamenti delle app in background, trascinamento (sandbox e permessi: fatti) | 1–2 mesi |
+| 2 | trascinamento (sandbox, permessi e aggiornamenti delle app: fatti) | 2–3 settimane |
 | 3 | interprete AML: sospensione, batteria, temperatura | 3–4 mesi |
 | 4 | aggiornamenti A/B, HiDPI, indice dei file | 2–3 mesi |
 | 5 | strato Linux completo (JavaScript in `arcweb`: fatto), poi Servo | 6–12 mesi |

@@ -32,6 +32,10 @@ sandbox test
 perms allow org.arcos.esempio files:Immagini
 perms
 perms forget org.arcos.esempio
+# app updates: signed index, damaged download, an open app, a new permission
+updates test
+@sleep 3
+updates
 mem
 # drivers
 kbd

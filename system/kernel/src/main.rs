@@ -11,6 +11,7 @@
 extern crate alloc;
 
 mod acpi;
+mod appupdate;
 mod arch;
 mod boot;
 mod console;
@@ -144,6 +145,7 @@ extern "C" fn kmain(boot_phys: u64) -> ! {
     driver::start_monitor();
     net::start();
     ipc::start_services();
+    appupdate::start();
     gui::boot_progress(82);
 
     gui::start();

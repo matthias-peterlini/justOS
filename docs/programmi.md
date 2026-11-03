@@ -301,7 +301,32 @@ Le app del Negozio (`system/store/`: 2048, Campo minato, Serpente, Sudoku,
 Tris, Disegno) sono programmi di questo tipo e un buon punto di partenza.
 Per metterne uno nel Negozio basta una cartella `system/store/<nome>` con il
 programma, un file `info` e un'icona `icon.qoi` di 128 pixel: il `Makefile`
-li copia in `sys:/store/<nome>`.
+li copia in `sys:/store/<nome>`. Nel file `info` la riga
+`permissions=files:Immagini,camera` dichiara i permessi che l'app potrà
+chiedere: il Negozio li mostra nella sua pagina.
+
+### Aggiornamenti delle app
+
+Il servizio `arc.updates` (`kernel/src/appupdate.rs`) controlla una volta al
+giorno un indice firmato con Ed25519, scarica in background le versioni
+nuove delle app installate e le mette al posto delle vecchie appena sono
+chiuse. Se un aggiornamento chiede permessi nuovi, aspetta che l'utente lo
+approvi nella sezione *Aggiornamenti* del Negozio, dove si può anche
+spegnere l'aggiornamento automatico. Dal terminale: `updates`, `updates
+check`, `updates install <app>|all`, `updates auto on|off`.
+
+Per pubblicare una versione nuova: si alza `version=` nel file `info`, poi
+
+```sh
+make updates                    # build/updates: index.json, la firma, le app
+scripts/publish-updates.sh      # le mette sul ramo updates del repository
+```
+
+La chiave privata sta fuori dal repository (`~/.arcos-keys/updates.key`,
+32 byte in esadecimale; `UPDATES_KEY=` per un'altra) e la pubblica è in
+`appupdate.rs` (`arctool pubkey <chiave>` la stampa). Ogni indice ha un
+numero di serie che cresce: arcOS rifiuta un indice firmato male o più
+vecchio dell'ultimo visto.
 
 ### Copiare un programma su un'immagine esistente
 

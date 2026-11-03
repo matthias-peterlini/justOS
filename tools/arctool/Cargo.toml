@@ -1,6 +1,6 @@
 [package]
 name = "arctool"
-description = "Host tool for arcOS: driver packages, disk images and ArcFS volumes"
+description = "Host tool for arcOS: driver packages, disk images, ArcFS volumes and the signed index of app updates"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -9,3 +9,5 @@ authors.workspace = true
 [dependencies]
 arcdk = { path = "../../system/libs/arcdk" }
 arcfs = { path = "../../system/libs/arcfs" }
+arcjson = { path = "../../system/libs/arcjson" }
+arctls = { path = "../../system/libs/arctls" }

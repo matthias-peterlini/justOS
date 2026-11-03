@@ -64,6 +64,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("kill", "<pid>", "stop a program"),
     ("ports", "", "named message ports and who owns them"),
     ("perms", "[allow|deny|ask <app> <perm>]", "what apps may use outside their sandbox"),
+    ("updates", "[check|install <app>|all|auto on|off]", "updates of the installed apps"),
     ("run", "<program> [args]", "start a program (also just: <program>)"),
     ("irq", "", "interrupt lines and message interrupts"),
     ("net", "", "network interfaces and addresses"),
@@ -789,6 +790,55 @@ impl Shell {
                 }
                 _ => println!("usage: perms | perms allow|deny|ask <app_id> <permission> | perms forget <app_id>"),
             },
+            "updates" => {
+                use crate::appupdate as up;
+                match (rest.first().copied(), rest.get(1).copied()) {
+                    (None, _) => {
+                        let when = match up::last_check() {
+                            0 => String::from("never"),
+                            t => {
+                                let t = time::from_epoch(t);
+                                alloc::format!("{:04}-{:02}-{:02} {:02}:{:02}", t.year, t.month, t.day, t.hour, t.min)
+                            }
+                        };
+                        println!("{DIM}last check: {when} · automatic: {}{RESET}", if up::auto() { "on" } else { "off" });
+                        if let Some(e) = up::last_error() {
+                            println!("{DIM}the index: {e}{RESET}");
+                        }
+                        let list = up::list();
+                        if list.is_empty() {
+                            println!("{DIM}no updates{RESET}");
+                        }
+                        for u in list {
+                            println!("  {}", up::describe(&u));
+                            if !u.new_permissions.is_empty() {
+                                let what: Vec<String> = u.new_permissions.iter().map(|p| crate::sandbox::describe(p)).collect();
+                                println!("    {DIM}asks for: {}{RESET}", what.join(", "));
+                            }
+                        }
+                    }
+                    (Some("check"), None) => match up::check() {
+                        Ok(0) => println!("everything is up to date"),
+                        Ok(n) => {
+                            println!("{n} update(s):");
+                            for u in up::list() {
+                                println!("  {}", up::describe(&u));
+                            }
+                        }
+                        Err(e) => println!("{ERR}updates: {e}{RESET}"),
+                    },
+                    (Some("install"), Some(id)) => match up::install(id) {
+                        Ok(up::Applied::Done) => println!("updated"),
+                        Ok(up::Applied::InUse) => println!("downloaded: it installs when the app is closed"),
+                        Err(e) => println!("{ERR}updates: {e}{RESET}"),
+                    },
+                    (Some("auto"), Some(v @ ("on" | "off"))) => up::set_auto(v == "on"),
+                    (Some("test"), None) => {
+                        up::self_test();
+                    }
+                    _ => println!("usage: updates | updates check | updates install <app>|all | updates auto on|off | updates test"),
+                }
+            }
             "uptime" => {
                 let s = time::uptime_ms() / 1000;
                 println!("up {}h {:02}m {:02}s", s / 3600, s / 60 % 60, s % 60);

@@ -1,0 +1,24 @@
+#!/bin/sh
+# Publishes the signed index of app updates (make updates) on the branch
+# "updates" of the repository, where arcOS looks for it
+# (kernel/src/appupdate.rs). The branch holds only the latest index and its
+# apps: each publication replaces it.
+#
+# Usage: scripts/publish-updates.sh [build/updates]
+set -eu
+DIR=${1:-build/updates}
+[ -f "$DIR/index.json.sig" ] || { echo "no $DIR/index.json.sig: run make updates first" >&2; exit 1; }
+REPO=$(pwd)
+REMOTE=$(git remote get-url origin)
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+cp "$DIR"/* "$WORK"/
+cd "$WORK"
+git init -q
+git checkout -q -b updates
+git add -A
+SERIAL=$(sed -n 's/.*"serial":\([0-9]*\).*/\1/p' index.json)
+git -c user.name="$(git -C "$REPO" config user.name)" -c user.email="$(git -C "$REPO" config user.email)" \
+    commit -q -m "App updates, index $SERIAL"
+git push -q -f "$REMOTE" updates
+echo "published index $SERIAL ($(ls *.app | wc -l) apps)"

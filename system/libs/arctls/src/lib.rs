@@ -1,6 +1,6 @@
 //! HTTPS for arcOS, written from scratch: SHA-2, HMAC and HKDF, AES-GCM,
-//! ChaCha20-Poly1305, X25519, P-256 and P-384, RSA, X.509 and a TLS 1.3 /
-//! 1.2 client. No unsafe code and no allocation-free promises: it runs in
+//! ChaCha20-Poly1305, X25519, Ed25519, P-256 and P-384, RSA, X.509 and a
+//! TLS 1.3 / 1.2 client. No unsafe code and no allocation-free promises: it runs in
 //! the kernel and in programs.
 
 #![no_std]
@@ -14,6 +14,7 @@ pub mod aes;
 pub mod bigint;
 pub mod chacha;
 pub mod ec;
+pub mod ed25519;
 pub mod hash;
 pub mod rsa;
 pub mod sha2;
