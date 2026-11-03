@@ -24,6 +24,9 @@ hello world
 info
 calc 6 * 7 + 0.5
 hello --crash
+# messages between programs
+ports
+ipc test
 mem
 # drivers
 kbd

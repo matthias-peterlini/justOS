@@ -93,6 +93,10 @@ pub fn errno(e: ArcError) -> i64 {
         ArcError::NoMemory => err::ENOMEM,
         ArcError::BadProgram => err::ENOENT,
         ArcError::Unknown => err::EINVAL,
+        ArcError::Timeout => err::ETIMEDOUT,
+        ArcError::Closed => err::EPIPE,
+        ArcError::Full => err::EAGAIN,
+        ArcError::TooLarge => err::EINVAL,
     }
 }
 

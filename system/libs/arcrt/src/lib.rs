@@ -16,7 +16,8 @@
 //! ```
 //!
 //! `alloc` works (`String`, `Vec`, `format!`); [`fs`], [`console`],
-//! [`time`] and [`process`] wrap the system calls.
+//! [`time`], [`process`] and [`ipc`] (messages between programs) wrap the
+//! system calls.
 
 #![no_std]
 
@@ -25,6 +26,7 @@ extern crate alloc;
 pub mod console;
 pub mod fs;
 mod heap;
+pub mod ipc;
 pub mod process;
 pub mod sys;
 pub mod time;

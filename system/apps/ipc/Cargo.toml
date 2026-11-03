@@ -1,0 +1,19 @@
+[package]
+name = "ipc"
+description = "arcOS program: messages between programs"
+version = "1.0.0"
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "ipc"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+arcrt.workspace = true
+
+[lints]
+workspace = true

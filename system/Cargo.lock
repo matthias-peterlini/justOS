@@ -255,6 +255,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ipc"
+version = "1.0.0"
+dependencies = [
+ "arcrt",
+]
+
+[[package]]
 name = "nvme"
 version = "1.0.0"
 dependencies = [

@@ -26,9 +26,29 @@ const STACK_PAGES: u64 = 64;
 pub(crate) const USER_TOP: u64 = 0x0000_8000_0000_0000;
 const MAX_HANDLES: usize = 64;
 
-#[derive(Clone)]
 enum Handle {
     File { path: Path, pos: u64, write: bool },
+    /// A port of [`crate::ipc`]: one this process owns (and receives
+    /// from), or a right to send to another.
+    Port { id: u32, own: bool },
+}
+
+impl Handle {
+    fn file(&mut self) -> Result<(&Path, &mut u64, bool), Error> {
+        match self {
+            Handle::File { path, pos, write } => Ok((path, pos, *write)),
+            Handle::Port { .. } => Err(Error::BadHandle),
+        }
+    }
+
+    /// Gives back what the handle held.
+    fn release(self) {
+        match self {
+            Handle::Port { id, own: true } => crate::ipc::close(id),
+            Handle::Port { id, own: false } => crate::ipc::drop_sender(id),
+            Handle::File { .. } => {}
+        }
+    }
 }
 
 /// Which system call interface a process uses.
@@ -311,6 +331,7 @@ pub(crate) fn current_name() -> String {
 pub(crate) fn terminate(code: i64) -> ! {
     let pid = task::current_pid();
     let me = task::current_tid();
+    let mut handles = Vec::new();
     let last = {
         let mut procs = PROCS.lock();
         match procs.get_mut(&pid) {
@@ -319,7 +340,7 @@ pub(crate) fn terminate(code: i64) -> ! {
                 p.threads.retain(|&t| t != me);
                 if p.threads.is_empty() {
                     p.state = State::Exited(code);
-                    p.handles.clear();
+                    handles = core::mem::take(&mut p.handles);
                     Some(core::mem::replace(&mut p.cr3, 0))
                 } else {
                     p.kill = true;
@@ -330,7 +351,16 @@ pub(crate) fn terminate(code: i64) -> ! {
         }
     };
     match last {
-        Some(cr3) => teardown(pid, cr3),
+        Some(cr3) => {
+            for h in handles.into_iter().flatten() {
+                h.release();
+            }
+            // Ports made by the kernel on the process's behalf, too.
+            for id in crate::ipc::owned_by(pid) {
+                crate::ipc::close(id);
+            }
+            teardown(pid, cr3)
+        }
         None => task::exit(),
     }
 }
@@ -691,6 +721,39 @@ fn with_handle<T>(h: u64, f: impl FnOnce(&mut Handle) -> T) -> Result<T, Error> 
     slot.as_mut().map(f).ok_or(Error::BadHandle)
 }
 
+/// Puts a handle in the calling process's table; returns its number.
+fn install(handle: Handle) -> Result<u64, Error> {
+    let pid = task::current_pid();
+    let mut procs = PROCS.lock();
+    let p = procs.get_mut(&pid).ok_or(Error::Unknown)?;
+    let slot = match p.handles.iter().position(|h| h.is_none()) {
+        Some(i) => i,
+        None if p.handles.len() < MAX_HANDLES => {
+            p.handles.push(None);
+            p.handles.len() - 1
+        }
+        None => return Err(Error::NoMemory),
+    };
+    p.handles[slot] = Some(handle);
+    Ok(slot as u64 + 1)
+}
+
+/// The port behind a handle, and whether the process owns it.
+fn port_of(h: u64) -> Result<(u32, bool), Error> {
+    with_handle(h, |h| match h {
+        Handle::Port { id, own } => Ok((*id, *own)),
+        Handle::File { .. } => Err(Error::BadHandle),
+    })?
+}
+
+/// The name of a process (0 is the kernel).
+pub(crate) fn process_name(pid: u32) -> Option<String> {
+    if pid == 0 {
+        return Some(String::from("kernel"));
+    }
+    PROCS.lock().get(&pid).map(|p| p.name.clone())
+}
+
 fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
     match n {
         sys::WRITE => {
@@ -699,30 +762,22 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
                 crate::print!("{}", String::from_utf8_lossy(data));
                 return Ok(a[2]);
             }
-            let (path, pos, write) = with_handle(a[0], |h| match h {
-                Handle::File { path, pos, write } => (path.clone(), *pos, *write),
-            })?;
+            let (path, pos, write) = with_handle(a[0], |h| h.file().map(|(path, pos, write)| (path.clone(), *pos, write)))??;
             if !write {
                 return Err(Error::ReadOnly);
             }
             let data = data.to_vec();
             fs::write_at(&path, pos, &data).map_err(fs_error)?;
-            with_handle(a[0], |h| match h {
-                Handle::File { pos, .. } => *pos += data.len() as u64,
-            })?;
+            with_handle(a[0], |h| h.file().map(|(_, pos, _)| *pos += data.len() as u64))??;
             Ok(data.len() as u64)
         }
         sys::READ => {
-            let (path, pos) = with_handle(a[0], |h| match h {
-                Handle::File { path, pos, .. } => (path.clone(), *pos),
-            })?;
+            let (path, pos) = with_handle(a[0], |h| h.file().map(|(path, pos, _)| (path.clone(), *pos)))??;
             let buf = user_slice(a[1], a[2])?;
             let mut tmp = alloc::vec![0u8; buf.len().min(1 << 20)];
             let n = fs::read_at(&path, pos, &mut tmp).map_err(fs_error)?;
             buf[..n].copy_from_slice(&tmp[..n]);
-            with_handle(a[0], |h| match h {
-                Handle::File { pos, .. } => *pos += n as u64,
-            })?;
+            with_handle(a[0], |h| h.file().map(|(_, pos, _)| *pos += n as u64))??;
             Ok(n as u64)
         }
         sys::READ_KEY => {
@@ -754,40 +809,77 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
                 Err(e) => return Err(fs_error(e)),
             }
             let pos = if mode == sys::MODE_APPEND { fs::stat(&path).map(|s| s.size).unwrap_or(0) } else { 0 };
-            let pid = task::current_pid();
-            let mut procs = PROCS.lock();
-            let p = procs.get_mut(&pid).ok_or(Error::Unknown)?;
-            let handle = Handle::File { path, pos, write: mode != sys::MODE_READ };
-            let slot = match p.handles.iter().position(|h| h.is_none()) {
-                Some(i) => i,
-                None if p.handles.len() < MAX_HANDLES => {
-                    p.handles.push(None);
-                    p.handles.len() - 1
-                }
-                None => return Err(Error::NoMemory),
-            };
-            p.handles[slot] = Some(handle);
-            Ok(slot as u64 + 1)
+            install(Handle::File { path, pos, write: mode != sys::MODE_READ })
         }
         sys::CLOSE => {
             let pid = task::current_pid();
-            let mut procs = PROCS.lock();
-            let p = procs.get_mut(&pid).ok_or(Error::Unknown)?;
-            let slot = a[0].checked_sub(1).and_then(|i| p.handles.get_mut(i as usize)).ok_or(Error::BadHandle)?;
-            slot.take().ok_or(Error::BadHandle)?;
+            let h = {
+                let mut procs = PROCS.lock();
+                let p = procs.get_mut(&pid).ok_or(Error::Unknown)?;
+                let slot = a[0].checked_sub(1).and_then(|i| p.handles.get_mut(i as usize)).ok_or(Error::BadHandle)?;
+                slot.take().ok_or(Error::BadHandle)?
+            };
+            h.release();
             Ok(0)
         }
-        sys::SEEK => with_handle(a[0], |h| match h {
-            Handle::File { pos, .. } => {
-                *pos = a[1];
-                0
-            }
-        }),
+        sys::SEEK => with_handle(a[0], |h| h.file().map(|(_, pos, _)| *pos = a[1]))?.map(|_| 0),
         sys::FILE_SIZE => {
-            let path = with_handle(a[0], |h| match h {
-                Handle::File { path, .. } => path.clone(),
-            })?;
+            let path = with_handle(a[0], |h| h.file().map(|(path, _, _)| path.clone()))??;
             fs::stat(&path).map(|s| s.size).map_err(fs_error)
+        }
+        sys::PORT_CREATE => {
+            let name = user_str(a[0], a[1])?;
+            let id = crate::ipc::create(task::current_pid(), (!name.is_empty()).then_some(name))?;
+            install(Handle::Port { id, own: true }).inspect_err(|_| crate::ipc::close(id))
+        }
+        sys::PORT_LOOKUP => {
+            let id = crate::ipc::lookup(user_str(a[0], a[1])?)?;
+            install(Handle::Port { id, own: false }).inspect_err(|_| crate::ipc::drop_sender(id))
+        }
+        sys::PORT_SEND => {
+            let id = port_of(a[0])?.0;
+            let data = user_slice(a[1], a[2].min(sys::PORT_MSG_MAX + 1))?.to_vec();
+            crate::ipc::send(id, data, task::current_pid(), None).map(|_| 0)
+        }
+        sys::PORT_RECV => {
+            let (id, own) = port_of(a[0])?;
+            if !own {
+                return Err(Error::BadHandle);
+            }
+            // Check the buffers before taking a message off the queue.
+            user_slice(a[1], a[2])?;
+            user_slice(a[4], 24)?;
+            let timeout = (a[3] != sys::FOREVER).then_some(a[3]);
+            let m = crate::ipc::recv(id, task::current_pid(), timeout, &kill_requested)?;
+            let reply = match m.reply {
+                Some(r) => install(Handle::Port { id: r, own: false }).inspect_err(|_| crate::ipc::drop_sender(r)).unwrap_or(0),
+                None => 0,
+            };
+            let buf = user_slice(a[1], a[2])?;
+            let n = m.data.len().min(buf.len());
+            buf[..n].copy_from_slice(&m.data[..n]);
+            let info = user_slice(a[4], 24)?;
+            for (i, w) in [m.data.len() as u64, m.sender as u64, reply].iter().enumerate() {
+                info[i * 8..i * 8 + 8].copy_from_slice(&w.to_le_bytes());
+            }
+            Ok(n as u64)
+        }
+        sys::PORT_CALL => {
+            let id = port_of(a[0])?.0;
+            let data = user_slice(a[1], a[2].min(sys::PORT_MSG_MAX + 1))?.to_vec();
+            user_slice(a[3], a[4])?;
+            let answer = crate::ipc::call(id, data, task::current_pid(), None, &kill_requested)?;
+            let buf = user_slice(a[3], a[4])?;
+            let n = answer.len().min(buf.len());
+            buf[..n].copy_from_slice(&answer[..n]);
+            Ok(answer.len() as u64)
+        }
+        sys::PROC_NAME => {
+            let name = process_name(a[0] as u32).ok_or(Error::NotFound)?;
+            let buf = user_slice(a[1], a[2])?;
+            let n = name.len().min(buf.len());
+            buf[..n].copy_from_slice(&name.as_bytes()[..n]);
+            Ok(name.len() as u64)
         }
         sys::LIST_DIR => {
             let path = user_path(a[0], a[1])?;

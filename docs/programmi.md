@@ -158,6 +158,37 @@ File e cartelle aperti sono **handle** numerici, non descrittori Unix.
 | 28 | `WIN_EVENT` | il prossimo evento (mouse, tastiera, chiusura, nuova misura) |
 | 29 | `WIN_CLOSE` | chiude la finestra |
 | 30 | `WIN_TITLE` | cambia il titolo |
+| 31 | `PORT_CREATE` | crea una porta di messaggi (con nome o privata) |
+| 32 | `PORT_LOOKUP` | trova una porta per nome |
+| 33 | `PORT_SEND` | invia un messaggio |
+| 34 | `PORT_RECV` | riceve un messaggio, con il mittente e dove rispondere |
+| 35 | `PORT_CALL` | invia una richiesta e aspetta la risposta |
+| 36 | `PROC_NAME` | il nome di un processo |
+
+## Messaggi tra programmi
+
+Un programma offre un servizio creando una porta con un nome; gli altri la
+trovano e le scrivono. `arcrt::ipc` lo nasconde:
+
+```rust
+use arcrt::ipc::Port;
+
+// il servizio
+let porta = Port::create("org.esempio.eco")?;
+loop {
+    let m = porta.recv(None)?;          // aspetta un messaggio
+    m.reply(m.text().to_uppercase().as_bytes())?;
+}
+
+// un altro programma
+let eco = Port::lookup("org.esempio.eco")?;
+let risposta = eco.call(b"ciao")?;      // b"CIAO"
+```
+
+Il kernel dice a chi riceve il pid di chi ha scritto (`m.sender`), che un
+programma non può falsificare. Il sistema offre `arc.notify`: un messaggio
+`{"title": "…", "text": "…"}` mostra una notifica sulla scrivania. Dalla
+shell: `ipc notify Titolo testo`, `ipc call <porta> <testo>`, `ports`.
 
 ## Programmi con una finestra
 

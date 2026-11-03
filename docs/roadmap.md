@@ -14,26 +14,32 @@ Legenda: ✅ fatto · 🟡 in parte · ⬜ da fare · ⛔ non realizzabile.
 Quasi tutto quello che segue ha bisogno di tre fondamenta che oggi mancano o
 sono minime. Vanno fatte per prime.
 
-### 1. IPC: porte di messaggi
+### 1. IPC: porte di messaggi ✅
 
-Oggi i programmi parlano con il kernel solo con chiamate di sistema
-(`system/libs/arcdk/src/syscall.rs`: file, finestre `WIN_*`, `SPAWN`,
-`WAIT`...) e non tra loro. Servizi come le notifiche, i permessi, la rete
-senza fili o gli aggiornamenti hanno bisogno di parlare con le app.
-
-Proposta, sul modello delle porte Mach di macOS e di Fuchsia, ma piccola:
+I programmi e i servizi del kernel si parlano con **porte** (sul modello
+delle porte Mach di macOS e di Fuchsia, ma piccole): `kernel/src/ipc.rs`,
+chiamate 31–36 in `arcdk::syscall`, libreria `arcrt::ipc`.
 
 | Chiamata | Cosa fa |
 |---|---|
-| `PORT_CREATE(name) -> handle` | crea una porta; un nome (`arc.notify`) la registra nel servizio dei nomi |
-| `PORT_LOOKUP(name) -> handle` | trova una porta per nome (soggetto ai permessi) |
-| `PORT_SEND(handle, buf, len, handles[])` | invia un messaggio (fino a 64 KiB) con eventuali handle allegati |
-| `PORT_RECV(handle, buf, len, timeout) -> (len, sender)` | riceve; `sender` è il pid e l'identità dell'app, che il kernel garantisce |
-| `PORT_CALL(handle, req, resp)` | invio e risposta in una volta (il caso comune) |
+| `PORT_CREATE(name) -> handle` | crea una porta; un nome (`arc.notify`) la rende trovabile, senza nome è privata |
+| `PORT_LOOKUP(name) -> handle` | un handle per inviare a una porta con nome |
+| `PORT_SEND(handle, buf, len)` | mette in coda un messaggio (fino a 64 KiB, 64 in coda) |
+| `PORT_RECV(handle, buf, cap, timeout, info)` | riceve da una porta propria; `info`: lunghezza, pid del mittente (garantito dal kernel), handle per la risposta |
+| `PORT_CALL(handle, req, len, resp, cap)` | richiesta e risposta in una volta, con una porta di risposta privata |
+| `PROC_NAME(pid, buf, cap)` | il nome di un processo (chi ha inviato un messaggio) |
 
-I messaggi sono JSON compatto (`arcjson`) all'inizio, binari dopo. Il
-kernel tiene una coda per porta in un `WaitQueue` (vedi `sync.rs`), quindi
-funziona già con più processori. Una libreria `arcrt::ipc` lo nasconde.
+Riceve solo chi ha creato la porta; inviare può chiunque ne abbia un
+handle. Le porte si contano: quando il proprietario termina la porta sparisce
+e chi invia riceve `Closed`; se un servizio termina senza rispondere, chi
+aspettava la risposta riceve `Closed` invece di restare bloccato. Le attese
+si accorgono di un Ctrl+C. Il primo servizio è `arc.notify` nel kernel
+(`{"title": …, "text": …}` mostra una notifica); `ports` nella shell elenca
+le porte con nome, `ipc test` le prova (anche in `make test`).
+
+Ancora da fare: allegare handle qualsiasi ai messaggi (oggi viaggia solo
+quello della risposta) e decidere chi può trovare quale porta, che arriva
+con l'identità delle app.
 
 ### 2. Identità delle app e sandbox
 
@@ -238,7 +244,7 @@ usare la fotocamera — Consenti / Non consentire» e ricorda la risposta;
 
 | Fase | Contenuto | Durata indicativa |
 |---|---|---|
-| 1 | IPC a porte, identità delle app (desktop virtuali e schede in File: fatti) | 2 mesi |
+| 1 | identità delle app (IPC a porte, desktop virtuali e schede in File: fatti) | 2 mesi |
 | 2 | sandbox e permessi, aggiornamenti delle app in background, trascinamento | 2–3 mesi |
 | 3 | interprete AML: sospensione, batteria, temperatura | 3–4 mesi |
 | 4 | aggiornamenti A/B, HiDPI, indice dei file | 2–3 mesi |

@@ -62,6 +62,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("mem", "", "memory usage"),
     ("ps", "", "running programs and threads"),
     ("kill", "<pid>", "stop a program"),
+    ("ports", "", "named message ports and who owns them"),
     ("run", "<program> [args]", "start a program (also just: <program>)"),
     ("irq", "", "interrupt lines and message interrupts"),
     ("net", "", "network interfaces and addresses"),
@@ -743,6 +744,13 @@ impl Shell {
                     t.min,
                     t.sec
                 );
+            }
+            "ports" => {
+                println!("{DIM}  owner  queued  name{RESET}");
+                for (name, owner, queued) in crate::ipc::list() {
+                    let who = crate::user::process_name(owner).unwrap_or_default();
+                    println!("  {owner:<5}  {queued:>6}  {name} {DIM}({who}){RESET}");
+                }
             }
             "uptime" => {
                 let s = time::uptime_ms() / 1000;

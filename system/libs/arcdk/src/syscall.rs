@@ -76,6 +76,37 @@ pub const WIN_CLOSE: u64 = 29;
 /// (handle, title, len)
 pub const WIN_TITLE: u64 = 30;
 
+// Ports: programs (and the system's services) send each other messages of up
+// to `PORT_MSG_MAX` bytes. A port belongs to the program that created it,
+// which alone receives from it; anyone holding a handle to it may send.
+
+/// (name, len) -> port handle. A name (`arc.notify`) makes the port findable
+/// with `PORT_LOOKUP`; an empty one makes a private port. `Exists` if taken.
+pub const PORT_CREATE: u64 = 31;
+/// (name, len) -> handle for sending to a named port.
+pub const PORT_LOOKUP: u64 = 32;
+/// (handle, ptr, len): queues a message. `Full` if the port has
+/// `PORT_QUEUE_MAX` waiting, `Closed` if its owner is gone.
+pub const PORT_SEND: u64 = 33;
+/// (handle, buf, cap, timeout_ms, ptr to [u64; 3]) -> bytes copied: waits for
+/// a message on an own port (`u64::MAX`: forever; `Timeout` otherwise). The
+/// words: the message's full length, the sender's process id (as the kernel
+/// knows it; 0 for the kernel) and a handle to send the reply to (0 if none).
+/// `Closed` when an unnamed port has nothing queued and nobody left to send.
+pub const PORT_RECV: u64 = 34;
+/// (handle, request, len, buf, cap) -> reply length: sends a request with a
+/// private reply port and waits for the answer. `Closed` if the other side
+/// ends or drops the request without answering.
+pub const PORT_CALL: u64 = 35;
+/// (pid, buf, cap) -> length of the name of a process (for the sender of a
+/// message).
+pub const PROC_NAME: u64 = 36;
+
+pub const PORT_MSG_MAX: u64 = 64 << 10;
+pub const PORT_QUEUE_MAX: usize = 64;
+/// `PORT_RECV` timeout: wait until a message comes.
+pub const FOREVER: u64 = u64::MAX;
+
 /// `WIN_CREATE` flag: the user may resize the window (`WIN_EV_RESIZE`).
 pub const WIN_RESIZABLE: u64 = 1;
 
@@ -129,6 +160,12 @@ pub enum Error {
     NoMemory = 12,
     BadProgram = 13,
     Unknown = 14,
+    Timeout = 15,
+    /// The other end of a port is gone.
+    Closed = 16,
+    /// A port's queue is full.
+    Full = 17,
+    TooLarge = 18,
 }
 
 impl Error {
@@ -147,6 +184,10 @@ impl Error {
             11 => Error::BadAddress,
             12 => Error::NoMemory,
             13 => Error::BadProgram,
+            15 => Error::Timeout,
+            16 => Error::Closed,
+            17 => Error::Full,
+            18 => Error::TooLarge,
             _ => Error::Unknown,
         }
     }
@@ -167,6 +208,10 @@ impl Error {
             Error::NoMemory => "out of memory",
             Error::BadProgram => "not a program",
             Error::Unknown => "error",
+            Error::Timeout => "timed out",
+            Error::Closed => "the other side is gone",
+            Error::Full => "queue full",
+            Error::TooLarge => "too large",
         }
     }
 }
