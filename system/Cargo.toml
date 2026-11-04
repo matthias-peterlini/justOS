@@ -25,6 +25,7 @@ arcrt = { path = "libs/arcrt" }
 arcusb = { path = "libs/arcusb" }
 arcvirtio = { path = "libs/arcvirtio" }
 arcdex = { path = "libs/arcdex" }
+arcaml = { path = "libs/arcaml" }
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }

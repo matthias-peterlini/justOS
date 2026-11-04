@@ -186,7 +186,7 @@ il ritorno alla versione precedente.
 | Wi-Fi | ⬜ |
 | Bluetooth | ⬜ |
 | Sospensione in RAM (S3/s2idle) | ⬜ |
-| Batteria e temperatura | ⬜ |
+| Batteria e temperatura | ✅ interprete AML `arcaml`, embedded controller, GPE |
 
 **Wi-Fi.** Ogni famiglia di schede (Intel iwlwifi, Realtek, MediaTek,
 Broadcom) ha un driver da decine di migliaia di righe e un firmware binario
@@ -202,13 +202,18 @@ standard: un driver vale per quasi tutti i dongle), più complicato sopra:
 L2CAP, profili HID (tastiere, mouse) e A2DP (audio, con il codec SBC).
 Stima: 2–3 mesi per HID, altrettanti per l'audio.
 
-**Sospensione.** Richiede l'interprete AML di ACPI (oggi arcOS legge le
-tabelle ma non esegue AML): metodi `_PTS`, `_S3`, `_WAK`, poi ogni driver
-deve salvare e ripristinare lo stato del suo dispositivo (`suspend`/`resume`
-nell'interfaccia dei driver `arcdrv`). Ripresa sotto il secondo è
-realistica dopo; il lavoro grosso è l'interprete AML (si può portare
-`acpica`, in C, o usare il crate `aml`). Batteria e temperatura vengono
-dallo stesso interprete (`_BST`, `_TMP`). Stima: 3–4 mesi.
+**Batteria e temperatura.** Fatto: arcOS esegue l'AML del firmware con il
+suo interprete, `arcaml` (scritto da zero, provato con le tabelle di sette
+portatili veri e di QEMU), e da lì legge batteria, alimentatore, coperchio
+e temperature; gli eventi arrivano dai GPE e dall'embedded controller.
+Vedi [architettura](architettura.md#acpi-e-aml).
+
+**Sospensione.** L'interprete c'è; mancano: il vettore di risveglio nella
+FACS (il codice che riparte in modo reale, simile al trampolino dei
+processori secondari in `smp.rs`), salvare e ripristinare lo stato della
+CPU, `_PTS(3)`/`_WAK(3)`, e un `suspend`/`resume` nell'interfaccia dei
+driver `arcdrv`, perché ogni driver rimetta a posto il suo dispositivo.
+Chiudere il coperchio sospenderà invece di non fare nulla. Stima: 1–2 mesi.
 
 ## 4. File manager e ricerca
 
@@ -284,7 +289,7 @@ mostra i permessi dichiarati nel manifest di ogni app.
 |---|---|---|
 | 1 | ✅ IPC a porte, identità delle app, desktop virtuali, schede in File | fatto |
 | 2 | ✅ sandbox, permessi, aggiornamenti delle app, trascinamento | fatto |
-| 3 | interprete AML: sospensione, batteria, temperatura | 3–4 mesi |
+| 3 | 🟡 interprete AML, batteria, temperatura: fatto; sospensione | 1–2 mesi |
 | 4 | aggiornamenti A/B, HiDPI, indice dei file | 2–3 mesi |
 | 5 | strato Linux completo (JavaScript in `arcweb`: fatto), poi Servo | 6–12 mesi |
 | 6 | Wi-Fi (un chip), Bluetooth HID e audio | 6–9 mesi |

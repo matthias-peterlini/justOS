@@ -31,6 +31,8 @@ Presa a modello da macOS:
   *Riavvia*, *Spegni*), il nome
   dell'app in primo piano, ora e data al centro, il **centro di controllo**
   (volume con un cursore, stato della rete) e il pulsante di spegnimento.
+  Sui portatili la barra mostra anche la carica della batteria (con il
+  fulmine quando è in carica) e il centro di controllo quanto manca.
 - **Widget**: saluto con l'orologio, calendario del mese, stato del sistema.
 - **Dock**: File, Applicazioni, Editor di testo, Note, Calendario, Foto,
   Musica, Calcolatrice, Negozio, Impostazioni e, dopo un separatore, le app

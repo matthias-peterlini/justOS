@@ -127,7 +127,7 @@ pub fn detect() -> Vec<(DeviceInfo, Option<&'static str>)> {
     }
     out.push((device("display", &[], IRQ_NONE), Some("kernel: console")));
     if let Some(line) = crate::acpi::sci_line() {
-        out.push((device("acpi-power-button", &[], line), Some("kernel: ACPI")));
+        out.push((device("acpi", &[], line), Some("kernel: ACPI")));
     }
     let ps2 = ps2();
     if ps2.keyboard {
@@ -146,7 +146,7 @@ pub fn describe(name: &str) -> &'static str {
         "rtc" => "real-time clock",
         "com1" => "serial port COM1",
         "display" => "boot display",
-        "acpi-power-button" => "power button (ACPI)",
+        "acpi" => "ACPI events (power button, battery, lid)",
         "ps2-keyboard" => "PS/2 keyboard",
         "ps2-mouse" => "PS/2 mouse",
         _ => "platform device",

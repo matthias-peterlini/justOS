@@ -111,7 +111,7 @@ extern "C" fn kmain(boot_phys: u64) -> ! {
 
     let (free, usable) = mem::frame::stats();
     info!("kernel", "{} of memory, {} free", util::Size(usable), util::Size(free));
-    acpi::init(boot.rsdp);
+    acpi::init(boot.rsdp, boot.memory_map());
     arch::smp::start();
     gui::boot_progress(18);
 

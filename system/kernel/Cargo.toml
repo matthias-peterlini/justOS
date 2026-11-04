@@ -22,6 +22,7 @@ arcjson.workspace = true
 arcweb.workspace = true
 arcc-core.workspace = true
 arc-vm.workspace = true
+arcaml.workspace = true
 
 [lints]
 workspace = true

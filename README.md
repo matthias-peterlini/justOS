@@ -133,7 +133,7 @@ memoria e `arcos.iso` nel lettore CD.
 | Parte | Cosa fa | Dettagli |
 |---|---|---|
 | **ArcBoot** | loader per BIOS (MBR + secondo stadio in assembly) e per UEFI (un'applicazione EFI in Rust); entrambi passano al kernel la stessa `BootInfo` | [architettura](docs/architettura.md#avvio) |
-| **Kernel** | 64 bit, memoria virtuale a 4 livelli, scheduler preemptivo, thread, code di attesa, MSI/MSI-X, ACPI per spegnere e riavviare | [architettura](docs/architettura.md#kernel) |
+| **Kernel** | 64 bit, memoria virtuale a 4 livelli, scheduler preemptivo, thread, code di attesa, MSI/MSI-X, ACPI con un interprete AML scritto da zero (spegnimento, batteria, temperature) | [architettura](docs/architettura.md#kernel) |
 | **Driver** | pacchetti `.adp` indipendenti dal kernel: il kernel confronta i manifesti con l'hardware e carica il driver giusto da solo, all'avvio e a sistema avviato | [driver](docs/driver.md) |
 | **ArcFS** | il file system nativo: blocchi da 4 KiB, extent, controllo di coerenza; volumi con nome (`sys:`, `ram:`, `chiavetta:`) | [architettura](docs/architettura.md#file-system-arcfs) |
 | **Interfaccia** | splash, configurazione guidata, scrivania con dock, Launchpad, notifiche, ricerca globale, snap delle finestre e animazioni; le app di sistema, tra cui l'IDE ArcStudio | [gui](docs/gui.md) |
@@ -156,9 +156,10 @@ memoria e `arcos.iso` nel lettore CD.
 | Audio | Intel HD Audio (quasi ogni PC dal 2005), AC'97 |
 | Video | qualunque scheda (Intel, AMD, NVIDIA, Hyper-V) con il framebuffer del firmware; cambio di risoluzione con le schede di QEMU (VGA, Cirrus, QXL), VirtualBox (VBoxVGA, VMSVGA), VMware e virtio-gpu |
 | Input | tastiera e mouse PS/2 e USB, pulsante di accensione (ACPI) |
+| Portatili | batteria, alimentatore, coperchio, temperature ed embedded controller, dall'AML del firmware |
 
-Mancano ancora il Wi-Fi, l'accelerazione e il cambio di risoluzione sulle
-schede video vere e la batteria dei portatili. Lo stato
+Mancano ancora il Wi-Fi, la sospensione, l'accelerazione e il cambio di
+risoluzione sulle schede video vere. Lo stato
 di ogni driver, provato o no, è in [docs/driver.md](docs/driver.md#hardware-supportato).
 
 ## Compilare

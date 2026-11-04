@@ -74,6 +74,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("fetch", "<url> [file]", "download from the web (http and https)"),
     ("sha256", "<file>", "the SHA-256 checksum of a file"),
     ("sysinfo", "", "about this machine"),
+    ("acpi", "[tree [path] | eval <path> [n...]]", "battery, temperatures and the firmware (ACPI)"),
     ("date", "", "date and time"),
     ("uptime", "", "time since start"),
     ("log", "[lines]", "the system journal"),
@@ -737,6 +738,7 @@ impl Shell {
                 }
             }
             "sysinfo" => self.sysinfo(),
+            "acpi" => self.acpi(&rest),
             "date" => {
                 let t = time::from_epoch(time::now());
                 println!(
@@ -1351,7 +1353,101 @@ impl Shell {
         let missing = devs.iter().filter(|d| !d.has_driver() && d.needs_driver()).count();
         println!("  devices    {} ({} with a driver, {} without)", devs.len(), with, missing);
         println!("  disks      {}", dev::block::list().iter().filter(|d| d.parent.is_none()).count());
+        if let Some((pct, plugged)) = crate::acpi::power::battery() {
+            println!("  battery    {pct}%{}", if plugged { " (on mains)" } else { "" });
+        }
+        if let Some(t) = crate::acpi::power::hottest() {
+            println!("  temperature {}.{} °C", t / 10, t % 10);
+        }
         println!("  uptime     {} s", time::uptime_ms() / 1000);
+    }
+
+    fn acpi(&self, rest: &[&str]) {
+        let waiting = || println!("{WARN}the firmware's AML is not running{RESET}");
+        match rest.first().copied() {
+            None => {
+                if !crate::acpi::aml_ready() {
+                    waiting();
+                    return;
+                }
+                println!("{BOLD}AML{RESET}  {}", crate::acpi::aml_summary());
+                if let Some((data, command, timeouts)) = crate::acpi::ec_info() {
+                    println!("{BOLD}embedded controller{RESET}  ports {data:#x}/{command:#x}, {timeouts} timeouts");
+                }
+                let s = crate::acpi::power::state();
+                match s.ac {
+                    Some(true) => println!("{BOLD}power{RESET}  on mains"),
+                    Some(false) => println!("{BOLD}power{RESET}  on battery"),
+                    None => {}
+                }
+                for b in &s.batteries {
+                    if !b.present {
+                        println!("{BOLD}battery{RESET}  {DIM}{}: not inserted{RESET}", b.path);
+                        continue;
+                    }
+                    let unit = if b.watts { "mWh" } else { "mAh" };
+                    let what = if b.charging() {
+                        "charging"
+                    } else if b.discharging() {
+                        "discharging"
+                    } else {
+                        "full or idle"
+                    };
+                    let pct = b.percent().map(|p| alloc::format!("{p}%")).unwrap_or_else(|| String::from("?"));
+                    println!("{BOLD}battery{RESET}  {pct}, {what}  {DIM}{} {} {}{RESET}", b.vendor, b.model, b.kind);
+                    let n = |v: Option<u32>| v.map(|x| x.to_string()).unwrap_or_else(|| String::from("?"));
+                    println!("  now {} of {} {unit} (design {}), rate {}", n(b.remaining), n(b.full), n(b.design), n(b.rate));
+                    if let Some(m) = b.minutes_left() {
+                        println!("  {} h {:02} min {}", m / 60, m % 60, if b.charging() { "to full" } else { "left" });
+                    }
+                    if let Some(h) = b.health() {
+                        println!("  health {h}%{}", b.cycles.map(|c| alloc::format!(", {c} cycles")).unwrap_or_default());
+                    }
+                }
+                if let Some(open) = s.lid_open {
+                    println!("{BOLD}lid{RESET}  {}", if open { "open" } else { "closed" });
+                }
+                for t in &s.thermal {
+                    let crit = t.critical.map(|c| alloc::format!("  {DIM}critical {} °C{RESET}", c / 10)).unwrap_or_default();
+                    println!("{BOLD}thermal{RESET}  {} {}.{} °C{crit}", t.path, t.temp / 10, t.temp % 10);
+                }
+            }
+            Some("tree") => match crate::acpi::tree(rest.get(1).copied().unwrap_or("\\_SB")) {
+                None => waiting(),
+                Some(Err(e)) => println!("{ERR}{e}{RESET}"),
+                Some(Ok(lines)) => {
+                    for l in lines {
+                        println!("{l}");
+                    }
+                }
+            },
+            Some("eval") => {
+                let Some(path) = rest.get(1) else {
+                    println!("usage: acpi eval <path> [numbers...]");
+                    return;
+                };
+                let mut args = Vec::new();
+                for a in &rest[2..] {
+                    let v = match a.strip_prefix("0x") {
+                        Some(h) => u64::from_str_radix(h, 16),
+                        None => a.parse(),
+                    };
+                    match v {
+                        Ok(v) => args.push(v),
+                        Err(_) => {
+                            println!("{ERR}{a}: not a number{RESET}");
+                            return;
+                        }
+                    }
+                }
+                match crate::acpi::eval(path, args) {
+                    None => waiting(),
+                    Some(Ok(v)) => println!("{v}"),
+                    Some(Err(e)) => println!("{ERR}{e}{RESET}"),
+                }
+            }
+            Some(other) => println!("{ERR}acpi {other}: unknown action{RESET} {DIM}(help acpi){RESET}"),
+        }
     }
 }
 

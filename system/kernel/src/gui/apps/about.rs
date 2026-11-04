@@ -33,7 +33,7 @@ impl About {
     }
 
     fn update_btn(area: Rect) -> Rect {
-        Rect::new(area.x + 250, area.y + 334, 170, 34)
+        Rect::new(area.x + 250, area.y + 348, 170, 34)
     }
 }
 
@@ -89,19 +89,30 @@ impl App for About {
                 let (sw, sh) = crate::console::pixel_size().unwrap_or((0, 0));
                 let video = crate::dev::display::controller().unwrap_or_else(|| String::from("Framebuffer del firmware"));
                 let sound = crate::dev::audio::list().first().map(|o| o.name.clone()).unwrap_or_else(|| String::from("Nessuna"));
-                let rows = [
+                let mut rows = alloc::vec![
                     ("Processore", cpu),
                     ("Memoria", format!("{} ({} libera)", Size(total), Size(free))),
                     ("Schermo", format!("{sw} × {sh}")),
                     ("Grafica", video),
                     ("Audio", sound),
-                    ("Acceso da", format!("{} h {} min {} s", up / 3600, up / 60 % 60, up % 60)),
                 ];
-                let mut y = area.y + 156;
+                // Laptops: the battery and the temperature, from ACPI.
+                let mut power = Vec::new();
+                if let Some((pct, plugged)) = crate::acpi::power::battery() {
+                    power.push(format!("Batteria {pct}%{}", if plugged { ", collegata" } else { "" }));
+                }
+                if let Some(t) = crate::acpi::power::hottest() {
+                    power.push(format!("{},{} °C", t / 10, t % 10));
+                }
+                if !power.is_empty() {
+                    rows.push(("Energia", power.join(" · ")));
+                }
+                rows.push(("Acceso da", format!("{} h {} min {} s", up / 3600, up / 60 % 60, up % 60)));
+                let mut y = area.y + 150;
                 for (k, v) in rows {
                     text::draw(c, Font::Strong, x, y, k, TEXT);
                     text::draw(c, Font::Body, x + 110, y, &text::fit(Font::Body, &v, area.right() - x - 130), TEXT_DIM);
-                    y += 28;
+                    y += 27;
                 }
                 use crate::update::State;
                 let state = crate::update::state();

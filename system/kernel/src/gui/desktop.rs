@@ -413,10 +413,28 @@ struct Desktop {
     space_hud: Option<Anim>,
     /// Files being dragged out of a window.
     carry: Option<Carry>,
+    /// The charge shown in the bar, and whether it charges (a laptop).
+    battery: Option<(u8, bool)>,
 }
 
 fn now() -> DateTime {
     time::from_epoch(time::now())
+}
+
+/// "Batteria 80% · in carica", for the control centre (laptops only).
+fn battery_line() -> Option<String> {
+    let (pct, plugged) = crate::acpi::power::battery()?;
+    let s = crate::acpi::power::state();
+    let b = s.batteries.iter().find(|b| b.present);
+    let charging = b.is_some_and(|b| b.charging());
+    let left = b.and_then(|b| b.minutes_left());
+    let how = match (charging, plugged, left) {
+        (true, ..) => String::from("in carica"),
+        (false, true, _) => String::from("collegata"),
+        (false, false, Some(m)) => format!("ancora {} h {:02} min", m / 60, m % 60),
+        (false, false, None) => String::from("in uso"),
+    };
+    Some(format!("Batteria {pct}% · {how}"))
 }
 
 impl Desktop {
@@ -442,11 +460,20 @@ impl Desktop {
         (self.spaces > 1 && !self.full_screen()).then(|| Rect::new(lb.right() + 4, lb.y, self.spaces as i32 * 14 + 18, lb.h))
     }
 
-    /// The status icons at the right (arc, network, sound): they open the
-    /// control centre.
+    /// The status icons at the right (arc, network, sound, battery): they
+    /// open the control centre.
     fn status_btn(&self) -> Rect {
         let t = self.topbar();
-        Rect::new(t.right() - 112, t.y + (t.h - 32) / 2, 100, 32)
+        let extra = self.battery_w();
+        Rect::new(t.right() - 112 - extra, t.y + (t.h - 32) / 2, 100 + extra, 32)
+    }
+
+    /// The room the battery takes in the bar: its charge and its icon.
+    fn battery_w(&self) -> i32 {
+        match self.battery {
+            Some((pct, _)) => text::width(Font::Small, &format!("{pct}%")) + 6 + 28,
+            None => 0,
+        }
     }
 
     /// The clock and the date in the middle: they open the notifications.
@@ -463,7 +490,7 @@ impl Desktop {
 
     /// Where a maximised window's buttons go: the bar, up to the status icons.
     fn full_bar(&self) -> Rect {
-        Rect::new(0, 0, self.w - 120, BAR_FULL_H)
+        Rect::new(0, 0, self.w - 120 - self.battery_w(), BAR_FULL_H)
     }
 
     fn widgets(&self) -> [Rect; 3] {
@@ -2187,6 +2214,12 @@ impl Desktop {
         ui::glyph(c, "g-wifi", 20, sb.x + 40, gy, net);
         let vol = if crate::dev::audio::volume() == 0 { "g-mute" } else { "g-volume" };
         ui::glyph(c, vol, 20, sb.x + 70, gy, if self.quiet { dim } else { fg });
+        if let Some((pct, charging)) = self.battery {
+            let label = format!("{pct}%");
+            let (sh, _) = text::metrics(Font::Small);
+            let w = text::draw(c, Font::Small, sb.x + 98, sb.y + (sb.h - sh) / 2, &label, fg);
+            ui::draw_battery(c, sb.x + 98 + w + 6, sb.y + (sb.h - 13) / 2, 26, pct, charging, fg);
+        }
     }
 
     fn draw_widgets(&self, c: &mut Canvas, r: Rect) {
@@ -2448,6 +2481,9 @@ impl Desktop {
         let tx = acx + ar + 18;
         text::draw(c, Font::Heading, tx, b.y + 34, &text::fit(Font::Heading, &name, b.right() - tx - 16), TEXT);
         text::draw(c, Font::Small, tx, b.y + 60, &text::fit(Font::Small, &mail, b.right() - tx - 16), TEXT_DIM);
+        if let Some(line) = battery_line() {
+            text::draw(c, Font::Small, tx, b.y + 80, &text::fit(Font::Small, &line, b.right() - tx - 16), TEXT_DIM);
+        }
         let [sb, rb, pb] = self.control_buttons();
         let lit = |h: ControlHit| hover == Some(h);
         c.fill_round(sb, sb.h / 2, if lit(ControlHit::Settings) { 0x40FF_FFFF } else { 0x29FF_FFFF });
@@ -2887,6 +2923,11 @@ impl Desktop {
                 if second != self.second {
                     self.second = second;
                     l.damage(ui::with_shadow(self.widgets()[2]));
+                    let battery = crate::acpi::power::battery();
+                    if battery != self.battery {
+                        self.battery = battery;
+                        l.damage(ui::with_shadow(self.topbar()));
+                    }
                 }
                 for w in self.windows.iter_mut() {
                     if !w.minimized && w.app.tick() {
@@ -3125,6 +3166,7 @@ pub fn run(d: &mut Display) {
         overview: None,
         space_hud: None,
         carry: None,
+        battery: None,
     };
     let mut l = Looper::new(d);
     l.damage_all(d);

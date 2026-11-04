@@ -127,6 +127,31 @@ pub fn draw_sun(c: &mut Canvas, x: i32, y: i32, s: i32, color: u32) {
     }
 }
 
+/// A battery lying down, `w` wide (and w/2 high), filled to `pct`: red when
+/// low and not charging, with a lightning bolt while on mains power.
+pub fn draw_battery(c: &mut Canvas, x: i32, y: i32, w: i32, pct: u8, charging: bool, color: u32) {
+    let h = w / 2;
+    let body = Rect::new(x, y, w - 3, h);
+    c.stroke_round(body, 4, 2, (color & 0xFF_FFFF) | 0x9900_0000);
+    c.fill_round(Rect::new(x + w - 3, y + h / 2 - 3, 3, 6), 1, (color & 0xFF_FFFF) | 0x9900_0000);
+    let inner = body.w - 6;
+    let fill = (inner * pct.min(100) as i32 / 100).max(2);
+    let level = if pct <= 10 && !charging { 0xFFFF_5A52 } else { color };
+    c.fill_round(Rect::new(x + 3, y + 3, fill, h - 6), 2, level);
+    if charging {
+        // A bolt across the middle, with a ring of the bar's colour taken
+        // out around it so it reads over the fill.
+        let (cx, cy) = (x + body.w / 2, y + h / 2);
+        let bolt = [(cx + 2, cy - h / 2 + 1), (cx - 3, cy + 1), (cx + 2, cy - 1), (cx - 2, cy + h / 2 - 1)];
+        for i in 0..3 {
+            c.line(bolt[i].0, bolt[i].1, bolt[i + 1].0, bolt[i + 1].1, 3, 0xFF00_0000 | (!color & 0xFF_FFFF));
+        }
+        for i in 0..3 {
+            c.line(bolt[i].0, bolt[i].1, bolt[i + 1].0, bolt[i + 1].1, 1, 0xFFFF_D84D);
+        }
+    }
+}
+
 /// Three round dark buttons on a light pill: minimise, maximise, close
 /// (`hover`: the one under the pointer). `r` is the pill.
 pub fn window_knobs(c: &mut Canvas, r: Rect, buttons: &[Rect; 3], hover: Option<usize>) {

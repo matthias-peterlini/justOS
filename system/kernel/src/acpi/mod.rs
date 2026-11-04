@@ -1,7 +1,16 @@
-//! Just enough ACPI to find the tables, to power off or restart, and to
-//! turn the computer off cleanly when its power button is pressed.
+//! ACPI: the tables, power off and restart, and the firmware's AML, run by
+//! the AML task (see `aml`), for batteries, lid, temperatures, buttons and
+//! the embedded controller of laptops.
+
+mod aml;
+pub mod ec;
+mod gpe;
+pub mod power;
+
+pub use aml::{ec_info, eval, ready as aml_ready, summary as aml_summary, tree};
 
 use crate::arch::cpu::{self, inw, outb, outw};
+use crate::boot::MemoryRegion;
 use crate::mem::phys_to_virt;
 use crate::sync::IrqLock;
 use alloc::string::String;
@@ -25,15 +34,39 @@ struct Fadt {
     pm1_evt_len: u8,
     /// The power button is a fixed feature (not a control method one).
     fixed_power_button: bool,
+    /// The general-purpose event blocks (I/O ports; lengths in bytes).
+    gpe0_blk: u32,
+    gpe1_blk: u32,
+    gpe0_len: u8,
+    gpe1_len: u8,
+    gpe1_base: u8,
 }
 
 struct Acpi {
     tables: Vec<([u8; 4], u64)>,
     fadt: Option<Fadt>,
     oem: String,
+    /// The firmware's memory map: what is RAM (reachable cached through the
+    /// direct map) and what is not (device registers).
+    memory: &'static [MemoryRegion],
 }
 
-static ACPI: IrqLock<Acpi> = IrqLock::new(Acpi { tables: Vec::new(), fadt: None, oem: String::new() });
+static ACPI: IrqLock<Acpi> = IrqLock::new(Acpi { tables: Vec::new(), fadt: None, oem: String::new(), memory: &[] });
+
+/// RAM, ACPI tables or ACPI NVS: memory, not device registers.
+fn is_ram(addr: u64) -> bool {
+    let top = crate::mem::frame::top().max(4 << 30);
+    addr < top && ACPI.lock().memory.iter().any(|r| matches!(r.kind, 1 | 3 | 4) && addr >= r.base && addr - r.base < r.len)
+}
+
+/// The tables the root table lists, by signature and physical address.
+fn tables() -> Vec<([u8; 4], u64)> {
+    ACPI.lock().tables.clone()
+}
+
+fn dsdt() -> Option<u64> {
+    ACPI.lock().fadt.map(|f| f.dsdt).filter(|&d| d != 0)
+}
 
 fn bytes(phys: u64, len: usize) -> &'static [u8] {
     // SAFETY: ACPI tables live in RAM or reserved memory, both reachable
@@ -68,6 +101,7 @@ fn find_rsdp() -> Option<u64> {
     scan(0xE0000, 0x20000)
 }
 
+/// A table, if its length is sane and its checksum right.
 fn table(phys: u64) -> Option<&'static [u8]> {
     let header = bytes(phys, 36);
     let len = le32(header, 4) as usize;
@@ -78,7 +112,8 @@ fn table(phys: u64) -> Option<&'static [u8]> {
     checksum_ok(t).then_some(t)
 }
 
-pub fn init(rsdp_hint: u64) {
+pub fn init(rsdp_hint: u64, memory: &'static [MemoryRegion]) {
+    ACPI.lock().memory = memory;
     let Some(rsdp) = (if rsdp_hint != 0 { Some(rsdp_hint) } else { find_rsdp() }) else {
         crate::warn!("acpi", "no ACPI tables found");
         return;
@@ -113,6 +148,11 @@ pub fn init(rsdp_hint: u64) {
             f.pm1a_evt = le32(t, 56);
             f.pm1b_evt = le32(t, 60);
             f.pm1_evt_len = t[88];
+            f.gpe0_blk = le32(t, 80);
+            f.gpe1_blk = le32(t, 84);
+            f.gpe0_len = t[92];
+            f.gpe1_len = t[93];
+            f.gpe1_base = t[94];
             f.fixed_power_button = le32(t, 112) & (1 << 4) == 0;
             if t.len() >= 129 {
                 f.reset_supported = le32(t, 112) & (1 << 10) != 0;
@@ -206,8 +246,10 @@ fn enable_acpi_mode(f: &Fadt) {
 /// PM1 status: the power button was pressed.
 const PWRBTN: u16 = 1 << 8;
 
-/// Set by the SCI when the power button was pressed.
+/// Set when the computer should turn itself off: the power button, or the
+/// AML task (battery empty, too hot).
 static POWER_BUTTON: crate::task::Event = crate::task::Event::new();
+static POWER_REASON: IrqLock<&'static str> = IrqLock::new("power button pressed");
 
 /// The PM1 status and enable registers of the first and second block.
 fn pm1_regs(f: &Fadt) -> impl Iterator<Item = (u16, u16)> {
@@ -215,6 +257,7 @@ fn pm1_regs(f: &Fadt) -> impl Iterator<Item = (u16, u16)> {
     [f.pm1a_evt, f.pm1b_evt].into_iter().filter(|&b| b != 0 && b <= 0xFFFF).map(move |b| (b as u16, (b + half) as u16))
 }
 
+/// The SCI: the fixed power button, and the GPEs, handed to the AML task.
 fn sci() {
     let Some(f) = ACPI.lock().fadt else { return };
     for (status, enable) in pm1_regs(&f) {
@@ -222,52 +265,97 @@ fn sci() {
         if pending != 0 {
             outw(status, pending); // write 1 to clear
             if pending & PWRBTN != 0 {
+                *POWER_REASON.lock() = "power button pressed";
                 POWER_BUTTON.signal();
             }
         }
+    }
+    if gpe::sci() {
+        aml::WAKE.signal();
     }
 }
 
 /// The interrupt line of ACPI events (for the device list), if there is one.
 pub fn sci_line() -> Option<u8> {
-    ACPI.lock().fadt.filter(|f| f.fixed_power_button && f.pm1a_evt != 0 && f.sci < 16).map(|f| f.sci as u8)
+    ACPI.lock().fadt.filter(|f| f.sci < 16 && f.sci != 2 && (f.pm1a_evt != 0 || f.gpe0_blk != 0)).map(|f| f.sci as u8)
 }
 
-/// Listens for the power button: pressing it turns the computer off cleanly
-/// (the file systems are written out first).
+/// Asks the power task to turn the computer off cleanly.
+pub(crate) fn request_power_off(reason: &'static str) {
+    *POWER_REASON.lock() = reason;
+    POWER_BUTTON.signal();
+}
+
+/// Switches the chipset to ACPI mode, listens for the power button and the
+/// GPEs, and starts the AML task. Pressing the power button turns the
+/// computer off cleanly (the file systems are written out first).
 pub fn start_events() {
     let Some(f) = ACPI.lock().fadt else { return };
-    let Some(line) = sci_line() else { return };
-    if f.pm1_evt_len < 4 {
+    let Some(line) = sci_line() else {
+        crate::debug!("acpi", "no SCI: ACPI events are off");
         return;
-    }
+    };
     enable_acpi_mode(&f);
-    for (status, enable) in pm1_regs(&f) {
-        outw(status, 0xFFFF);
-        outw(enable, (inw(enable) | PWRBTN) & PWRBTN);
+    gpe::init(f.gpe0_blk, f.gpe0_len, f.gpe1_blk, f.gpe1_len, f.gpe1_base);
+    if f.pm1_evt_len >= 4 {
+        let button = if f.fixed_power_button { PWRBTN } else { 0 };
+        for (status, enable) in pm1_regs(&f) {
+            outw(status, 0xFFFF);
+            outw(enable, button);
+        }
     }
     crate::dev::irq::attach_kernel(line, sci);
-    crate::task::spawn("acpi", || loop {
+    crate::task::spawn("power", || loop {
         POWER_BUTTON.wait(None);
-        crate::info!("acpi", "power button pressed: turning off");
+        let reason = *POWER_REASON.lock();
+        crate::info!("acpi", "{reason}: turning off");
         power_off();
     });
-    crate::debug!("acpi", "power button on line {line}");
+    crate::debug!("acpi", "SCI on line {line}, {} GPEs", gpe::count());
+    aml::start();
+}
+
+/// Writes SLP_TYP and SLP_EN: the chipset enters the sleep state.
+fn enter_sleep(f: &Fadt, (a, b): (u16, u16)) {
+    // Wake events that are pending would wake the computer at once.
+    for (status, _) in pm1_regs(f) {
+        outw(status, 0xFFFF);
+    }
+    gpe::disable_all();
+    for (reg, typ) in [(f.pm1a_cnt, a), (f.pm1b_cnt, b)] {
+        if reg != 0 && reg <= 0xFFFF {
+            let v = inw(reg as u16) & !(7 << 10 | 1 << 13);
+            outw(reg as u16, v | (typ & 7) << 10);
+        }
+    }
+    for (reg, typ) in [(f.pm1a_cnt, a), (f.pm1b_cnt, b)] {
+        if reg != 0 && reg <= 0xFFFF {
+            let v = inw(reg as u16) & !(7 << 10 | 1 << 13);
+            outw(reg as u16, v | (typ & 7) << 10 | 1 << 13);
+        }
+    }
 }
 
 /// Turns the machine off. Returns only if every method failed.
 pub fn power_off() {
     crate::fs::sync_all();
+    // The firmware prepares (_PTS: lights, fans, the embedded controller)
+    // and says which sleep type S5 is.
+    let from_aml = aml::with(3000, |aml| {
+        if aml.find("\\_PTS").is_some() {
+            let _ = aml.evaluate("\\_PTS", &[arcaml::Value::Integer(5)]);
+        }
+        aml.sleep_type(5)
+    })
+    .flatten();
     cpu::disable_irq();
     let fadt = ACPI.lock().fadt;
     if let Some(f) = fadt {
         if f.pm1a_cnt != 0 {
             enable_acpi_mode(&f);
-            if let Some((a, b)) = s5_sleep_type(f.dsdt) {
-                outw(f.pm1a_cnt as u16, (a << 10) | (1 << 13));
-                if f.pm1b_cnt != 0 {
-                    outw(f.pm1b_cnt as u16, (b << 10) | (1 << 13));
-                }
+            let slp = from_aml.map(|(a, b)| (a as u16, b as u16)).or_else(|| s5_sleep_type(f.dsdt));
+            if let Some(slp) = slp {
+                enter_sleep(&f, slp);
             }
         }
     }

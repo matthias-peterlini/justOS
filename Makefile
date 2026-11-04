@@ -16,7 +16,7 @@
 #   make test-compat   run a Linux and a Windows program on arcOS and check them
 #   make test-audio    play sounds on every emulated sound card and check them
 #   make test-display  switch the resolution on every emulated display
-#   make test-acpi     press the power button and check that arcOS turns off
+#   make test-acpi     power button, then a laptop's battery and sensors (AML)
 #   make test-net      TCP, HTTP and HTTPS against servers on this machine
 #   make test-linux    Linux programs with threads, sockets, poll (C, Rust, Go)
 #   make shots      boot headless, drive the GUI and save screenshots (build/shots)
@@ -179,7 +179,7 @@ photos:
 	tools/assets/gen_thumbs.py rootfs/system/gui/wallpapers
 
 check:
-	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs -p arcgfx -p arctls -p arczip -p arcjson -p arcc-core -p arc-vm -p arcweb -p arcjs -p arcdex
+	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs -p arcgfx -p arctls -p arczip -p arcjson -p arcc-core -p arc-vm -p arcweb -p arcjs -p arcdex -p arcaml
 	cd tools && $(CARGO) test --release
 
 updates: root tools

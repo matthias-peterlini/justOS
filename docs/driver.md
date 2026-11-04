@@ -360,13 +360,14 @@ della scheda non funzionano.
 loader UEFI sceglie un modo grande del GOP (non più 1024x768 fisso), così
 anche sulle schede vere lo schermo è nitido.
 
-Il pulsante di accensione non ha un driver: lo gestisce il kernel (ACPI,
-`make test-acpi`), e premerlo spegne il computer in modo pulito.
+Il pulsante di accensione, la batteria, l'alimentatore, il coperchio e le
+temperature dei portatili non hanno un driver: li gestisce il kernel
+eseguendo l'AML del firmware (ACPI, vedi
+[architettura](architettura.md#acpi-e-aml), `make test-acpi`).
 
 Mancano ancora i driver per: Wi-Fi, l'accelerazione e il cambio di
 risoluzione delle schede video vere (Intel, AMD, NVIDIA: hanno lo schermo
-tramite `fbgeneric`), lettori di schede Realtek e Genesys su PCIe, batteria
-dei portatili.
+tramite `fbgeneric`), lettori di schede Realtek e Genesys su PCIe.
 
 ### Il pacchetto
 

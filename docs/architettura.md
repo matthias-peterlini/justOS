@@ -127,8 +127,44 @@ La metà bassa appartiene al programma in esecuzione.
 | rete | `net.rs` | ARP, IPv4, ICMP, UDP, DHCP, DNS |
 | programmi | `user.rs` | processi, spazi di indirizzi, caricatore, chiamate di sistema (anche le finestre, `WIN_*`) |
 | negozio | `store.rs` | i pacchetti di `sys:/store`: elenco, installazione, rimozione |
-| ACPI | `acpi.rs` | tabelle, spegnimento (S5), riavvio, pulsante di accensione |
+| ACPI | `acpi/` | tabelle, spegnimento (`_PTS`, S5), riavvio, pulsante di accensione; l'AML del firmware: GPE, embedded controller, batteria, alimentatore, coperchio, temperature |
 | shell | `shell.rs` | l'interfaccia a riga di comando |
+
+### ACPI e AML
+
+Il firmware descrive il computer con le tabelle ACPI; la DSDT e le SSDT
+contengono codice, l'AML, che solo lui sa come parla al suo hardware:
+quanto è carica la batteria, se il coperchio è chiuso, quanto è caldo il
+processore. arcOS lo esegue con il suo interprete, `arcaml`
+(`system/libs/arcaml`, senza `std`, provato anche sul PC di sviluppo con
+`cargo test -p arcaml` e con le tabelle di portatili veri). Copre l'AML
+che i firmware usano davvero: tipi, pacchetti, campi (anche Index e Bank),
+buffer field, metodi con argomenti e variabili locali, `While` con limite
+di tempo, mutex ed eventi, `Notify`, `_OSI` (risponde come Windows, come
+fa Linux), regioni in memoria, I/O, configurazione PCI, embedded controller
+e CMOS.
+
+Nel kernel (`acpi/`) l'interprete vive in un thread suo, `acpi`, con uno
+stack da 1 MiB: carica le tabelle, chiama `_REG`, `_STA` e `_INI` dei
+dispositivi, prende le porte dell'embedded controller (dalla ECDT o dal
+`_CRS` del dispositivo PNP0C09) e abilita i GPE con un metodo `_Lxx`/`_Exx`.
+L'interruzione SCI segna quali GPE sono scattati e lo sveglia; lui esegue
+i metodi (per l'embedded controller, i `_Qxx` degli eventi in coda) e
+raccoglie i `Notify`. Il resto del kernel gli chiede qualcosa con
+`aml::with` (una coda di lavori con risposta), così l'AML gira sempre in
+un solo posto.
+
+`acpi/power.rs` legge batterie (`_BIX` o `_BIF`, `_BST`), alimentatore
+(`_PSR`), coperchio (`_LID`) e zone termiche (`_TMP`, `_CRT`) all'avvio, a
+ogni `Notify` e ogni 30 secondi (10 per le temperature). Avvisa al 10% e al
+5%, spegne il computer in modo pulito quando la batteria è vuota o una
+zona resta sopra la temperatura critica. Lo stato si vede nella barra in
+alto, nel centro di controllo, in Info sistema e con `acpi` nel Terminale
+(`acpi tree` mostra i dispositivi, `acpi eval` esegue un metodo).
+
+`make test-acpi` prova il pulsante di accensione su PIIX4 e Q35 e un
+«portatile»: QEMU con la SSDT di `scripts/acpi/laptop.asl` (batteria,
+alimentatore, coperchio, zona termica), di cui scarica la batteria.
 
 ### Dispositivi e driver
 
