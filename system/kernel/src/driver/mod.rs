@@ -1,11 +1,14 @@
 //! The driver manager: finds, installs and loads drivers by itself.
 //!
-//! Drivers are `.adp` packages (see `arcdk::package`) kept in two places:
+//! Drivers are `.adp` packages (see `arcdk::package`) kept in three places:
 //!
 //! * `boot:/drivers` — the drivers needed before the system disk is mounted
 //!   (disk controllers, keyboard), inside the boot pack;
-//! * `sys:/system/drivers` — the **driver store**: every driver available to
-//!   this installation.
+//! * `boot:/system` — every other driver that comes with the system, also
+//!   in the boot pack (so a system update brings its drivers along, and
+//!   going back to the previous system brings back its own); used from the
+//!   second pass on, as before the store;
+//! * `sys:/system/drivers` — the **driver store**: drivers added later.
 //!
 //! Whenever a device has no driver, the manager matches the device against
 //! the manifests of every package, picks the most specific match (newest
@@ -35,11 +38,14 @@ use arcdk::{DriverEntry, DriverInfo, Status, ABI_VERSION, DRIVER_MAGIC, E_BUSY, 
 
 pub const STORE: &str = "sys:/system/drivers";
 pub const BOOT_DRIVERS: &str = "boot:/drivers";
+pub const SYSTEM_DRIVERS: &str = "boot:/system";
 pub const INBOX: &str = "sys:/inbox";
 
+/// Where a package is. With the same version, the later one wins.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Origin {
     Boot,
+    System,
     Store,
 }
 
@@ -47,6 +53,7 @@ impl Origin {
     pub fn name(self) -> &'static str {
         match self {
             Origin::Boot => "boot pack",
+            Origin::System => "system",
             Origin::Store => "store",
         }
     }
@@ -93,9 +100,11 @@ impl Loaded {
 struct Manager {
     packages: Vec<PackageEntry>,
     loaded: Vec<Loaded>,
+    /// Past the first pass: the system's other drivers count too.
+    all: bool,
 }
 
-static MANAGER: Mutex<Manager> = Mutex::new(Manager { packages: Vec::new(), loaded: Vec::new() });
+static MANAGER: Mutex<Manager> = Mutex::new(Manager { packages: Vec::new(), loaded: Vec::new(), all: false });
 
 /// Reads and validates a package file.
 fn read_package(path: &Path) -> Result<(Vec<u8>, String), String> {
@@ -129,6 +138,9 @@ impl Manager {
     fn refresh(&mut self) {
         let mut packages = Vec::new();
         scan_folder(BOOT_DRIVERS, Origin::Boot, &mut packages);
+        if self.all {
+            scan_folder(SYSTEM_DRIVERS, Origin::System, &mut packages);
+        }
         scan_folder(STORE, Origin::Store, &mut packages);
         self.packages = packages;
     }
@@ -354,9 +366,11 @@ pub fn wait_for_system(ms: u64) {
     }
 }
 
-/// After the system volume is mounted: the whole store.
+/// After the system volume is mounted: every driver of the system and the
+/// whole store.
 pub fn configure_all() -> usize {
     let mut m = MANAGER.lock();
+    m.all = true;
     m.refresh();
     m.configure()
 }
@@ -431,8 +445,8 @@ pub fn remove(name: &str) -> Result<String, String> {
     if removed {
         notes.insert(0, String::from("removed from the driver store"));
     }
-    if entries.iter().any(|p| p.origin == Origin::Boot) {
-        notes.push(String::from("a copy stays in the boot pack"));
+    if entries.iter().any(|p| p.origin != Origin::Store) {
+        notes.push(String::from("the copy that comes with the system stays"));
     }
     m.refresh();
     // Another driver may take over the freed devices.

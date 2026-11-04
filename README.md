@@ -37,7 +37,9 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
   `rootfs/system/gui/wallpapers/CREDITS.txt`).
 - **Al sicuro e aggiornato**: una password blocca lo schermo (all'avvio,
   con logo+L o dopo qualche minuto di pausa), Stamp salva una schermata in
-  Immagini, e arcOS avvisa quando su GitHub c'è una versione nuova. Le app
+  Immagini. arcOS si aggiorna da solo come un telefono: la versione nuova
+  va nell'altro dei due slot di sistema, parte al riavvio e, se non
+  funziona, si torna da soli alla precedente. Le app
   del Negozio girano in una sandbox: vedono solo la propria cartella e i
   file scelti dall'utente, e per le altre cartelle chiedono il permesso
   («Disegno vuole usare la cartella Immagini»), che si rivede in
@@ -132,7 +134,7 @@ memoria e `arcos.iso` nel lettore CD.
 
 | Parte | Cosa fa | Dettagli |
 |---|---|---|
-| **ArcBoot** | loader per BIOS (MBR + secondo stadio in assembly) e per UEFI (un'applicazione EFI in Rust); entrambi passano al kernel la stessa `BootInfo` | [architettura](docs/architettura.md#avvio) |
+| **ArcBoot** | loader per BIOS (MBR + secondo stadio in assembly) e per UEFI (un'applicazione EFI in Rust); entrambi scelgono uno dei due slot di sistema (aggiornamenti A/B con ritorno indietro) e passano al kernel la stessa `BootInfo` | [architettura](docs/architettura.md#aggiornamenti-del-sistema-ab) |
 | **Kernel** | 64 bit, memoria virtuale a 4 livelli, scheduler preemptivo, thread, code di attesa, MSI/MSI-X, ACPI con un interprete AML scritto da zero (spegnimento, sospensione in RAM, batteria, temperature) | [architettura](docs/architettura.md#kernel) |
 | **Driver** | pacchetti `.adp` indipendenti dal kernel: il kernel confronta i manifesti con l'hardware e carica il driver giusto da solo, all'avvio e a sistema avviato | [driver](docs/driver.md) |
 | **ArcFS** | il file system nativo: blocchi da 4 KiB, extent, controllo di coerenza; volumi con nome (`sys:`, `ram:`, `chiavetta:`) | [architettura](docs/architettura.md#file-system-arcfs) |
@@ -182,6 +184,7 @@ make test-drivers   # un avvio per ogni disco, scheda di rete, controller USB e 
 make test-audio     # suoni su ogni scheda audio emulata, registrati e controllati
 make test-display   # cambio di risoluzione e risveglio su ogni scheda video emulata
 make test-acpi      # pulsante di accensione, batteria, sospensione e risveglio
+make test-update    # aggiornamento nell'altro slot, prova, conferma, ritorno indietro
 SLEEP=1 make test-drivers  # gli stessi, dopo una sospensione (anche test-audio)
 make test-compat    # programmi Linux, Windows (anche con finestre), Java e Android
 make test-arcscript # programmi ArcScript
@@ -222,6 +225,7 @@ net / ping 10.0.2.2    rete
 suspend 10             sospende il computer per 10 secondi
 install sudoku         un programma dal Negozio
 updates check          aggiornamenti delle app
+sysupdate              i due slot di sistema (check, install, rollback)
 cd sys:/home/arcscript
 hello.as               un programma ArcScript
 shutdown / restart

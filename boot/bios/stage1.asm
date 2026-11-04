@@ -107,7 +107,7 @@ times 0x180 - ($ - $$) db 0
 boot_stage2_lba     dd 0
 boot_system_lba     dd 0            ; a live system volume to load, if any
 boot_system_sectors dd 0
-boot_reserved       dd 0
+boot_ctl_lba        dd 0            ; ARCOS/BOOT.CTL: picks the system slot
 boot_magic          dd 0            ; "ARCB"
 boot_stage2_sectors dw 0
 boot_flags          dw 0            ; BOOT_CD

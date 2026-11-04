@@ -18,12 +18,13 @@ controller USB aggiunge ogni interfaccia di ogni dispositivo collegato
 dispositivo viene scollegato (`device_remove`). Per quei dispositivi la
 scelta del driver funziona esattamente come per quelli PCI.
 
-I pacchetti stanno in due posti:
+I pacchetti stanno in tre posti:
 
 | Dove | Cosa |
 |---|---|
 | `boot:/drivers` | il **pacchetto di avvio** (boot pack): i driver che servono prima che il disco di sistema sia montato. Il loader lo carica in memoria insieme al kernel |
-| `sys:/system/drivers` | il **magazzino** (driver store): tutti i driver disponibili per questa installazione |
+| `boot:/system` | gli altri driver che vengono con il sistema, nello stesso pacchetto: arrivano e se ne vanno con la sua versione (vedi gli [aggiornamenti A/B](architettura.md#aggiornamenti-del-sistema-ab)) |
+| `sys:/system/drivers` | il **magazzino** (driver store): i driver aggiunti dopo (`drv add`, `sys:/inbox`), anche versioni più nuove di quelli del sistema |
 
 Per ogni dispositivo senza driver, il gestore:
 
@@ -32,15 +33,16 @@ Per ogni dispositivo senza driver, il gestore:
    `pci-class` o `usb-class` classe:sottoclasse:interfaccia 60,
    classe:sottoclasse 40, la sola classe 20;
 2. a parità di punteggio sceglie la versione più recente; a parità di
-   versione preferisce il magazzino al pacchetto di avvio;
+   versione preferisce il magazzino ai driver del sistema, e questi al
+   pacchetto di avvio;
 3. carica il modulo (una volta sola, anche se serve a più dispositivi) e
    chiama `probe` sul dispositivo. Se `probe` rifiuta, prova il candidato
    successivo.
 
 Questo succede in tre momenti:
 
-- **all'avvio**: prima con i driver del pacchetto di avvio (così si monta
-  `sys:`), poi con tutto il magazzino;
+- **all'avvio**: prima con i driver di `boot:/drivers` (così si monta
+  `sys:`), poi con tutti gli altri e il magazzino;
 - **dopo ogni scansione** dei dispositivi (`dev scan`);
 - **quando arriva un pacchetto nuovo**. Il thread `drvmon` controlla
   `sys:/inbox` ogni due secondi. Un pacchetto lasciato lì viene verificato

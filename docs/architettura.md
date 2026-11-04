@@ -15,16 +15,25 @@ sia da UEFI:
 |---|---|
 | 0 | MBR: codice dello stadio 1, tabella di avvio (da 0x180, firma `ARCB` a 0x190), tabella delle partizioni |
 | 1–63 | stadio 2 del loader BIOS |
-| 64– | kernel (immagine piatta) e, subito dopo, il pacchetto di avvio |
-| partizione 2 (tipo 0xEF) | partizione di sistema EFI, FAT16, 16 MiB: `EFI/BOOT/BOOTX64.EFI`, `ARCOS/KERNEL.BIN`, `ARCOS/BOOTPACK.IMG` |
+| 2048– (partizione 2, tipo 0xEF) | partizione di sistema EFI, FAT16: `EFI/BOOT/BOOTX64.EFI`, `ARCOS/BOOT.CTL` e i due **slot di sistema** `ARCOS/SLOTA.BIN`, `ARCOS/SLOTB.BIN` (24 MiB l'uno, `make SLOT_SIZE=…`) |
 | partizione 1 (tipo 0xAC) | il volume ArcFS "System", che diventa `sys:` |
 
-Il **pacchetto di avvio** è un piccolo volume ArcFS in sola lettura con i
-driver marcati `boot = yes` (dischi, controller USB, tastiere e chiavette
-USB). Il loader lo carica in
-memoria e il kernel lo monta come `boot:`. Così il kernel può leggere il
-disco di sistema con un driver normale, installabile e aggiornabile,
-invece di averne uno incorporato.
+Uno **slot** contiene una versione del sistema: un settore di intestazione
+(versione, posizioni, SHA-256 del resto), il kernel (immagine piatta) e il
+pacchetto di avvio. Su un disco nuovo i due slot contengono lo stesso
+sistema; `BOOT.CTL` (un settore) dice quale si avvia. I file sono contigui:
+il loader BIOS e il kernel li raggiungono per settori, il loader UEFI come
+file. La tabella di avvio dell'MBR punta a `BOOT.CTL` e, per il caso in cui
+sia illeggibile, al kernel e al pacchetto dello slot A. Vedi
+[Aggiornamenti del sistema](#aggiornamenti-del-sistema-ab).
+
+Il **pacchetto di avvio** è un piccolo volume ArcFS in sola lettura con
+tutti i driver che vengono con il sistema: in `drivers/` quelli marcati
+`boot = yes` (dischi, controller USB, tastiere e chiavette USB), in
+`system/` gli altri. Il loader lo carica in memoria e il kernel lo monta
+come `boot:`. Così il kernel può leggere il disco di sistema con un driver
+normale, invece di averne uno incorporato, e una versione del sistema
+porta con sé i suoi driver.
 
 ### Il CD live
 
@@ -38,7 +47,7 @@ per UEFI (`tools/arctool/src/iso.rs`):
 | poi | stadio 2, kernel |
 | poi | immagine FAT dell'avvio UEFI: `BOOTX64.EFI`, `KERNEL.BIN`, `BOOTPACK.IMG`, `SYSTEM.IMG` |
 
-`SYSTEM.IMG` è il volume "System" (16 MiB, `make LIVE_SIZE=…`). Il loader
+`SYSTEM.IMG` è il volume "System" (48 MiB, `make LIVE_SIZE=…`). Il loader
 BIOS legge il pacchetto di avvio e il volume di sistema direttamente dai
 settori dell'immagine FAT, dove i file sono contigui e allineati a 2048
 byte. Entrambi i loader caricano il volume di sistema in memoria e lo
@@ -54,8 +63,9 @@ lettori CD.
   settori sono di 2048 byte e i loader convertono.
 - **Stadio 2**, in modo reale e "unreal":
   1. abilita la linea A20;
-  2. carica il kernel a 1 MiB, il pacchetto di avvio subito dopo e, da un
-     CD live, il volume di sistema dopo ancora;
+  2. sceglie lo slot da `BOOT.CTL` (sotto) e carica il suo kernel a 1 MiB,
+     il pacchetto di avvio subito dopo e, da un CD live, il volume di
+     sistema dopo ancora;
   3. legge la mappa della memoria (E820), copia il font 8×16 del BIOS e
      cerca la tabella RSDP di ACPI;
   4. sceglie con VBE un modo grafico lineare a 32 bit (preferito
@@ -69,9 +79,9 @@ lettori CD.
 GUID UEFI che usa sono dichiarati a mano in `efi.rs`. Esegue gli stessi
 passi del loader BIOS con i servizi del firmware:
 
-1. legge `KERNEL.BIN`, `BOOTPACK.IMG` e, se c'è (un CD live),
-   `SYSTEM.IMG` dalla partizione da cui è stato avviato (Loaded Image +
-   Simple File System);
+1. dalla partizione da cui è stato avviato (Loaded Image + Simple File
+   System) sceglie lo slot da `ARCOS/BOOT.CTL` e lo carica; su un CD live
+   legge invece `KERNEL.BIN`, `BOOTPACK.IMG` e `SYSTEM.IMG`;
 2. sceglie un modo grafico con il Graphics Output Protocol;
 3. prende l'RSDP dalla tabella di configurazione;
 4. costruisce le tabelle delle pagine, legge la mappa della memoria e la
@@ -90,7 +100,42 @@ Struttura `#[repr(C)]` definita in `system/kernel/src/boot.rs` (e copiata
 in `stage2.asm` e in `boot/uefi`): mappa della memoria, framebuffer
 (indirizzo, dimensioni, posizione dei canali di colore), font, posizione e
 dimensione del kernel, del pacchetto di avvio e del volume di sistema di un
-CD live, RSDP e tipo di loader.
+CD live, RSDP, tipo di loader e lo slot avviato (con i segni "in prova" e
+"l'altro non è partito").
+
+### Aggiornamenti del sistema (A/B)
+
+Un aggiornamento di arcOS è un'immagine di slot (`arctool slot`,
+`arcos-<versione>.slot`). Il kernel (`sysupdate.rs`) la scrive nello slot
+che **non** è in esecuzione, la rilegge e ne controlla lo SHA-256, e solo
+allora la rende quella che parte, **in prova**. `BOOT.CTL` tiene lo slot
+attivo, i tentativi che gli restano e quali slot sono noti per funzionare:
+
+```
+BOOT.CTL: "ARCCTL01" · settore di A · settore di B · settori per slot
+          slot attivo · tentativi · slot che funzionano (bit) · numero di sequenza
+          somma di controllo (i 128 dword sommano a 0)
+```
+
+1. Il loader avvia lo slot attivo. Se non è ancora noto per funzionare,
+   consuma un tentativo (riscrive `BOOT.CTL`) e lo avvia "in prova"; con i
+   tentativi finiti, o con l'intestazione rovinata, avvia l'altro.
+2. Il nuovo sistema, se gira per 15 secondi, si dichiara funzionante.
+   Un kernel panic durante la prova riavvia la macchina invece di fermarla;
+   un sistema in prova che non trova il proprio disco si riavvia da sé.
+3. Esauriti i due tentativi, il loader torna allo slot che funzionava; quel
+   sistema se ne accorge, torna attivo e lo dice con una notifica.
+
+Il sistema in esecuzione non viene mai scritto: un'interruzione di
+corrente a metà aggiornamento lascia le cose come stavano. L'intestazione
+dello slot nuovo si scrive per ultima.
+
+Gli aggiornamenti arrivano dall'indice firmato degli aggiornamenti
+(`system`: versione, indirizzo, dimensione e SHA-256 dell'immagine), lo
+stesso delle app: con gli aggiornamenti automatici si installano da soli e
+aspettano un riavvio, altrimenti Info sistema li propone. Info sistema
+permette anche di annullare un aggiornamento in attesa e di tornare alla
+versione precedente; dal terminale c'è `sysupdate`.
 
 ## Memoria
 

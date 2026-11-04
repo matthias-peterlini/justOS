@@ -697,7 +697,11 @@ pub fn panic_screen(args: fmt::Arguments<'_>) -> ! {
         let _ = Serial.write_str("\narcOS stopped: ");
         let _ = Serial.write_fmt(args);
         let _ = Serial.write_str("\n");
+        if crate::sysupdate::on_trial() {
+            let _ = Serial.write_str("This new version does not work: restarting into the previous one.\n");
+        }
         if crate::gui::panic_screen() {
+            crate::sysupdate::restart_after_panic();
             crate::arch::cpu::halt_forever();
         }
     }
@@ -721,6 +725,10 @@ pub fn panic_screen(args: fmt::Arguments<'_>) -> ! {
     }
     let _ = PanicOut.write_str("\n\x1b[41;97m arcOS stopped \x1b[0m\n\x1b[91m");
     let _ = PanicOut.write_fmt(args);
+    if crate::sysupdate::on_trial() {
+        let _ = PanicOut.write_str("\x1b[0m\n\nThis new version of arcOS does not work: restarting into the previous one.\n");
+        crate::sysupdate::restart_after_panic();
+    }
     let _ = PanicOut.write_str("\x1b[0m\n\nThe system has been halted. Restart the computer.\n");
     crate::arch::cpu::halt_forever();
 }

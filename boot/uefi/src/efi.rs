@@ -154,6 +154,7 @@ pub struct SimpleFileSystem {
 }
 
 pub const FILE_MODE_READ: u64 = 1;
+pub const FILE_MODE_WRITE: u64 = 2;
 
 #[repr(C)]
 pub struct File {
@@ -162,9 +163,12 @@ pub struct File {
     pub close: unsafe extern "efiapi" fn(*mut File) -> Status,
     pub delete: Unused,
     pub read: unsafe extern "efiapi" fn(*mut File, *mut usize, *mut u8) -> Status,
-    pub write: Unused,
+    pub write: unsafe extern "efiapi" fn(*mut File, *mut usize, *const u8) -> Status,
     pub get_position: unsafe extern "efiapi" fn(*mut File, *mut u64) -> Status,
     pub set_position: unsafe extern "efiapi" fn(*mut File, u64) -> Status,
+    pub get_info: Unused,
+    pub set_info: Unused,
+    pub flush: unsafe extern "efiapi" fn(*mut File) -> Status,
 }
 
 pub const PIXEL_RGB: u32 = 0;

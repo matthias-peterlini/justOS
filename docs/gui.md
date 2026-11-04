@@ -93,9 +93,15 @@ Presa a modello da macOS:
   la password; senza password basta Invio. La password non è salvata
   in chiaro: nelle impostazioni c'è un sale casuale e 20 000 passaggi di
   SHA-256.
-- **Aggiornamenti**: con la rete, all'avvio arcOS chiede a GitHub l'ultima
-  release e avvisa con una notifica se ce n'è una più nuova; *Info sistema →
-  Cerca aggiornamenti* lo richiede a mano.
+- **Aggiornamenti**: con la rete, all'avvio e una volta al giorno arcOS
+  legge l'indice firmato degli aggiornamenti. Una versione nuova si
+  scarica e si scrive nell'altro slot di sistema; con gli aggiornamenti
+  automatici succede da sola, poi una notifica chiede di riavviare. In
+  *Info sistema* il pulsante passa da *Cerca aggiornamenti* a *Installa*,
+  *Scarico…*, *Installo…* e *Riavvia*. Accanto ci sono *Annulla* e *Torna a
+  <versione precedente>*. Se la versione nuova non parte, arcOS torna da
+  solo alla precedente e lo dice. Una release su GitHub che l'indice non ha
+  ancora è solo annunciata.
 
 ### Le animazioni
 

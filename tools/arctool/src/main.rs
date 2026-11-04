@@ -5,11 +5,12 @@
 //! arctool pack <driver.manifest> <module> <out.adp>
 //! arctool inspect <file.adp>
 //! arctool image <out.img> --stage1 <bin> --stage2 <bin> --kernel <elf> --drivers <dir>
-//!               [--efi <BOOTX64.efi>] [--size 128M] [--files <dir>]
+//!               [--efi <BOOTX64.efi>] [--size 256M] [--files <dir>] [--version <v>] [--slot-size 24M]
 //! arctool iso <out.iso> (the same, --efi required) [--size 16M]   a live CD
+//! arctool slot <out.slot> --kernel <elf> --drivers <dir> [--version <v>]   a system update
 //! arctool fs <image> ls [path] | cat <path> | put <local> <path> | get <path> <local>
 //!               | mkdir <path> | rm <path> | check
-//! arctool updates <store dir> <out dir> --key <file> --base-url <url>   the signed index of app updates
+//! arctool updates <store dir> <out dir> --key <file> --base-url <url> [--slot <file>]   the signed index of updates
 //! arctool pubkey <key file>
 //! ```
 
@@ -17,6 +18,7 @@ mod disk;
 mod elf;
 mod fat;
 mod iso;
+mod slot;
 mod updates;
 
 use arcdk::manifest::Manifest;
@@ -32,11 +34,12 @@ type Result<T> = std::result::Result<T, String>;
 
 const KERNEL_LINK_BASE: u64 = 0xFFFF_FFFF_8010_0000;
 const SECTOR: u64 = 512;
-const KERNEL_LBA: u64 = 64;
-/// Stage 2 sits between the MBR and the kernel.
-const STAGE2_MAX_SECTORS: u64 = KERNEL_LBA - 1;
-/// Size of the EFI system partition (FAT16).
-const ESP_SIZE: u64 = 16 << 20;
+/// Stage 2 sits right after the MBR (stage 1 reads it in one go).
+const STAGE2_MAX_SECTORS: u64 = 63;
+/// Where the EFI system partition starts (1 MiB).
+const ESP_LBA: u64 = 2048;
+/// Room for one version of the system (kernel and boot pack).
+const SLOT_SIZE: u64 = 24 << 20;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -45,12 +48,13 @@ fn main() -> ExitCode {
         Some("inspect") => cmd_inspect(&args[1..]),
         Some("image") => cmd_image(&args[1..]),
         Some("iso") => cmd_iso(&args[1..]),
+        Some("slot") => cmd_slot(&args[1..]),
         Some("fs") => cmd_fs(&args[1..]),
         Some("mkfs") => cmd_mkfs(&args[1..]),
         Some("updates") => updates::cmd_updates(&args[1..]),
         Some("pubkey") => updates::cmd_pubkey(&args[1..]),
         _ => Err(String::from(
-            "usage:\n  arctool pack <driver.manifest> <module> <out.adp>\n  arctool inspect <file.adp>\n  arctool image <out.img> --stage1 <bin> --stage2 <bin> --kernel <elf> --drivers <dir> [--efi <BOOTX64.efi>] [--size 128M] [--files <dir>]\n  arctool iso <out.iso> --stage1 <bin> --stage2 <bin> --kernel <elf> --drivers <dir> --efi <BOOTX64.efi> [--size 16M] [--files <dir>]\n  arctool fs <image> ls [path] | cat <path> | put <local> <path> | get <path> <local> | mkdir <path> | rm <path> | check\n  arctool mkfs <image> [--size 64M] [--label Data]\n  arctool updates <store dir> <out dir> --key <file> --base-url <url> [--serial <n>]\n  arctool pubkey <key file>",
+            "usage:\n  arctool pack <driver.manifest> <module> <out.adp>\n  arctool inspect <file.adp>\n  arctool image <out.img> --stage1 <bin> --stage2 <bin> --kernel <elf> --drivers <dir> [--efi <BOOTX64.efi>] [--size 256M] [--files <dir>] [--version <v>] [--slot-size 24M]\n  arctool iso <out.iso> --stage1 <bin> --stage2 <bin> --kernel <elf> --drivers <dir> --efi <BOOTX64.efi> [--size 16M] [--files <dir>]\n  arctool slot <out.slot> --kernel <elf> --drivers <dir> [--version <v>]\n  arctool fs <image> ls [path] | cat <path> | put <local> <path> | get <path> <local> | mkdir <path> | rm <path> | check\n  arctool mkfs <image> [--size 64M] [--label Data]\n  arctool updates <store dir> <out dir> --key <file> --base-url <url> [--serial <n>] [--slot <file>]\n  arctool pubkey <key file>",
         )),
     };
     match result {
@@ -140,14 +144,20 @@ fn load_drivers(dir: &Path) -> Result<Vec<DriverFile>> {
     Ok(out)
 }
 
-/// The boot pack: a small read-only ArcFS image with the boot drivers.
+/// The boot pack: a small read-only ArcFS image with every driver that
+/// comes with the system. Those needed before the system disk is mounted
+/// are in `drivers/`, the others in `system/`; both travel with the kernel,
+/// so a system update brings its own drivers.
 fn build_boot_pack(drivers: &[DriverFile]) -> Result<Vec<u8>> {
-    let payload: usize = drivers.iter().filter(|d| d.boot).map(|d| d.bytes.len().div_ceil(BLOCK_SIZE) + 2).sum();
+    let payload: usize = drivers.iter().map(|d| d.bytes.len().div_ceil(BLOCK_SIZE) + 2).sum();
     let blocks = (payload + 32).max(64);
     let mut fs = Fs::format(MemDisk::new(blocks), "Boot", &CLOCK).map_err(|e| format!("boot pack: {e}"))?;
-    fs.create_dirs("drivers").map_err(|e| format!("boot pack: {e}"))?;
-    for d in drivers.iter().filter(|d| d.boot) {
-        fs.write_file(&format!("drivers/{}", d.file_name), &d.bytes).map_err(|e| format!("boot pack: {}: {e}", d.name))?;
+    for dir in ["drivers", "system"] {
+        fs.create_dirs(dir).map_err(|e| format!("boot pack: {e}"))?;
+    }
+    for d in drivers {
+        let dir = if d.boot { "drivers" } else { "system" };
+        fs.write_file(&format!("{dir}/{}", d.file_name), &d.bytes).map_err(|e| format!("boot pack: {}: {e}", d.name))?;
     }
     fs.sync().map_err(|e| format!("boot pack: {e}"))?;
     Ok(fs.into_device().data)
@@ -185,12 +195,17 @@ struct Inputs {
     pack: Vec<u8>,
     files: Option<String>,
     efi: Option<Vec<u8>>,
+    /// The system's version, for the slot header.
+    version: String,
+    slot_size: u64,
 }
 
-fn parse_inputs(args: &[String]) -> Result<Inputs> {
+/// `stages`: whether the BIOS loader's stages are needed (not for a slot).
+fn parse_inputs(args: &[String], stages: bool) -> Result<Inputs> {
     let mut out = None;
     let mut size = None;
     let (mut stage1, mut stage2, mut kernel, mut drivers, mut files, mut efi) = (None, None, None, None, None, None);
+    let (mut version, mut slot_size) = (None, SLOT_SIZE);
     let mut i = 0;
     while i < args.len() {
         let next = || args.get(i + 1).cloned().ok_or(format!("{} needs a value", args[i]));
@@ -202,6 +217,8 @@ fn parse_inputs(args: &[String]) -> Result<Inputs> {
             "--drivers" => drivers = Some(next()?),
             "--files" => files = Some(next()?),
             "--efi" => efi = Some(next()?),
+            "--version" => version = Some(next()?),
+            "--slot-size" => slot_size = parse_size(&next()?)?,
             a if a.starts_with("--") => return Err(format!("unknown option {a}")),
             a => {
                 out = Some(a.to_string());
@@ -212,12 +229,22 @@ fn parse_inputs(args: &[String]) -> Result<Inputs> {
         i += 2;
     }
     let out = out.ok_or("missing output file")?;
-    let stage1 = read(stage1.ok_or("missing --stage1")?)?;
-    let stage2 = read(stage2.ok_or("missing --stage2")?)?;
+    let (stage1, stage2) = if stages {
+        (read(stage1.ok_or("missing --stage1")?)?, read(stage2.ok_or("missing --stage2")?)?)
+    } else {
+        (vec![0; 512], Vec::new())
+    };
     let kernel_path = kernel.ok_or("missing --kernel")?;
     let kernel_elf = read(&kernel_path)?;
     let drivers = load_drivers(Path::new(&drivers.ok_or("missing --drivers")?))?;
     let efi = efi.map(read).transpose()?;
+    let version = version.unwrap_or_else(|| String::from("0"));
+    if version.len() > 31 {
+        return Err("the version is longer than 31 bytes".into());
+    }
+    if slot_size % (1 << 20) != 0 {
+        return Err("the slot size must be whole MiB".into());
+    }
 
     if stage1.len() != 512 {
         return Err("stage 1 must be exactly 512 bytes".into());
@@ -234,7 +261,7 @@ fn parse_inputs(args: &[String]) -> Result<Inputs> {
         return Err("kernel too big".into());
     }
     let pack = build_boot_pack(&drivers)?;
-    Ok(Inputs { out, size, stage1, stage2, flat, memsz, entry: elf.entry, drivers, pack, files, efi })
+    Ok(Inputs { out, size, stage1, stage2, flat, memsz, entry: elf.entry, drivers, pack, files, efi, version, slot_size })
 }
 
 impl Inputs {
@@ -250,15 +277,18 @@ impl Inputs {
         out
     }
 
-    /// Fills a freshly formatted system volume: the driver store, the usual
-    /// folders and the files of --files.
+    /// The slot image: header, kernel and boot pack.
+    fn slot(&self) -> Vec<u8> {
+        slot::build(&self.flat, self.memsz, self.entry, &self.pack, &self.version, slot::build_time())
+    }
+
+    /// Fills a freshly formatted system volume: the usual folders and the
+    /// files of --files. The driver store starts empty: the drivers that
+    /// come with the system are in the boot pack.
     fn fill_system<D: BlockDevice>(&self, fs: &mut Fs<D>) -> Result<()> {
         let fserr = |e: arcfs::Error| format!("system volume: {e}");
         for dir in ["system/drivers", "inbox", "home"] {
             fs.create_dirs(dir).map_err(fserr)?;
-        }
-        for d in &self.drivers {
-            fs.write_file(&format!("system/drivers/{}", d.file_name), &d.bytes).map_err(fserr)?;
         }
         if let Some(dir) = &self.files {
             copy_tree(fs, Path::new(dir), "")?;
@@ -271,11 +301,12 @@ impl Inputs {
     fn summary(&self) -> String {
         let boot: Vec<&str> = self.drivers.iter().filter(|d| d.boot).map(|d| d.name.as_str()).collect();
         format!(
-            "kernel {} KiB, boot pack {} KiB ({}), {} drivers in the store",
+            "arcOS {}, kernel {} KiB, boot pack {} KiB with {} drivers (at boot: {})",
+            self.version,
             self.flat.len() >> 10,
             self.pack.len() >> 10,
-            boot.join(", "),
-            self.drivers.len()
+            self.drivers.len(),
+            boot.join(", ")
         )
     }
 }
@@ -294,6 +325,8 @@ struct BootTable {
     entry: u64,
     system_lba: u64,
     system_sectors: u64,
+    /// BOOT.CTL, which picks the slot (0: start the kernel above).
+    ctl_lba: u64,
     /// 2048-byte sectors (a CD).
     cd: bool,
 }
@@ -304,7 +337,7 @@ impl BootTable {
         put(0x180, self.stage2_lba, 4);
         put(0x184, self.system_lba, 4);
         put(0x188, self.system_sectors, 4);
-        put(0x18C, 0, 4);
+        put(0x18C, self.ctl_lba, 4);
         put(0x190, u64::from(u32::from_le_bytes(*b"ARCB")), 4);
         put(0x194, self.stage2_sectors, 2);
         put(0x196, u64::from(self.cd), 2);
@@ -317,37 +350,60 @@ impl BootTable {
     }
 }
 
+/// A disk: MBR and stage 2, the EFI system partition (FAT16) with the UEFI
+/// loader, BOOT.CTL and the two system slots, then the system volume.
 fn cmd_image(args: &[String]) -> Result<()> {
-    let inputs = parse_inputs(args)?;
+    let inputs = parse_inputs(args, true)?;
     let out = &inputs.out;
-    let size = inputs.size.unwrap_or(128 << 20);
+    let size = inputs.size.unwrap_or(256 << 20);
     let stage2_sectors = (inputs.stage2.len() as u64).div_ceil(SECTOR);
-    let kernel_sectors = (inputs.flat.len() as u64).div_ceil(SECTOR);
-    let pack_lba = (KERNEL_LBA + kernel_sectors).next_multiple_of(8);
-    let pack_sectors = (inputs.pack.len() as u64).div_ceil(SECTOR);
-    // With a UEFI loader: the EFI system partition, then the system volume.
-    let esp_lba = (pack_lba + pack_sectors).next_multiple_of(2048).max(2048);
-    let esp_sectors = if inputs.efi.is_some() { ESP_SIZE / SECTOR } else { 0 };
+    let slot_image = inputs.slot();
+    let slot_size = inputs.slot_size;
+    if slot_image.len() as u64 > slot_size {
+        return Err(format!("the system ({} KiB) does not fit a slot of {} MiB", slot_image.len() >> 10, slot_size >> 20));
+    }
+    let header = slot::parse(&slot_image).expect("a slot just built");
+    // Two slots, the loader and a little room.
+    let esp_size = 2 * slot_size + (8 << 20);
+    let esp_lba = ESP_LBA;
+    let esp_sectors = esp_size / SECTOR;
     let part_lba = esp_lba + esp_sectors;
     let total_sectors = size / SECTOR;
-    if part_lba + 4096 > total_sectors {
-        return Err(format!("the image is too small: the system needs at least {} MiB", ((part_lba + 4096) * SECTOR) >> 20));
+    if part_lba + 8192 > total_sectors {
+        return Err(format!("the image is too small: the system needs at least {} MiB", ((part_lba + 8192) * SECTOR) >> 20));
     }
+
+    let mut padded = slot_image.clone();
+    padded.resize(slot_size as usize, 0);
+    let mut files = Vec::new();
+    if let Some(loader) = &inputs.efi {
+        files.push(("EFI/BOOT/BOOTX64.EFI", loader.clone()));
+    }
+    files.push(("ARCOS/BOOT.CTL", vec![0; SECTOR as usize]));
+    files.push(("ARCOS/SLOTA.BIN", padded.clone()));
+    files.push(("ARCOS/SLOTB.BIN", padded));
+    let (mut esp, offsets) = fat::build(esp_size, esp_lba, files)?;
+    let at = |name: &str| offsets.iter().find(|(n, _)| n == name).map(|(_, o)| *o).unwrap();
+    let (slot_a, slot_b) = (esp_lba + at("ARCOS/SLOTA.BIN") / SECTOR, esp_lba + at("ARCOS/SLOTB.BIN") / SECTOR);
+    let ctl_at = at("ARCOS/BOOT.CTL") as usize;
+    esp[ctl_at..ctl_at + SECTOR as usize].copy_from_slice(&slot::control(slot_a, slot_b, slot_size / SECTOR));
 
     let mut f = OpenOptions::new().read(true).write(true).create(true).truncate(true).open(out).map_err(|e| format!("{out}: {e}"))?;
     f.set_len(size).map_err(|e| format!("{out}: {e}"))?;
 
-    // MBR: boot code, boot table, the ArcFS partition and the ESP.
+    // MBR: boot code, boot table, the ArcFS partition and the ESP. Without
+    // a readable BOOT.CTL, stage 2 starts slot A from the table.
     let mut mbr = inputs.stage1.clone();
     BootTable {
         stage2_lba: 1,
         stage2_sectors,
-        kernel_lba: KERNEL_LBA,
-        kernel_sectors,
+        kernel_lba: slot_a + 1,
+        kernel_sectors: header.kernel_sectors as u64,
         memsz: inputs.memsz,
-        pack_lba,
-        pack_sectors,
+        pack_lba: slot_a + header.pack_sector as u64,
+        pack_sectors: header.pack_sectors as u64,
         entry: inputs.entry,
+        ctl_lba: esp_lba + ctl_at as u64 / SECTOR,
         ..BootTable::default()
     }
     .write(&mut mbr);
@@ -365,32 +421,41 @@ fn cmd_image(args: &[String]) -> Result<()> {
         entry[12..16].copy_from_slice(&(sectors as u32).to_le_bytes());
     };
     partition(0, true, 0xAC, part_lba, part_sectors);
-    if esp_sectors > 0 {
-        partition(1, false, 0xEF, esp_lba, esp_sectors);
-    }
+    partition(1, false, 0xEF, esp_lba, esp_sectors);
 
     let mut write_at = |lba: u64, data: &[u8]| -> Result<()> {
         f.seek(SeekFrom::Start(lba * SECTOR)).and_then(|_| f.write_all(data)).map_err(|e| format!("{out}: {e}"))
     };
     write_at(0, &mbr)?;
     write_at(1, &inputs.stage2)?;
-    write_at(KERNEL_LBA, &inputs.flat)?;
-    write_at(pack_lba, &inputs.pack)?;
-    if let Some(loader) = &inputs.efi {
-        let files = vec![
-            ("EFI/BOOT/BOOTX64.EFI", loader.clone()),
-            ("ARCOS/KERNEL.BIN", inputs.kernel_bin()),
-            ("ARCOS/BOOTPACK.IMG", inputs.pack.clone()),
-        ];
-        write_at(esp_lba, &fat::build(ESP_SIZE, esp_lba, files)?.0)?;
-    }
+    write_at(esp_lba, &esp)?;
 
     // The system volume.
     let file = f.try_clone().map_err(|e| e.to_string())?;
     let dev = FileBlocks { file, offset: part_lba * SECTOR, blocks: part_sectors * SECTOR / BLOCK_SIZE as u64 };
     let mut fs = Fs::format(dev, "System", &CLOCK).map_err(|e| format!("system volume: {e}"))?;
     inputs.fill_system(&mut fs)?;
-    println!("{out}: {} MiB, {} — {}", size >> 20, if esp_sectors > 0 { "BIOS and UEFI" } else { "BIOS" }, inputs.summary());
+    println!(
+        "{out}: {} MiB, {} — {}; slots of {} MiB, {} KiB used",
+        size >> 20,
+        if inputs.efi.is_some() { "BIOS and UEFI" } else { "BIOS" },
+        inputs.summary(),
+        slot_size >> 20,
+        slot_image.len() >> 10
+    );
+    Ok(())
+}
+
+/// A system update: the slot image alone (what `sysupdate install` writes
+/// into the other slot), named in the signed index by `arctool updates`.
+fn cmd_slot(args: &[String]) -> Result<()> {
+    let inputs = parse_inputs(args, false)?;
+    let image = inputs.slot();
+    if image.len() as u64 > SLOT_SIZE {
+        return Err(format!("the system ({} KiB) does not fit a slot of {} MiB", image.len() >> 10, SLOT_SIZE >> 20));
+    }
+    fs::write(&inputs.out, &image).map_err(|e| format!("{}: {e}", inputs.out))?;
+    println!("{}: {} KiB — {}", inputs.out, image.len() >> 10, inputs.summary());
     Ok(())
 }
 
@@ -401,7 +466,7 @@ fn cmd_image(args: &[String]) -> Result<()> {
 /// volume travels as a file that the loaders read into memory; the kernel
 /// mounts it as `sys:`, so changes last until the computer is turned off.
 fn cmd_iso(args: &[String]) -> Result<()> {
-    let inputs = parse_inputs(args)?;
+    let inputs = parse_inputs(args, true)?;
     let efi = inputs.efi.clone().ok_or("missing --efi: the ISO boots with UEFI as well")?;
     let system_size = inputs.size.unwrap_or(16 << 20);
 
@@ -446,6 +511,7 @@ fn cmd_iso(args: &[String]) -> Result<()> {
         entry: inputs.entry,
         system_lba: in_fat("ARCOS/SYSTEM.IMG"),
         system_sectors: (system.len() as u64).div_ceil(SECTOR),
+        ctl_lba: 0,
         cd: true,
     }
     .write(&mut stage1);

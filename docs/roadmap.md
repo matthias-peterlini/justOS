@@ -259,25 +259,32 @@ PCI che il firmware non ripristina da sé (`_PS0`/`_PS3`, D3cold).
 | Cosa | Stato |
 |---|---|
 | Avviso di una nuova versione (release di GitHub) | ✅ |
-| Aggiornamento atomico con ritorno indietro | ⬜ |
+| Aggiornamento atomico con ritorno indietro | ✅ due slot di sistema, prova e conferma, ritorno automatico (`make test-update`) |
 | Password con sale e 20 000 passaggi di SHA-256, blocco automatico | ✅ |
 | Richieste di permesso (fotocamera, microfono, cartelle) | ✅ |
 
-**Aggiornamenti atomici A/B.** Il disco ha già una partizione EFI e una
-ArcFS; il kernel e i file di sistema vanno in due partizioni di sistema (A
-e B) e i dati restano in una partizione utente:
+**Aggiornamenti atomici A/B.** Fatto (vedi
+[architettura](architettura.md#aggiornamenti-del-sistema-ab)): il kernel e
+il pacchetto di avvio con tutti i driver del sistema stanno in due slot
+nella partizione EFI (`ARCOS/SLOTA.BIN`, `SLOTB.BIN`), `ARCOS/BOOT.CTL`
+dice quale avviare.
 
-1. l'aggiornamento scarica l'immagine firmata nella partizione inattiva,
-   ne verifica l'hash;
-2. scrive nella partizione EFI quale avviare la prossima volta, con un
-   contatore di tentativi;
-3. al riavvio il sistema nuovo, se arriva al desktop, si dichiara buono;
-   se no, dopo due tentativi ArcBoot torna all'altro (come Android e
-   ChromeOS).
+1. L'aggiornamento arriva dall'indice firmato (`make updates` vi mette
+   l'immagine di slot) e si scrive nello slot inattivo. Il sistema lo
+   rilegge e ne verifica lo SHA-256.
+2. Lo slot nuovo diventa attivo con due tentativi, che ArcBoot (BIOS e
+   UEFI) consuma uno per avvio.
+3. Il sistema nuovo, se gira per 15 secondi, si dichiara buono. Un panic
+   durante la prova riavvia la macchina; con i tentativi finiti ArcBoot
+   torna all'altro slot, che lo segnala.
 
-ArcBoot (BIOS e UEFI, `boot/`) va esteso a leggere lo slot e il contatore.
-Stima: 1–2 mesi. Gli snapshot del file system (alla APFS o Btrfs) sono
-un'alternativa più elegante ma richiedono il copy-on-write in ArcFS.
+Info sistema installa, chiede il riavvio, annulla e torna alla versione
+precedente; dal terminale c'è `sysupdate`. Restano da fare:
+
+- l'immagine delta, per scaricare solo le differenze;
+- i file di sistema di `sys:` (`rootfs`) dentro lo slot (oggi si aggiornano
+  le app e il kernel con i driver, non i file come sfondi e font);
+- gli snapshot del file system, che richiedono il copy-on-write in ArcFS.
 
 **Permessi.** Fatto (vedi «Identità delle app e sandbox»): quando un'app
 apre una cartella fuori dalla sua, il kernel sospende la chiamata e mostra
@@ -294,7 +301,7 @@ mostra i permessi dichiarati nel manifest di ogni app.
 | 1 | ✅ IPC a porte, identità delle app, desktop virtuali, schede in File | fatto |
 | 2 | ✅ sandbox, permessi, aggiornamenti delle app, trascinamento | fatto |
 | 3 | ✅ interprete AML, batteria, temperatura, sospensione | fatto |
-| 4 | aggiornamenti A/B, HiDPI, indice dei file | 2–3 mesi |
+| 4 | ✅ aggiornamenti A/B; HiDPI, indice dei file | 2–3 mesi |
 | 5 | strato Linux completo (JavaScript in `arcweb`: fatto), poi Servo | 6–12 mesi |
 | 6 | Wi-Fi (un chip), Bluetooth HID e audio | 6–9 mesi |
 | 7 | accelerazione grafica (virgl, poi hardware vero) | 12 mesi e oltre |

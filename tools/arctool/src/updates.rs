@@ -1,7 +1,8 @@
-//! The signed index of app updates (`kernel/src/appupdate.rs` reads it).
+//! The signed index of updates (`kernel/src/appupdate.rs` and
+//! `kernel/src/sysupdate.rs` read it).
 //!
 //! ```text
-//! arctool updates <store dir> <out dir> --key <file> --base-url <url> [--serial <n>] [--system <version>]
+//! arctool updates <store dir> <out dir> --key <file> --base-url <url> [--serial <n>] [--system <version>] [--slot <file>]
 //! arctool pubkey <key file>
 //! ```
 //!
@@ -10,7 +11,9 @@
 //! `<id>-<version>.app` (and `.qoi`), `index.json` and `index.json.sig`;
 //! publish it at `<url>`. The key file is a private key: 32 bytes in hex.
 //! The serial defaults to the time, so a newer index always has a higher
-//! one; `--system` is the oldest arcOS the apps run on.
+//! one; `--system` is the oldest arcOS the apps run on. `--slot` adds a
+//! system update (from `arctool slot`) as `arcos-<version>.slot`, with its
+//! own signature next to it (`.slot.sig`) for installing it by hand.
 
 use arcjson::Value;
 use arctls::{ed25519, sha2::Sha256};
@@ -52,14 +55,15 @@ fn file_entry(base: &str, name: &str, data: &[u8]) -> Value {
 }
 
 pub fn cmd_updates(args: &[String]) -> Result<()> {
-    let usage = "usage: arctool updates <store dir> <out dir> --key <file> --base-url <url> [--serial <n>] [--system <version>]";
-    let (mut pos, mut key, mut base, mut serial, mut system) = (Vec::new(), None, None, None, None);
+    let usage = "usage: arctool updates <store dir> <out dir> --key <file> --base-url <url> [--serial <n>] [--system <version>] [--slot <file>]";
+    let (mut pos, mut key, mut base, mut serial, mut system, mut slot) = (Vec::new(), None, None, None, None, None);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--key" => key = it.next().cloned(),
             "--base-url" => base = it.next().cloned(),
             "--system" => system = it.next().cloned(),
+            "--slot" => slot = it.next().cloned(),
             "--serial" => serial = it.next().and_then(|s| s.parse::<u64>().ok()),
             _ => pos.push(a.clone()),
         }
@@ -104,7 +108,22 @@ pub fn cmd_updates(args: &[String]) -> Result<()> {
         println!("{id} {version}");
     }
     let count = apps.len();
-    let index = format!("{}\n", Value::object(vec![("serial", Value::Num(serial as f64)), ("apps", Value::Arr(apps))]));
+    let mut fields = vec![("serial", Value::Num(serial as f64)), ("apps", Value::Arr(apps))];
+    if let Some(file) = &slot {
+        let image = fs::read(file).map_err(|e| format!("{file}: {e}"))?;
+        let header = crate::slot::parse(&image).ok_or_else(|| format!("{file}: not a system slot image"))?;
+        if image.len() != header.total_sectors as usize * crate::slot::SECTOR {
+            return Err(format!("{file}: the size does not match its header"));
+        }
+        let name = format!("arcos-{}.slot", header.version);
+        fs::write(Path::new(out).join(&name), &image).map_err(|e| format!("{name}: {e}"))?;
+        // For `sysupdate install <file>` on arcOS.
+        let sig = ed25519::sign(&seed, &image);
+        fs::write(Path::new(out).join(format!("{name}.sig")), format!("{}\n", hex(&sig))).map_err(|e| format!("{name}.sig: {e}"))?;
+        fields.push(("system", Value::object(vec![("version", Value::string(&header.version)), ("slot", file_entry(&base, &name, &image))])));
+        println!("system {}", header.version);
+    }
+    let index = format!("{}\n", Value::object(fields));
     let sig = ed25519::sign(&seed, index.as_bytes());
     fs::write(Path::new(out).join("index.json"), &index).map_err(|e| format!("index.json: {e}"))?;
     fs::write(Path::new(out).join("index.json.sig"), format!("{}\n", hex(&sig))).map_err(|e| format!("index.json.sig: {e}"))?;

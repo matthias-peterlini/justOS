@@ -65,6 +65,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("ports", "", "named message ports and who owns them"),
     ("perms", "[allow|deny|ask <app> <perm>]", "what apps may use outside their sandbox"),
     ("updates", "[check|install <app>|all|auto on|off]", "updates of the installed apps"),
+    ("sysupdate", "[check|install [file]|rollback|cancel]", "arcOS updates: the two system slots"),
     ("dnd", "test", "check moving and copying files the way a drop does"),
     ("run", "<program> [args]", "start a program (also just: <program>)"),
     ("irq", "", "interrupt lines and message interrupts"),
@@ -845,6 +846,80 @@ impl Shell {
                     _ => println!("usage: updates | updates check | updates install <app>|all | updates auto on|off | updates test"),
                 }
             }
+            "sysupdate" => {
+                use crate::sysupdate as su;
+                use crate::update::State;
+                match (rest.first().copied(), rest.get(1).copied(), rest.get(2).copied()) {
+                    (None, _, _) => match su::status() {
+                        Ok(s) => {
+                            for (i, slot) in s.slots.iter().enumerate() {
+                                let mut notes = alloc::vec![if slot.good { "works" } else { "not confirmed" }];
+                                if i == s.booted {
+                                    notes.push("running");
+                                }
+                                if i == s.active && i != s.booted {
+                                    notes.push("starts next");
+                                }
+                                if i == s.active && !slot.good && s.tries > 0 {
+                                    notes.push(if s.tries == 1 { "1 try left" } else { "2 tries left" });
+                                }
+                                let version = slot.version.as_deref().unwrap_or("empty");
+                                println!("slot {}: {version} · {}", su::name(i), notes.join(" · "));
+                            }
+                            println!("{DIM}{} per slot{RESET}", crate::util::Size(s.slots[0].size));
+                            if !s.confirmed {
+                                println!("{DIM}this version is on trial: it is confirmed once it has run for a while{RESET}");
+                            }
+                            if s.fallback {
+                                println!("{DIM}the other slot did not start: this one took over{RESET}");
+                            }
+                        }
+                        Err(e) => println!("{ERR}sysupdate: {e}{RESET}"),
+                    },
+                    (Some("check"), None, _) => match crate::update::check_now(false) {
+                        State::UpToDate => println!("arcOS is up to date"),
+                        State::Available(v) => println!("arcOS {v} is available: sysupdate install"),
+                        State::Released(v) => println!("arcOS {v} is released on GitHub (not in the update index yet)"),
+                        State::Staged(v) => println!("arcOS {v} starts at the next restart"),
+                        State::Failed(e) => println!("{ERR}sysupdate: {e}{RESET}"),
+                        _ => println!("already busy"),
+                    },
+                    (Some("install"), None, _) => match crate::update::install() {
+                        Ok(v) => println!("arcOS {v} is installed in the other slot: it starts at the next restart"),
+                        Err(e) => println!("{ERR}sysupdate: {e}{RESET}"),
+                    },
+                    (Some("install"), Some(a), b) if (a == "--unsigned") == b.is_some() => {
+                        let (unsigned, file) = match b {
+                            Some(f) => (true, f),
+                            None => (false, a),
+                        };
+                        let result = fs::abs(file).and_then(|p| fs::read_file(&p)).map_err(|e| alloc::format!("{file}: {e}")).and_then(|data| {
+                            if !unsigned {
+                                let sig = fs::abs(&alloc::format!("{file}.sig"))
+                                    .and_then(|p| fs::read_file(&p))
+                                    .map_err(|_| alloc::format!("{file}.sig is missing (an image without a signature: --unsigned)"))?;
+                                if !crate::appupdate::signed(&data, &sig) {
+                                    return Err(String::from("the signature does not match"));
+                                }
+                            }
+                            su::install(&data, &mut |_, _| {})
+                        });
+                        match result {
+                            Ok(v) => println!("arcOS {v} is installed in the other slot: it starts at the next restart"),
+                            Err(e) => println!("{ERR}sysupdate: {e}{RESET}"),
+                        }
+                    }
+                    (Some("rollback"), None, _) => match su::rollback() {
+                        Ok(v) => println!("arcOS {v} starts at the next restart"),
+                        Err(e) => println!("{ERR}sysupdate: {e}{RESET}"),
+                    },
+                    (Some("cancel"), None, _) => match su::cancel() {
+                        Ok(()) => println!("this version starts again at the next restart"),
+                        Err(e) => println!("{ERR}sysupdate: {e}{RESET}"),
+                    },
+                    _ => println!("usage: sysupdate | sysupdate check | sysupdate install [[--unsigned] <file>] | sysupdate rollback | sysupdate cancel"),
+                }
+            }
             "dnd" => match rest.first().copied() {
                 Some("test") => {
                     crate::gui::dnd::self_test();
@@ -1147,7 +1222,7 @@ impl Shell {
             return;
         }
         for (name, args, text) in COMMANDS {
-            println!("  {BOLD}{name:<9}{RESET}{DIM}{args:<22}{RESET} {text}");
+            println!("  {BOLD}{name:<10}{RESET}{DIM}{args:<22}{RESET} {text}");
         }
         println!("\nPaths name a volume first: {BOLD}sys:/system/drivers{RESET}. Tab completes commands and paths.");
         if let Ok(apps) = fs::abs("sys:/apps").and_then(|p| fs::list_dir(&p)) {

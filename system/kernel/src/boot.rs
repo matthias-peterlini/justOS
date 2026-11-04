@@ -11,6 +11,13 @@ pub const FB_TEXT: u32 = 2;
 // loader: 1 = BIOS.
 pub const LOADER_UEFI: u32 = 2;
 
+/// The slot is new and not yet known to work: this start used up one of
+/// its tries.
+pub const SLOT_TRIAL: u32 = 0x100;
+/// The active slot had no tries left (or could not be read): the loader
+/// started the other one.
+pub const SLOT_FALLBACK: u32 = 0x200;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct BootInfo {
@@ -42,7 +49,9 @@ pub struct BootInfo {
     pub pack_size: u64,
     pub rsdp: u64,
     pub loader: u32,
-    pub _pad2: u32,
+    /// The system slot that started: 1 = A, 2 = B (0: a disk without
+    /// slots, a live CD), with [`SLOT_TRIAL`] and [`SLOT_FALLBACK`].
+    pub slot: u32,
     /// A live system volume (booted from a CD), or 0.
     pub system_phys: u64,
     pub system_size: u64,
@@ -58,6 +67,7 @@ const _: () = {
     assert!(offset_of!(BootInfo, pack_phys) == 0x68);
     assert!(offset_of!(BootInfo, rsdp) == 0x78);
     assert!(offset_of!(BootInfo, loader) == 0x80);
+    assert!(offset_of!(BootInfo, slot) == 0x84);
     assert!(offset_of!(BootInfo, system_phys) == 0x88);
 };
 

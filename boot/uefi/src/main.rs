@@ -3,8 +3,10 @@
 //! The firmware starts this program from the EFI system partition
 //! (`\EFI\BOOT\BOOTX64.EFI`). It does what the BIOS stages do, with the
 //! firmware's services instead of the BIOS:
-//!   1. reads `\ARCOS\KERNEL.BIN` and `\ARCOS\BOOTPACK.IMG` from the same
-//!      partition;
+//!   1. picks the system slot with `\ARCOS\BOOT.CTL` and reads the kernel
+//!      and the boot pack from `\ARCOS\SLOTA.BIN` or `SLOTB.BIN` on the same
+//!      partition (a live CD has no slots: `\ARCOS\KERNEL.BIN` and
+//!      `\ARCOS\BOOTPACK.IMG`);
 //!   2. picks a 32-bit framebuffer mode through the Graphics Output Protocol;
 //!   3. finds the ACPI tables in the firmware's configuration table;
 //!   4. builds the initial page tables, takes the memory map and leaves the
@@ -43,6 +45,16 @@ const KERNEL_FILE_MAGIC: &[u8; 8] = b"ARCKERN1";
 const BOOT_MAGIC: &[u8; 8] = b"ARCBOOT1";
 const PREFERRED_MODE: (u32, u32) = (1024, 768);
 
+// System slots (see tools/arctool/src/slot.rs).
+const CTL_MAGIC: &[u8; 8] = b"ARCCTL01";
+const SLOT_MAGIC: &[u8; 8] = b"ARCSLOT1";
+const SLOT_FILES: [&str; 2] = ["\\ARCOS\\SLOTA.BIN", "\\ARCOS\\SLOTB.BIN"];
+/// BootInfo slot flags: not yet known to work; the other slot should have
+/// started.
+const SLOT_TRIAL: u32 = 0x100;
+const SLOT_FALLBACK: u32 = 0x200;
+const SECTOR: usize = 512;
+
 // ----------------------------------------------------------------------------
 // The hand-off (same layout as kernel/src/boot.rs)
 
@@ -72,7 +84,8 @@ struct BootInfo {
     pack_size: u64,
     rsdp: u64,
     loader: u32,
-    _pad2: u32,
+    /// 1 = slot A, 2 = slot B, with the SLOT_ flags; 0 without slots.
+    slot: u32,
     system_phys: u64,
     system_size: u64,
 }
@@ -84,6 +97,7 @@ const _: () = {
     assert!(offset_of!(BootInfo, kernel_phys) == 0x58);
     assert!(offset_of!(BootInfo, rsdp) == 0x78);
     assert!(offset_of!(BootInfo, loader) == 0x80);
+    assert!(offset_of!(BootInfo, slot) == 0x84);
     assert!(offset_of!(BootInfo, system_phys) == 0x88);
 };
 
@@ -226,10 +240,14 @@ impl Volume {
     }
 
     fn try_open(&self, path: &str) -> Result<*mut File, Status> {
+        self.try_open_mode(path, FILE_MODE_READ)
+    }
+
+    fn try_open_mode(&self, path: &str, mode: u64) -> Result<*mut File, Status> {
         let name = ucs2::<64>(path);
         let mut file = null_mut();
         // SAFETY: valid protocol pointer and null-terminated name.
-        let status = unsafe { ((*self.0).open)(self.0, &mut file, name.as_ptr(), FILE_MODE_READ, 0) };
+        let status = unsafe { ((*self.0).open)(self.0, &mut file, name.as_ptr(), mode, 0) };
         if status == SUCCESS {
             Ok(file)
         } else {
@@ -267,6 +285,39 @@ fn close(file: *mut File) {
     unsafe { ((*file).close)(file) };
 }
 
+/// Reads `len` bytes at `at`; false on any error (the caller has another
+/// way).
+fn try_read(file: *mut File, at: u64, dest: *mut u8, len: u64) -> bool {
+    // SAFETY: valid file; `dest` has room for `len` bytes.
+    unsafe {
+        if ((*file).set_position)(file, at) != SUCCESS {
+            return false;
+        }
+        let mut done = 0;
+        while done < len {
+            let mut n = (len - done) as usize;
+            if ((*file).read)(file, &mut n, dest.add(done as usize)) != SUCCESS || n == 0 {
+                return false;
+            }
+            done += n as u64;
+        }
+    }
+    true
+}
+
+/// Room for a kernel of `memsz` bytes: it must sit 1 MiB into a 2 MiB
+/// page, so this allocates 2 MiB more and picks the address inside.
+fn place_kernel(memsz: u64) -> u64 {
+    let pages = (memsz + HUGE).div_ceil(PAGE);
+    let area = allocate_pages(pages, "no memory for the kernel");
+    let aligned = area.next_multiple_of(HUGE);
+    if aligned >= HUGE && aligned - HUGE + KERNEL_LINK_OFFSET >= area {
+        aligned - HUGE + KERNEL_LINK_OFFSET
+    } else {
+        aligned + KERNEL_LINK_OFFSET
+    }
+}
+
 /// Loads `KERNEL.BIN`: a 32-byte header (magic, entry, memory size, file
 /// size) and the flat image. Returns (physical address, memory size, entry).
 fn load_kernel(vol: &Volume) -> (u64, u64, u64) {
@@ -280,19 +331,91 @@ fn load_kernel(vol: &Volume) -> (u64, u64, u64) {
     }
     // SAFETY: back to the image after the size check.
     unsafe { ((*file).set_position)(file, 32) };
-    // The kernel must sit 1 MiB into a 2 MiB page: allocate 2 MiB more and
-    // pick the address inside.
-    let pages = (memsz + HUGE).div_ceil(PAGE);
-    let area = allocate_pages(pages, "no memory for the kernel");
-    let aligned = area.next_multiple_of(HUGE);
-    let phys = if aligned >= HUGE && aligned - HUGE + KERNEL_LINK_OFFSET >= area {
-        aligned - HUGE + KERNEL_LINK_OFFSET
-    } else {
-        aligned + KERNEL_LINK_OFFSET
-    };
+    let phys = place_kernel(memsz);
     read_exact(file, phys as *mut u8, filesz, "cannot read the kernel");
     close(file);
     (phys, memsz, entry)
+}
+
+fn le32(b: &[u8], at: usize) -> u32 {
+    u32::from_le_bytes(b[at..at + 4].try_into().unwrap())
+}
+
+/// The magic matches and the 128 dwords add up to zero.
+fn sector_ok(s: &[u8; SECTOR], magic: &[u8; 8]) -> bool {
+    &s[..8] == magic && (0..SECTOR / 4).fold(0u32, |a, i| a.wrapping_add(le32(s, i * 4))) == 0
+}
+
+/// Which slot starts (0 = A, 1 = B) and the BootInfo flags, from
+/// BOOT.CTL; `None` without one (a live CD). A slot not yet known to work
+/// uses up one of its starts, written back at once; with none left, the
+/// other starts. A damaged BOOT.CTL starts slot A.
+fn choose_slot(vol: &Volume) -> Option<(usize, u32)> {
+    let file = vol.try_open_mode("\\ARCOS\\BOOT.CTL", FILE_MODE_READ | FILE_MODE_WRITE).or_else(|_| vol.try_open("\\ARCOS\\BOOT.CTL")).ok()?;
+    let mut ctl = [0u8; SECTOR];
+    if !try_read(file, 0, ctl.as_mut_ptr(), SECTOR as u64) || !sector_ok(&ctl, CTL_MAGIC) {
+        close(file);
+        return Some((0, 0));
+    }
+    let mut slot = (ctl[0x14] & 1) as usize;
+    let mut flags = 0;
+    if (ctl[0x16] >> slot) & 1 == 0 {
+        if ctl[0x15] > 0 {
+            ctl[0x15] -= 1;
+            let seq = le32(&ctl, 0x18).wrapping_add(1);
+            ctl[0x18..0x1C].copy_from_slice(&seq.to_le_bytes());
+            ctl[0x1FC..].fill(0);
+            let sum = (0..SECTOR / 4).fold(0u32, |a, i| a.wrapping_add(le32(&ctl, i * 4)));
+            ctl[0x1FC..].copy_from_slice(&sum.wrapping_neg().to_le_bytes());
+            let mut n = SECTOR;
+            // SAFETY: valid file and buffer; a failed write (a read-only
+            // disk) just leaves the count as it was.
+            unsafe {
+                ((*file).set_position)(file, 0);
+                ((*file).write)(file, &mut n, ctl.as_ptr());
+                ((*file).flush)(file);
+            }
+            flags = SLOT_TRIAL;
+        } else {
+            slot ^= 1;
+            flags = SLOT_FALLBACK;
+        }
+    }
+    close(file);
+    Some((slot, flags))
+}
+
+/// The kernel (address, memory size, entry) and the boot pack (address,
+/// size) of a slot, in memory.
+type Loaded = ((u64, u64, u64), (u64, u64));
+
+/// Loads the kernel and the boot pack of a slot. `None` if its header is
+/// damaged or it cannot be read.
+fn load_slot(vol: &Volume, slot: usize) -> Option<Loaded> {
+    let file = vol.try_open(SLOT_FILES[slot]).ok()?;
+    let mut h = [0u8; SECTOR];
+    let loaded = (|| {
+        if !try_read(file, 0, h.as_mut_ptr(), SECTOR as u64) || !sector_ok(&h, SLOT_MAGIC) {
+            return None;
+        }
+        let memsz = le32(&h, 0x0C) as u64;
+        let entry = u64::from_le_bytes(h[0x10..0x18].try_into().unwrap());
+        let (pack_at, kernel_bytes, pack_bytes) = (le32(&h, 0x18) as u64 * SECTOR as u64, le32(&h, 0x20) as u64, le32(&h, 0x24) as u64);
+        if kernel_bytes == 0 || kernel_bytes > memsz {
+            return None;
+        }
+        let kernel = place_kernel(memsz);
+        if !try_read(file, SECTOR as u64, kernel as *mut u8, kernel_bytes) {
+            return None;
+        }
+        let pack = allocate_pages(pack_bytes.div_ceil(PAGE).max(1), "no memory for the boot pack");
+        if !try_read(file, pack_at, pack as *mut u8, pack_bytes) {
+            return None;
+        }
+        Some(((kernel, memsz, entry), (pack, pack_bytes)))
+    })();
+    close(file);
+    loaded
 }
 
 fn load_boot_pack(vol: &Volume) -> (u64, u64) {
@@ -528,8 +651,18 @@ extern "efiapi" fn efi_main(image: Handle, st: *mut SystemTable) -> Status {
     unsafe { (boot_services().set_watchdog_timer)(0, 0, 0, core::ptr::null()) };
 
     let vol = Volume::of_image(image);
-    let (kernel_phys, kernel_size, entry) = load_kernel(&vol);
-    let (pack_phys, pack_size) = load_boot_pack(&vol);
+    let ((kernel_phys, kernel_size, entry), (pack_phys, pack_size), slot) = match choose_slot(&vol) {
+        Some((slot, flags)) => match load_slot(&vol, slot) {
+            Some(loaded) => (loaded.0, loaded.1, (slot as u32 + 1) | flags),
+            // A damaged slot: the other one, if it was not the other already.
+            None if flags & SLOT_FALLBACK == 0 => match load_slot(&vol, slot ^ 1) {
+                Some(loaded) => (loaded.0, loaded.1, ((slot as u32 ^ 1) + 1) | SLOT_FALLBACK),
+                None => fail("no system slot can be read", 0),
+            },
+            None => fail("no system slot can be read", 0),
+        },
+        None => (load_kernel(&vol), load_boot_pack(&vol), 0),
+    };
     let (system_phys, system_size) = load_system(&vol);
     close(vol.0);
 
@@ -545,6 +678,7 @@ extern "efiapi" fn efi_main(image: Handle, st: *mut SystemTable) -> Status {
     info.pack_size = pack_size;
     info.rsdp = find_rsdp();
     info.loader = LOADER_UEFI;
+    info.slot = slot;
     info.system_phys = system_phys;
     info.system_size = system_size;
 

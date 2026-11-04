@@ -26,7 +26,10 @@
 #   make assets     regenerate fonts, icons, wallpapers and sounds (Python, Pillow, numpy)
 #   make photos     download the photo wallpapers from Wikimedia Commons
 #   make check      unit tests of the shared libraries and the host tool
-#   make updates    the signed index of app updates (build/updates), with the
+#   make test-update   install a system update into the other slot, restart
+#                   into it; a broken one goes back by itself (BIOS and UEFI)
+#   make updates    the signed index of updates (build/updates): the store's
+#                   apps and this arcOS as a system image, signed with the
 #                   private key in UPDATES_KEY; scripts/publish-updates.sh
 #                   puts it online
 
@@ -34,7 +37,9 @@ PROFILE  ?= release
 CARGO    ?= cargo
 QEMU     ?= qemu-system-x86_64
 MEMORY   ?= 512M
-SIZE     ?= 128M
+# The disk image: the EFI partition holds two system slots of SLOT_SIZE.
+SIZE     ?= 256M
+SLOT_SIZE ?= 24M
 # UEFI firmware for QEMU: code (read-only) and a template of its variables.
 OVMF_CODE ?= /usr/share/OVMF/OVMF_CODE_4M.fd
 OVMF_VARS ?= /usr/share/OVMF/OVMF_VARS_4M.fd
@@ -52,7 +57,7 @@ ROOT     := $(BUILD)/root
 IMAGE    := $(BUILD)/arcos.img
 ISO      := $(BUILD)/arcos.iso
 # Size of the live CD's system volume (it lives in memory).
-LIVE_SIZE ?= 24M
+LIVE_SIZE ?= 48M
 # App updates: the signing key (kept out of the repository) and where the
 # index is published (kernel/src/appupdate.rs looks there).
 UPDATES_KEY ?= $(HOME)/.arcos-keys/updates.key
@@ -63,7 +68,7 @@ ifeq ($(PROFILE),release)
 CARGO_PROFILE := --release
 endif
 
-.PHONY: photos all uefi system tools root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript test-compat test-audio test-display test-acpi test-net test-linux shots assets check updates clean $(PACKAGES)
+.PHONY: photos all uefi system tools root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript test-compat test-audio test-display test-acpi test-net test-linux test-update shots assets check updates clean $(PACKAGES)
 
 all: image
 
@@ -99,12 +104,16 @@ root: system
 	cp system/kernel/assets/fonts.bin $(ROOT)/system/fonts.bin
 
 image: $(BUILD)/stage1.bin $(BUILD)/stage2.bin uefi system tools $(PACKAGES) root
-	$(ARCTOOL) image $(IMAGE) --size $(SIZE) \
+	$(ARCTOOL) image $(IMAGE) --size $(SIZE) --slot-size $(SLOT_SIZE) --version $(VERSION) \
 		--stage1 $(BUILD)/stage1.bin --stage2 $(BUILD)/stage2.bin --efi $(EFI_APP) \
 		--kernel $(TARGET)/arc-kernel --drivers $(BUILD)/drivers --files $(ROOT)
 
+# This arcOS as a system update (a slot image).
+$(BUILD)/arcos-$(VERSION).slot: system tools $(PACKAGES)
+	$(ARCTOOL) slot $@ --kernel $(TARGET)/arc-kernel --drivers $(BUILD)/drivers --version $(VERSION)
+
 iso: $(BUILD)/stage1.bin $(BUILD)/stage2.bin uefi system tools $(PACKAGES) root
-	$(ARCTOOL) iso $(ISO) --size $(LIVE_SIZE) \
+	$(ARCTOOL) iso $(ISO) --size $(LIVE_SIZE) --version $(VERSION) \
 		--stage1 $(BUILD)/stage1.bin --stage2 $(BUILD)/stage2.bin --efi $(EFI_APP) \
 		--kernel $(TARGET)/arc-kernel --drivers $(BUILD)/drivers --files $(ROOT)
 
@@ -162,6 +171,9 @@ test-net: image
 test-linux: image
 	scripts/test-linux.sh $(IMAGE)
 
+test-update: image
+	OVMF_CODE=$(OVMF_CODE) OVMF_VARS=$(OVMF_VARS) scripts/test-update.sh $(IMAGE)
+
 shots: image
 	scripts/gui-shots.py $(IMAGE) scripts/gui/tour.txt $(BUILD)/shots
 
@@ -185,9 +197,10 @@ check:
 	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs -p arcgfx -p arctls -p arczip -p arcjson -p arcc-core -p arc-vm -p arcweb -p arcjs -p arcdex -p arcaml
 	cd tools && $(CARGO) test --release
 
-updates: root tools
+updates: root tools $(BUILD)/arcos-$(VERSION).slot
 	rm -rf $(BUILD)/updates
-	$(ARCTOOL) updates $(ROOT)/store $(BUILD)/updates --key $(UPDATES_KEY) --base-url $(UPDATES_URL) --system $(VERSION)
+	$(ARCTOOL) updates $(ROOT)/store $(BUILD)/updates --key $(UPDATES_KEY) --base-url $(UPDATES_URL) --system $(VERSION) \
+		--slot $(BUILD)/arcos-$(VERSION).slot
 
 clean:
 	rm -rf $(BUILD)

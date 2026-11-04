@@ -35,6 +35,34 @@ impl About {
     fn update_btn(area: Rect) -> Rect {
         Rect::new(area.x + 250, area.y + 348, 170, 34)
     }
+
+    fn second_btn(area: Rect) -> Rect {
+        let b = Self::update_btn(area);
+        Rect::new(b.right() + 10, b.y, 170, b.h)
+    }
+}
+
+/// What the second button next to the update button does.
+enum Second {
+    /// Keep this version (an update or a change of slot waits).
+    Cancel,
+    /// Start the version in the other slot (it worked).
+    Switch(String),
+}
+
+fn second_action() -> Option<Second> {
+    use crate::update::State;
+    match crate::update::state() {
+        State::Staged(_) => Some(Second::Cancel),
+        State::Checking | State::Downloading { .. } | State::Installing { .. } => None,
+        // On trial, a version that does not work goes back by itself.
+        _ if crate::sysupdate::on_trial() => None,
+        _ => crate::sysupdate::slots().previous.filter(|p| p != crate::VERSION).map(Second::Switch),
+    }
+}
+
+fn percent(done: u64, total: u64) -> u64 {
+    (done * 100 / total.max(1)).min(100)
 }
 
 /// An icon for a kind of device.
@@ -117,15 +145,34 @@ impl App for About {
                 use crate::update::State;
                 let state = crate::update::state();
                 let b = Self::update_btn(area);
-                let label = if state == State::Checking { "Controllo…" } else { "Cerca aggiornamenti" };
-                ui::button(c, b, label, matches!(state, State::Available(_)), false);
+                let label = match &state {
+                    State::Checking => String::from("Controllo…"),
+                    State::Available(v) => format!("Installa {v}"),
+                    State::Downloading { done, total, .. } => format!("Scarico… {}%", percent(*done, *total)),
+                    State::Installing { done, total, .. } => format!("Installo… {}%", percent(*done, *total)),
+                    State::Staged(_) => String::from("Riavvia"),
+                    _ => String::from("Cerca aggiornamenti"),
+                };
+                ui::button(c, b, &label, matches!(state, State::Available(_) | State::Staged(_)), false);
+                match second_action() {
+                    Some(Second::Cancel) => ui::button(c, Self::second_btn(area), "Annulla", false, false),
+                    Some(Second::Switch(v)) => {
+                        let verb = if crate::update::newer(&v, crate::VERSION) { "Passa a" } else { "Torna a" };
+                        ui::button(c, Self::second_btn(area), &format!("{verb} {v}"), false, false);
+                    }
+                    None => {}
+                }
                 let (line, color) = match &state {
                     State::NotChecked | State::Checking => (String::new(), TEXT_FAINT),
                     State::UpToDate => (String::from("arcOS è aggiornato."), ui::GREEN),
-                    State::Available(v) => (format!("arcOS {v} è nelle release su GitHub."), ui::ORANGE),
-                    State::Failed(_) => (String::from("Nessuna risposta: c'è la rete?"), TEXT_FAINT),
+                    State::Available(v) => (format!("È disponibile arcOS {v}."), ui::ORANGE),
+                    State::Released(v) => (format!("arcOS {v} è nelle release su GitHub."), ui::ORANGE),
+                    State::Downloading { version, done, total } => (format!("Scarico arcOS {version}: {} di {}", Size(*done), Size(*total)), TEXT_DIM),
+                    State::Installing { version, .. } => (format!("Scrivo arcOS {version} accanto a questo sistema…"), TEXT_DIM),
+                    State::Staged(v) => (format!("arcOS {v} parte al prossimo riavvio."), ui::GREEN),
+                    State::Failed(e) => (format!("Non riuscito: {e}"), TEXT_FAINT),
                 };
-                text::draw(c, Font::Small, b.right() + 12, b.y + 9, &text::fit(Font::Small, &line, area.right() - b.right() - 16), color);
+                text::draw(c, Font::Small, b.x + 4, b.bottom() + 10, &text::fit(Font::Small, &line, area.right() - b.x - 20), color);
                 text::draw_centered(c, Font::Small, area.x + area.w / 2, area.bottom() - 30, "Scritto da zero, in Rust · © Matthias Peterlini", TEXT_FAINT);
             }
             1 => {
@@ -185,8 +232,28 @@ impl App for About {
                 return Action::Redraw;
             }
         }
-        if self.tab == 0 && Self::update_btn(area).contains(area.x + x, area.y + y) {
-            crate::update::check(false);
+        if self.tab != 0 {
+            return Action::None;
+        }
+        use crate::update::State;
+        if Self::update_btn(area).contains(area.x + x, area.y + y) {
+            match crate::update::state() {
+                State::Available(_) => crate::update::install_in_background(),
+                State::Staged(_) => crate::acpi::reboot(),
+                State::Checking | State::Downloading { .. } | State::Installing { .. } => {}
+                _ => crate::update::check(false),
+            }
+            return Action::Redraw;
+        }
+        if Self::second_btn(area).contains(area.x + x, area.y + y) {
+            let done = match second_action() {
+                Some(Second::Cancel) => crate::sysupdate::cancel(),
+                Some(Second::Switch(_)) => crate::sysupdate::rollback().map(|_| ()),
+                None => return Action::None,
+            };
+            if let Err(e) = done {
+                crate::gui::notify("Sistema", &e, "about");
+            }
             return Action::Redraw;
         }
         Action::None

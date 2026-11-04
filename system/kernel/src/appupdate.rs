@@ -9,7 +9,9 @@
 //!   new program's address, size and SHA-256, carries the new `info`, and
 //!   may name the oldest arcOS it runs on (`system`).
 //!   The index has a serial number that never goes back, so an old index
-//!   (with old, known bugs) cannot be passed off as new.
+//!   (with old, known bugs) cannot be passed off as new. It may also offer
+//!   a newer arcOS (`system`: its version and system image), which
+//!   [`crate::update`] installs.
 //! - **Linux and Windows programs** from GitHub: their latest release,
 //!   downloaded over HTTPS as the store installs them.
 //!
@@ -77,6 +79,20 @@ struct Remote {
     url: String,
     sha256: [u8; 32],
     size: u64,
+}
+
+/// A newer arcOS in the index: its version and its system image (see
+/// [`crate::sysupdate`]).
+#[derive(Clone)]
+pub struct SystemOffer {
+    pub version: String,
+    slot: Remote,
+}
+
+impl SystemOffer {
+    pub fn size(&self) -> u64 {
+        self.slot.size
+    }
 }
 
 #[derive(Clone)]
@@ -197,6 +213,12 @@ fn unhex(s: &str) -> Option<Vec<u8>> {
     (0..s.len()).step_by(2).map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok()).collect()
 }
 
+/// Whether `sig` (in hex, like `index.json.sig`) is [`KEY`]'s signature of
+/// `data`: for a system image installed by hand.
+pub fn signed(data: &[u8], sig: &[u8]) -> bool {
+    unhex(&String::from_utf8_lossy(sig)).is_some_and(|s| ed25519::verify(&KEY, data, &s))
+}
+
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
@@ -206,9 +228,16 @@ fn remote(v: &Value) -> Option<Remote> {
     Some(Remote { url: v.get("url").as_str()?.to_string(), sha256: sha.try_into().ok()?, size: v.get("size").as_f64().unwrap_or(0.0) as u64 })
 }
 
-/// Reads and checks the signed index: its serial and the updates it has for
-/// the installed arcOS apps.
-fn read_index(src: &Source, min_serial: u64) -> Result<(u64, Vec<Update>), String> {
+/// What the signed index has for this computer.
+struct Index {
+    serial: u64,
+    apps: Vec<Update>,
+    system: Option<SystemOffer>,
+}
+
+/// Reads and checks the signed index: its serial, the updates it has for
+/// the installed arcOS apps and a newer arcOS, if any.
+fn read_index(src: &Source, min_serial: u64) -> Result<Index, String> {
     let index = fetch(&src.index, &mut |_, _| true)?;
     let sig = fetch(&format!("{}.sig", src.index), &mut |_, _| true)?;
     let sig = unhex(&String::from_utf8_lossy(&sig)).ok_or("la firma dell'indice è illeggibile")?;
@@ -245,7 +274,12 @@ fn read_index(src: &Source, min_serial: u64) -> Result<(u64, Vec<Update>), Strin
             origin: Origin::Index { app, icon, info: info.to_string() },
         });
     }
-    Ok((serial, out))
+    let s = v.get("system");
+    let system = match (s.get("version").as_str(), remote(s.get("slot"))) {
+        (Some(version), Some(slot)) if crate::update::newer(version, crate::VERSION) => Some(SystemOffer { version: version.to_string(), slot }),
+        _ => None,
+    };
+    Ok(Index { serial, apps: out, system })
 }
 
 /// Newer releases of the installed Linux and Windows programs from GitHub.
@@ -275,20 +309,38 @@ fn github_updates() -> Vec<Update> {
 /// Asks the index (and GitHub, if `github`) what is new. The updates found,
 /// and why the index could not be read, if it could not.
 pub fn check_with(src: &Source, github: bool) -> (Vec<Update>, Option<String>) {
+    let (found, _, error) = check_index(src, github);
+    (found, error)
+}
+
+/// [`check_with`], and the newer arcOS the index offers.
+fn check_index(src: &Source, github: bool) -> (Vec<Update>, Option<SystemOffer>, Option<String>) {
     let mut s = load_settings(src);
-    let (mut found, error) = match read_index(src, s.serial) {
-        Ok((serial, found)) => {
-            s.serial = serial;
-            (found, None)
+    let (mut found, system, error) = match read_index(src, s.serial) {
+        Ok(index) => {
+            s.serial = index.serial;
+            (index.apps, index.system, None)
         }
-        Err(e) => (Vec::new(), Some(e)),
+        Err(e) => (Vec::new(), None, Some(e)),
     };
     s.last_check = crate::time::now();
     save_settings(src, &s);
     if github {
         found.extend(github_updates());
     }
-    (found, error)
+    (found, system, error)
+}
+
+/// The newer arcOS the published index offers, if any (reads the index now;
+/// the app updates it has wait for the daily check).
+pub fn system_offer() -> Result<Option<SystemOffer>, String> {
+    let src = Source::system();
+    read_index(&src, load_settings(&src).serial).map(|i| i.system)
+}
+
+/// Downloads an offered system image, checked against the signed index.
+pub fn fetch_system(o: &SystemOffer, progress: http::Progress<'_>) -> Result<Vec<u8>, String> {
+    fetch_checked(&o.slot, progress)
 }
 
 // ----------------------------------------------------------------------------
@@ -469,9 +521,13 @@ pub fn check() -> Result<usize, String> {
         return Err("sto già controllando".to_string());
     }
     let src = Source::system();
-    let (found, error) = check_with(&src, crate::net::online());
+    let (found, system, error) = check_index(&src, crate::net::online());
     if let Some(e) = &error {
         crate::warn!("updates", "{e}");
+    }
+    // A newer arcOS: in a thread of its own, it is big.
+    if let Some(o) = system {
+        crate::task::spawn("update-system", move || crate::update::offered(o, true));
     }
     *ERROR.lock() = error.clone();
     let mut fresh = Vec::new();

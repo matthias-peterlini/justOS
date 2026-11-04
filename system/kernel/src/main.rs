@@ -29,6 +29,7 @@ mod shell;
 mod sleep;
 mod store;
 mod sync;
+mod sysupdate;
 mod task;
 mod ticly;
 mod time;
@@ -89,6 +90,7 @@ extern "C" fn kmain(boot_phys: u64) -> ! {
         console::early("bad boot information from the loader\n");
         cpu::halt_forever();
     }
+    sysupdate::init(boot.slot);
 
     cpu::enable_sse();
     gdt::init();
@@ -150,6 +152,7 @@ extern "C" fn kmain(boot_phys: u64) -> ! {
     gui::boot_progress(82);
 
     gui::start();
+    sysupdate::start();
     if gui::active() {
         update::check_when_online();
     }

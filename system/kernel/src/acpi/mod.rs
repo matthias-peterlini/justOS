@@ -405,12 +405,23 @@ pub fn power_off() {
 pub fn reboot() -> ! {
     crate::fs::sync_all();
     cpu::disable_irq();
-    let fadt = ACPI.lock().fadt;
+    restart(true)
+}
+
+/// Restarts the machine at once, saving nothing: for a kernel panic, so it
+/// waits for no lock and maps no memory.
+pub fn reset() -> ! {
+    cpu::disable_irq();
+    restart(false)
+}
+
+fn restart(mmio: bool) -> ! {
+    let fadt = ACPI.try_lock().and_then(|a| a.fadt);
     if let Some(f) = fadt {
         if f.reset_supported && f.reset_addr != 0 {
             match f.reset_space {
                 1 => outb(f.reset_addr as u16, f.reset_value),
-                0 => {
+                0 if mmio => {
                     if let Some(v) = crate::mem::region::map_device(f.reset_addr, 1, crate::mem::paging::NO_CACHE) {
                         // SAFETY: the FADT names this register for resets.
                         unsafe { (v as *mut u8).write_volatile(f.reset_value) };

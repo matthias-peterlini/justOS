@@ -3,15 +3,17 @@
 ; Loaded by stage 1 at 0000:7E00, entered in real mode with the boot drive in
 ; DL. It:
 ;   1. enables the A20 line and switches to "unreal" mode (4 GiB data limit);
-;   2. reads the kernel image to 1 MiB, the boot pack right after it and,
+;   2. on a disk, picks the system slot (A or B) from ARCOS/BOOT.CTL;
+;   3. reads the kernel image to 1 MiB, the boot pack right after it and,
 ;      when booting a live CD, the system volume after that;
-;   3. collects the BIOS memory map (E820) and the 8x16 VGA font;
-;   4. picks a 32-bit linear framebuffer mode with VBE (text mode otherwise);
-;   5. builds the initial page tables and enters 64-bit long mode;
-;   6. jumps to the kernel entry with RDI = physical address of the BootInfo.
+;   4. collects the BIOS memory map (E820) and the 8x16 VGA font;
+;   5. picks a 32-bit linear framebuffer mode with VBE (text mode otherwise);
+;   6. builds the initial page tables and enters 64-bit long mode;
+;   7. jumps to the kernel entry with RDI = physical address of the BootInfo.
 ;
 ; Physical memory used below 1 MiB (all of it is reclaimable by the kernel):
 ;   0x01000  BootInfo            0x02000  E820 map       0x03000  font
+;   0x05000  BOOT.CTL            0x05200  slot header
 ;   0x07C00  stage 1             0x07E00  stage 2 (<= 32 KiB)
 ;   0x10000  page tables (7 pages)
 ;   0x20000  disk bounce buffer (32 KiB)
@@ -33,10 +35,13 @@ BOUNCE          equ 0x20000
 BOUNCE_SECTORS  equ 64
 VBE_SEG         equ 0x3000
 KERNEL_PHYS     equ 0x100000
+CTL_BUF         equ 0x5000
+SLOT_BUF        equ 0x5200
 
 ; Boot table inside stage 1 (see stage1.asm).
 BT_SYSTEM_LBA       equ 0x7C00 + 0x184
 BT_SYSTEM_SECTORS   equ 0x7C00 + 0x188
+BT_CTL_LBA          equ 0x7C00 + 0x18C
 BT_STAGE2_SECTORS   equ 0x7C00 + 0x194
 BT_FLAGS            equ 0x7C00 + 0x196
 BOOT_CD             equ 1
@@ -69,8 +74,25 @@ BI_PACK_PHYS    equ 0x68
 BI_PACK_SIZE    equ 0x70
 BI_RSDP         equ 0x78
 BI_LOADER       equ 0x80
+BI_SLOT         equ 0x84
 BI_SYSTEM_PHYS  equ 0x88
 BI_SYSTEM_SIZE  equ 0x90
+
+; BOOT.CTL and the slot header (see tools/arctool/src/slot.rs).
+CTL_SLOT_A      equ 0x08                ; then slot B at 0x0C
+CTL_ACTIVE      equ 0x14
+CTL_TRIES       equ 0x15
+CTL_GOOD        equ 0x16
+CTL_SEQUENCE    equ 0x18
+CHECKSUM        equ 0x1FC
+SH_KERNEL_SECTORS equ 0x08
+SH_MEMSZ        equ 0x0C
+SH_ENTRY        equ 0x10
+SH_PACK_SECTOR  equ 0x18
+SH_PACK_SECTORS equ 0x1C
+; BootInfo slot: 1 = A, 2 = B (0: no slots), plus these flags.
+SLOT_TRIAL      equ 0x100               ; not yet known to work
+SLOT_FALLBACK   equ 0x200               ; the other slot should have started
 
 FB_NONE         equ 0
 FB_RGB          equ 1
@@ -109,6 +131,7 @@ stage2:
     call enable_a20
     call check_long_mode
     call enter_unreal
+    call choose_slot
 
     ; --- Kernel ----------------------------------------------------------
     mov eax, [BT_KERNEL_LBA]
@@ -265,6 +288,167 @@ enter_unreal:
     pop es
     pop ds
     sti
+    ret
+
+; choose_slot: on a disk with BOOT.CTL, picks the system slot and points the
+; boot table's kernel and boot pack at it. A slot not yet known to work uses
+; up one of its starts (written back at once); with none left, or with a
+; damaged header, the other slot starts. Without a readable BOOT.CTL the
+; table's own entries (slot A) stay.
+choose_slot:
+    test byte [BT_FLAGS], BOOT_CD
+    jnz .done
+    mov eax, [BT_CTL_LBA]
+    test eax, eax
+    jz .done
+    mov di, CTL_BUF
+    call read_sector
+    jc .done
+    mov si, CTL_BUF
+    mov di, ctl_magic
+    call check_sector
+    jc .done
+    movzx bx, byte [CTL_BUF + CTL_ACTIVE]
+    and bx, 1
+    xor dx, dx                      ; flags for the BootInfo
+    mov cl, bl
+    mov al, [CTL_BUF + CTL_GOOD]
+    shr al, cl
+    test al, 1
+    jnz .start                      ; known to work
+    cmp byte [CTL_BUF + CTL_TRIES], 0
+    je .other
+    dec byte [CTL_BUF + CTL_TRIES]
+    or dx, SLOT_TRIAL
+    push bx
+    push dx
+    call write_ctl
+    pop dx
+    pop bx
+    jmp .start
+.other:
+    xor bx, 1
+    or dx, SLOT_FALLBACK
+.start:
+    call use_slot
+    jnc .chosen
+    test dx, SLOT_FALLBACK
+    jnz .done                       ; neither slot is readable
+    xor bx, 1
+    mov dx, SLOT_FALLBACK
+    call use_slot
+    jc .done
+.chosen:
+    lea ax, [bx + 1]
+    or ax, dx
+    movzx eax, ax
+    mov [BOOTINFO + BI_SLOT], eax
+.done:
+    ret
+
+; use_slot: BX = slot (0 = A, 1 = B). Reads its header and points the boot
+; table at its kernel and boot pack; CF = 1 if the header is not valid.
+use_slot:
+    push bx
+    push dx
+    shl bx, 2
+    mov eax, [CTL_BUF + CTL_SLOT_A + bx]
+    test eax, eax
+    jz .bad
+    mov [slot_lba], eax
+    mov di, SLOT_BUF
+    call read_sector
+    jc .bad
+    mov si, SLOT_BUF
+    mov di, slot_magic
+    call check_sector
+    jc .bad
+    mov eax, [SLOT_BUF + SH_KERNEL_SECTORS]
+    test eax, eax
+    jz .bad
+    mov [BT_KERNEL_SECTORS], eax
+    mov eax, [slot_lba]
+    inc eax
+    mov [BT_KERNEL_LBA], eax
+    mov eax, [SLOT_BUF + SH_MEMSZ]
+    mov [BT_KERNEL_MEMSZ], eax
+    mov eax, [SLOT_BUF + SH_ENTRY]
+    mov [BT_KERNEL_ENTRY], eax
+    mov eax, [SLOT_BUF + SH_ENTRY + 4]
+    mov [BT_KERNEL_ENTRY + 4], eax
+    mov eax, [slot_lba]
+    add eax, [SLOT_BUF + SH_PACK_SECTOR]
+    mov [BT_PACK_LBA], eax
+    mov eax, [SLOT_BUF + SH_PACK_SECTORS]
+    mov [BT_PACK_SECTORS], eax
+    pop dx
+    pop bx
+    clc
+    ret
+.bad:
+    pop dx
+    pop bx
+    stc
+    ret
+
+; read_sector: EAX = LBA, DI = buffer (segment 0). CF = 1 on error.
+read_sector:
+    mov word [dap_count], 1
+    mov [dap_offset], di
+    mov word [dap_segment], 0
+    mov [dap_lba], eax
+    mov dword [dap_lba + 4], 0
+    mov si, dap
+    mov ah, 0x42
+    mov dl, [boot_drive]
+    int 0x13
+    ret
+
+; check_sector: SI = sector, DI = its 8-byte magic. CF = 1 unless the magic
+; matches and the 128 dwords add up to zero.
+check_sector:
+    push si
+    mov cx, 4
+    repe cmpsw
+    pop si
+    jne .bad
+    call sum_sector
+    test eax, eax
+    jnz .bad
+    clc
+    ret
+.bad:
+    stc
+    ret
+
+; sum_sector: SI = sector. EAX = the sum of its 128 dwords.
+sum_sector:
+    xor eax, eax
+    mov cx, 128
+.next:
+    add eax, [si]
+    add si, 4
+    loop .next
+    ret
+
+; write_ctl: seals CTL_BUF (one more in the sequence) and writes it back.
+write_ctl:
+    inc dword [CTL_BUF + CTL_SEQUENCE]
+    mov dword [CTL_BUF + CHECKSUM], 0
+    mov si, CTL_BUF
+    call sum_sector
+    neg eax
+    mov [CTL_BUF + CHECKSUM], eax
+    mov eax, [BT_CTL_LBA]
+    mov word [dap_count], 1
+    mov word [dap_offset], CTL_BUF
+    mov word [dap_segment], 0
+    mov [dap_lba], eax
+    mov dword [dap_lba + 4], 0
+    mov si, dap
+    mov ax, 0x4300
+    mov dl, [boot_drive]
+    int 0x13
     ret
 
 ; load_image: reads load_left sectors from load_lba to physical load_dest
@@ -649,6 +833,9 @@ mode_list_seg   dw 0
 cur_mode        dw 0
 best_mode       dw 0
 best_area       dd 0
+slot_lba        dd 0
+ctl_magic       db "ARCCTL01"
+slot_magic      db "ARCSLOT1"
 
 msg_err_disk     db "disk read error", 0
 msg_err_nokernel db "no kernel in the boot table", 0
