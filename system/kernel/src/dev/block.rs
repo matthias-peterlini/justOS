@@ -70,7 +70,7 @@ impl Disk {
         if *disk.gone.lock() {
             return E_IO;
         }
-        let _io = disk.io.lock();
+        let _io = disk.lock_io();
         // SAFETY: the descriptor stays valid while the disk is registered;
         // `buf` holds `count` sectors.
         unsafe {
@@ -90,9 +90,26 @@ impl Disk {
         OK
     }
 
+    /// The disk's I/O lock, once the devices are up (they may be asleep).
+    fn lock_io(&self) -> crate::sync::MutexGuard<'_, ()> {
+        loop {
+            let g = self.io.lock();
+            if super::pm::awake() {
+                return g;
+            }
+            drop(g);
+            super::pm::wait_awake();
+        }
+    }
+
+    /// Waits for the transfer under way, if any (before the machine sleeps).
+    pub fn wait_idle(&self) {
+        drop(self.whole().0.io.lock());
+    }
+
     pub fn flush(&self) -> Status {
         let (disk, _) = self.whole();
-        let _io = disk.io.lock();
+        let _io = disk.lock_io();
         // SAFETY: as in transfer.
         unsafe {
             let d = &*disk.desc;

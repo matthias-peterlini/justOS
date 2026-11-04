@@ -54,6 +54,8 @@ pub struct PerCpu {
     /// The last TLB flush request this processor has done.
     tlb_seen: AtomicU64,
     online: AtomicBool,
+    /// The top of its idle thread's stack (where it starts again after sleep).
+    stack_top: AtomicU64,
 }
 
 impl PerCpu {
@@ -65,6 +67,7 @@ impl PerCpu {
             apic_id: AtomicU32::new(0),
             tlb_seen: AtomicU64::new(0),
             online: AtomicBool::new(false),
+            stack_top: AtomicU64::new(0),
         }
     }
 }
@@ -72,6 +75,12 @@ impl PerCpu {
 static CPUS: [PerCpu; MAX_CPUS] = [const { PerCpu::new() }; MAX_CPUS];
 static ONLINE: AtomicUsize = AtomicUsize::new(1);
 static TLB_GEN: AtomicU64 = AtomicU64::new(0);
+/// How many processors were started (with the first).
+static STARTED: AtomicUsize = AtomicUsize::new(1);
+/// The other processors are asked to stop (before sleep): they leave their
+/// threads to the first one and wait with interrupts off.
+static PARK: AtomicBool = AtomicBool::new(false);
+static PARKED: AtomicUsize = AtomicUsize::new(0);
 
 global_asm!(
     r#"
@@ -98,8 +107,7 @@ ap_trampoline_start:
     movl 0x8000 + (ap_trampoline_data - ap_trampoline_start) + 8, %eax
     xorl %edx, %edx
     wrmsr
-    movl %cr0, %eax
-    orl $0x80000001, %eax
+    movl 0x8000 + (ap_trampoline_data - ap_trampoline_start) + 40, %eax
     movl %eax, %cr0
     ljmpl $0x08, $(0x8000 + (ap_long - ap_trampoline_start))
     .code64
@@ -123,7 +131,7 @@ ap_gdtr:
     .long 0x8000 + (ap_gdt - ap_trampoline_start)
     .balign 8
 ap_trampoline_data:
-    .quad 0, 0, 0, 0, 0
+    .quad 0, 0, 0, 0, 0, 0
 ap_trampoline_end:
 "#,
     options(att_syntax)
@@ -202,14 +210,36 @@ pub fn shootdown() {
             continue;
         }
         // A processor stuck with interrupts off for a very long time must
-        // not hang this one forever.
+        // not hang this one forever. One that stops flushes everything
+        // before it runs again.
         let mut spins = 0u64;
-        while c.tlb_seen.load(Ordering::Acquire) < gen && spins < 200_000_000 {
+        while c.tlb_seen.load(Ordering::Acquire) < gen && c.online.load(Ordering::Acquire) && spins < 200_000_000 {
             service();
             core::hint::spin_loop();
             spins += 1;
         }
     }
+}
+
+/// Copies the start-up code and its page tables below 1 MiB, and fills in
+/// where it goes: `entry(arg)` in long mode on `stack` (16-byte aligned).
+/// Returns the code's physical address.
+pub(crate) fn prepare_trampoline(entry: u64, stack: u64, arg: u64) -> u64 {
+    let data = install_trampoline() as *mut u64;
+    // SAFETY: the data words of the copied trampoline.
+    unsafe {
+        data.write_volatile(TMP_PML4);
+        // Long mode and no-execute as here; "long mode active" is the
+        // processor's to set.
+        data.add(1).write_volatile(cpu::rdmsr(MSR_EFER) & !(1 << 10));
+        data.add(2).write_volatile(stack);
+        data.add(3).write_volatile(arg);
+        data.add(4).write_volatile(entry);
+        // Paging, protection and caching as on this processor (a processor
+        // just reset has its caches off).
+        data.add(5).write_volatile((cpu::read_cr0() & 0x9FFF_FFFF) | 0x8000_0001);
+    }
+    TRAMPOLINE
 }
 
 /// Copies the start-up code and its page tables below 1 MiB.
@@ -253,7 +283,6 @@ pub fn start() {
     CPUS[0].apic_id.store(bsp, Ordering::Relaxed);
     let per_ms = apic::timer_calibrate();
     TIMER_PER_MS.store(per_ms, Ordering::Relaxed);
-    let data = install_trampoline() as *mut u64;
     let mut next = 1;
     for id in ids.into_iter().filter(|&id| id != bsp) {
         if next >= MAX_CPUS {
@@ -261,48 +290,44 @@ pub fn start() {
         }
         let Some(stack) = region::alloc_pages(&region::STACKS, AP_STACK_PAGES, 1) else { break };
         let top = stack + AP_STACK_PAGES * mem::PAGE_SIZE;
-        // SAFETY: the data words of the copied trampoline.
-        unsafe {
-            data.write_volatile(TMP_PML4);
-            // Long mode and no-execute as here; "long mode active" is the
-            // processor's to set.
-            data.add(1).write_volatile(cpu::rdmsr(MSR_EFER) & !(1 << 10));
-            data.add(2).write_volatile(top);
-            data.add(3).write_volatile(next as u64);
-            data.add(4).write_volatile(ap_entry as *const () as u64);
-        }
         STACK_OF_NEXT.store(stack, Ordering::Release);
-        apic::send_init(id);
-        crate::task::sleep_ms(10);
-        apic::send_startup(id, (TRAMPOLINE >> 12) as u8);
-        let deadline = crate::time::uptime_ms() + 200;
-        let mut second = false;
-        while !CPUS[next].online.load(Ordering::Acquire) && crate::time::uptime_ms() < deadline {
-            if !second && crate::time::uptime_ms() + 199 > deadline {
-                // The specification asks for a second start-up IPI.
-                apic::send_startup(id, (TRAMPOLINE >> 12) as u8);
-                second = true;
-            }
-            crate::task::sleep_ms(1);
-        }
-        if CPUS[next].online.load(Ordering::Acquire) {
+        if boot(id, next, top, ap_entry as *const () as u64) {
             next += 1;
         } else {
             crate::warn!("smp", "processor with APIC id {id} did not start");
             region::free_pages(&region::STACKS, stack, AP_STACK_PAGES, 1);
         }
     }
+    STARTED.store(next, Ordering::Release);
     crate::info!("smp", "{} processors running", count());
+}
+
+/// Starts processor `index` (APIC `id`) at `entry` on the stack `top`; true
+/// once it is online.
+fn boot(id: u32, index: usize, top: u64, entry: u64) -> bool {
+    prepare_trampoline(entry, top, index as u64);
+    apic::send_init(id);
+    crate::task::sleep_ms(10);
+    apic::send_startup(id, (TRAMPOLINE >> 12) as u8);
+    let deadline = crate::time::uptime_ms() + 200;
+    let mut second = false;
+    while !CPUS[index].online.load(Ordering::Acquire) && crate::time::uptime_ms() < deadline {
+        if !second && crate::time::uptime_ms() + 199 > deadline {
+            // The specification asks for a second start-up IPI.
+            apic::send_startup(id, (TRAMPOLINE >> 12) as u8);
+            second = true;
+        }
+        crate::task::sleep_ms(1);
+    }
+    CPUS[index].online.load(Ordering::Acquire)
 }
 
 static TIMER_PER_MS: AtomicU32 = AtomicU32::new(0);
 /// The stack of the processor being started, for its idle thread.
 static STACK_OF_NEXT: AtomicU64 = AtomicU64::new(0);
 
-/// Where a started processor arrives in Rust, on its own stack, with the
-/// trampoline's page tables.
-extern "C" fn ap_entry(index: u64) -> ! {
-    let index = index as usize;
+/// The processor's own tables and registers, on a processor just started.
+fn setup_here(index: usize) {
     // SAFETY: the kernel's tables map everything the kernel needs.
     unsafe { cpu::write_cr3(paging::kernel_pml4()) };
     cpu::enable_sse();
@@ -315,7 +340,28 @@ extern "C" fn ap_entry(index: u64) -> ! {
     set_gs(index);
     let id = apic::enable_here();
     CPUS[index].apic_id.store(id, Ordering::Relaxed);
-    crate::task::start_cpu(index, STACK_OF_NEXT.load(Ordering::Acquire), AP_STACK_PAGES);
+}
+
+/// Where a started processor arrives in Rust, on its own stack, with the
+/// trampoline's page tables.
+extern "C" fn ap_entry(index: u64) -> ! {
+    let index = index as usize;
+    setup_here(index);
+    let stack = STACK_OF_NEXT.load(Ordering::Acquire);
+    CPUS[index].stack_top.store(stack + AP_STACK_PAGES * mem::PAGE_SIZE, Ordering::Relaxed);
+    crate::task::start_cpu(index, stack, AP_STACK_PAGES);
+    go_online(index)
+}
+
+/// Where a processor arrives after sleep: it is still the scheduler's
+/// processor `index`, running its idle thread from the top of its stack.
+extern "C" fn ap_resume(index: u64) -> ! {
+    let index = index as usize;
+    setup_here(index);
+    go_online(index)
+}
+
+fn go_online(index: usize) -> ! {
     CPUS[index].tlb_seen.store(TLB_GEN.load(Ordering::Acquire), Ordering::Release);
     flush_all();
     apic::timer_start(VEC_TIMER, TIMER_PER_MS.load(Ordering::Relaxed));
@@ -323,6 +369,84 @@ extern "C" fn ap_entry(index: u64) -> ! {
     ONLINE.fetch_add(1, Ordering::AcqRel);
     // This is now the processor's idle thread.
     loop {
+        if PARK.load(Ordering::Acquire) {
+            park_here(index);
+        }
         cpu::enable_and_halt();
+    }
+}
+
+/// The other processors are being stopped: they run nothing new.
+#[inline]
+pub fn parking() -> bool {
+    PARK.load(Ordering::Relaxed)
+}
+
+/// Stops the other processors: their threads move to the first one and
+/// they wait with interrupts off. Called on a thread that may then only
+/// run on the first processor; false (and nothing stopped) if a processor
+/// did not stop within a second.
+pub fn park() -> bool {
+    let others = ONLINE.load(Ordering::Acquire).saturating_sub(1);
+    PARKED.store(0, Ordering::Release);
+    PARK.store(true, Ordering::Release);
+    let deadline = crate::time::uptime_ms() + 1000;
+    while PARKED.load(Ordering::Acquire) < others && crate::time::uptime_ms() < deadline {
+        crate::task::sleep_ms(1);
+    }
+    // Threads that were running elsewhere come here at their next tick.
+    while this_cpu() != 0 && crate::time::uptime_ms() < deadline {
+        crate::task::sleep_ms(1);
+    }
+    if PARKED.load(Ordering::Acquire) < others || this_cpu() != 0 {
+        unpark();
+        return false;
+    }
+    true
+}
+
+/// Lets the stopped processors run again (sleep did not happen).
+pub fn unpark() {
+    PARK.store(false, Ordering::Release);
+}
+
+/// On a processor being stopped, in its idle thread.
+fn park_here(index: usize) {
+    cpu::disable_irq();
+    let me = &CPUS[index];
+    me.online.store(false, Ordering::Release);
+    ONLINE.fetch_sub(1, Ordering::AcqRel);
+    PARKED.fetch_add(1, Ordering::AcqRel);
+    while PARK.load(Ordering::Acquire) {
+        core::hint::spin_loop();
+    }
+    // Woken without sleeping: the kernel's mappings may have changed.
+    me.tlb_seen.store(TLB_GEN.load(Ordering::Acquire), Ordering::Release);
+    flush_all();
+    me.online.store(true, Ordering::Release);
+    ONLINE.fetch_add(1, Ordering::AcqRel);
+    cpu::enable_irq();
+}
+
+/// After sleep, on the first processor (its tables already loaded): its
+/// own data again.
+pub fn resume_bsp() {
+    set_gs(0);
+}
+
+/// After sleep: the other processors lost everything; they start again
+/// where they stopped, as the idle threads they were.
+pub fn resume() {
+    let started = STARTED.load(Ordering::Acquire);
+    ONLINE.store(1, Ordering::Release);
+    for c in &CPUS[1..started] {
+        c.online.store(false, Ordering::Release);
+    }
+    PARK.store(false, Ordering::Release);
+    for (index, c) in CPUS.iter().enumerate().take(started).skip(1) {
+        let id = c.apic_id.load(Ordering::Relaxed);
+        if !boot(id, index, c.stack_top.load(Ordering::Relaxed), ap_resume as *const () as u64) {
+            crate::warn!("sleep", "processor {index} did not start again");
+        }
     }
 }

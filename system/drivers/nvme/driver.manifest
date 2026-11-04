@@ -1,6 +1,6 @@
 # NVMe solid-state drives (M.2, U.2, PCIe cards).
 name        = nvme
-version     = 1.0.0
+version     = 1.1.0
 class       = storage
 description = NVM Express SSD
 author      = arcOS

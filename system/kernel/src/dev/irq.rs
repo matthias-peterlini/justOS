@@ -65,12 +65,10 @@ pub fn attach_msi(device: u32, handler: IrqHandler, ctx: *mut c_void) -> Result<
         return Err(arcdk::E_UNSUPPORTED);
     }
     let loc = info.location;
-    let msix = super::pci::find_capability(loc, CAP_MSIX);
-    let msi = super::pci::find_capability(loc, CAP_MSI);
-    if msix.is_none() && msi.is_none() {
+    if super::pci::find_capability(loc, CAP_MSIX).is_none() && super::pci::find_capability(loc, CAP_MSI).is_none() {
         return Err(arcdk::E_UNSUPPORTED);
     }
-    let apic_id = apic::enable().ok_or(arcdk::E_UNSUPPORTED)?;
+    apic::enable().ok_or(arcdk::E_UNSUPPORTED)?;
     let vector = {
         let mut table = MSI.lock();
         let free = table.iter().position(|e| e.is_none()).ok_or(arcdk::E_BUSY)?;
@@ -78,22 +76,46 @@ pub fn attach_msi(device: u32, handler: IrqHandler, ctx: *mut c_void) -> Result<
         MSI_COUNTS.lock()[free] = 0;
         MSI_FIRST + free as u8
     };
-    let address = 0xFEE0_0000u32 | (apic_id & 0xFF) << 12;
-    let ok = match msix {
-        Some(cap) => program_msix(&info, cap, address, vector as u32),
-        None => {
-            program_msi(loc, msi.unwrap(), address, vector as u32);
-            true
-        }
-    };
-    if !ok {
+    if !program(&info, vector) {
         MSI.lock()[(vector - MSI_FIRST) as usize] = None;
         return Err(arcdk::E_IO);
     }
-    // Message interrupts replace the legacy line.
-    let cmd = super::pci::read(loc, 0x04, 2);
-    super::pci::write(loc, 0x04, 2, cmd | (1 << 10));
     Ok(vector)
+}
+
+/// Points the device's MSI-X (preferred) or MSI at `vector` on the first
+/// processor, and turns its legacy line off.
+fn program(info: &arcdk::DeviceInfo, vector: u8) -> bool {
+    let loc = info.location;
+    let Some(apic_id) = apic::enable() else { return false };
+    let address = 0xFEE0_0000u32 | (apic_id & 0xFF) << 12;
+    let ok = match (super::pci::find_capability(loc, CAP_MSIX), super::pci::find_capability(loc, CAP_MSI)) {
+        (Some(cap), _) => program_msix(info, cap, address, vector as u32),
+        (None, Some(cap)) => {
+            program_msi(loc, cap, address, vector as u32);
+            true
+        }
+        (None, None) => false,
+    };
+    if ok {
+        // Message interrupts replace the legacy line.
+        let cmd = super::pci::read(loc, 0x04, 2);
+        super::pci::write(loc, 0x04, 2, cmd | (1 << 10));
+    }
+    ok
+}
+
+/// After sleep: the devices forgot where their message interrupts go (an
+/// MSI-X table lives in the device); tells them again.
+pub fn restore_msi() {
+    let owners: Vec<(u32, u8)> =
+        MSI.lock().iter().enumerate().filter_map(|(i, e)| e.map(|e| (e.owner, MSI_FIRST + i as u8))).collect();
+    for (device, vector) in owners {
+        match super::info(device) {
+            Some(info) if program(&info, vector) => {}
+            _ => crate::warn!("sleep", "device {device}: its message interrupt is lost"),
+        }
+    }
 }
 
 fn program_msi(loc: u32, cap: u16, address: u32, vector: u32) {

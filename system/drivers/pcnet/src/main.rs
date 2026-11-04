@@ -17,7 +17,7 @@ use core::sync::atomic::{fence, AtomicBool, AtomicI32, Ordering};
 
 arcdrv::driver! {
     name: "pcnet",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -66,13 +66,71 @@ struct Nic {
     state: IrqLock<State>,
     iface: AtomicI32,
     has_irq: AtomicBool,
+    mac: [u8; 6],
+    /// Asleep: the card is left alone.
+    paused: AtomicBool,
 }
 
 const INIT_BLOCK: usize = 0;
 const RX_RING: usize = 32;
 const TX_RING: usize = RX_RING + RX_COUNT * 16;
 
+/// Resets the card (either width); it comes back in 16-bit mode.
+fn reset(io: u16) {
+    port::inl(io + RESET);
+    port::inw(io + RESET16);
+    arcdrv::sleep_ms(2);
+}
+
 impl Nic {
+    /// After [`reset`]: 32-bit registers and descriptors, fresh rings, the
+    /// initialisation block taken. The card is left stopped.
+    fn init(&self) -> Status {
+        // A 32-bit write to RDP switches to 32-bit registers.
+        port::outl(self.io + RDP, 0);
+        self.set_csr(0, CSR0_STOP);
+        // Software style 2: 32-bit descriptors and initialisation block.
+        self.set_bcr(20, (self.bcr(20) & !0xFF) | 2);
+        // Pick the cable automatically.
+        self.set_bcr(2, self.bcr(2) | (1 << 1));
+
+        let ib = &self.rings;
+        ib.as_mut_slice().fill(0);
+        for i in 0..RX_COUNT {
+            let at = RX_RING + i * 16;
+            ib.write::<u32>(at, (self.rx_bufs.phys() + (i * BUF) as u64) as u32);
+            self.give_rx(i);
+        }
+        ib.write::<u16>(INIT_BLOCK, 0); // normal mode
+        ib.write::<u8>(INIT_BLOCK + 2, (RX_LOG2 << 4) as u8);
+        ib.write::<u8>(INIT_BLOCK + 3, (TX_LOG2 << 4) as u8);
+        for (i, b) in self.mac.iter().enumerate() {
+            ib.write::<u8>(INIT_BLOCK + 4 + i, *b);
+        }
+        ib.write::<u64>(INIT_BLOCK + 12, u64::MAX); // every multicast group
+        ib.write::<u32>(INIT_BLOCK + 20, (ib.phys() + RX_RING as u64) as u32);
+        ib.write::<u32>(INIT_BLOCK + 24, (ib.phys() + TX_RING as u64) as u32);
+
+        let block = ib.phys() + INIT_BLOCK as u64;
+        self.set_csr(1, block as u32 & 0xFFFF);
+        self.set_csr(2, (block >> 16) as u32 & 0xFFFF);
+        // No interrupt for "initialisation done"; pad short frames.
+        self.set_csr(3, 1 << 10);
+        self.set_csr(4, self.csr(4) | (1 << 11));
+        self.set_csr(0, CSR0_INIT);
+        if !arcdrv::wait_until(100, || self.csr(0) & CSR0_IDON != 0) {
+            arcdrv::warn!("the card does not take its settings");
+            return E_IO;
+        }
+        self.set_csr(0, CSR0_IDON);
+        OK
+    }
+
+    fn start(&self) {
+        let irq = self.has_irq.load(Ordering::Relaxed);
+        self.set_csr(0, CSR0_STRT | if irq { CSR0_IENA } else { 0 });
+    }
+
     fn csr(&self, n: u32) -> u32 {
         port::outl(self.io + RAP, n);
         port::inl(self.io + RDP)
@@ -103,6 +161,9 @@ impl Nic {
     }
 
     fn receive(&self) {
+        if self.paused.load(Ordering::Acquire) {
+            return;
+        }
         let iface = self.iface.load(Ordering::Relaxed);
         let mut st = self.state.lock();
         for _ in 0..RX_COUNT {
@@ -127,6 +188,9 @@ impl Nic {
     fn send(&self, frame: &[u8]) -> Status {
         if frame.is_empty() || frame.len() > MAX_FRAME - 4 {
             return E_INVAL;
+        }
+        if self.paused.load(Ordering::Acquire) {
+            return E_IO;
         }
         let start = arcdrv::time_ms();
         let mut st = loop {
@@ -169,6 +233,9 @@ unsafe extern "C" fn send(ctx: *mut c_void, frame: *const u8, len: usize) -> Sta
 unsafe extern "C" fn irq(ctx: *mut c_void) {
     // SAFETY: the leaked Nic.
     let nic = unsafe { &*(ctx as *const Nic) };
+    if nic.paused.load(Ordering::Acquire) {
+        return; // stopped, with interrupts off
+    }
     let csr0 = {
         let _st = nic.state.lock(); // RAP is shared with send()
         let csr0 = nic.csr(0);
@@ -192,21 +259,40 @@ unsafe extern "C" fn poller(ctx: *mut c_void) {
     }
 }
 
+/// Before sleep: the card stops.
+unsafe extern "C" fn suspend(ctx: *mut c_void) -> Status {
+    // SAFETY: the leaked Nic.
+    let nic = unsafe { &*(ctx as *const Nic) };
+    nic.paused.store(true, Ordering::Release);
+    let _st = nic.state.lock(); // a send or receive under way ends
+    nic.set_csr(0, CSR0_STOP);
+    OK
+}
+
+/// After sleep: the card set up again.
+unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
+    // SAFETY: the leaked Nic.
+    let nic = unsafe { &*(ctx as *const Nic) };
+    reset(nic.io);
+    let st = nic.init();
+    if st == OK {
+        *nic.state.lock() = State { rx_next: 0, tx_next: 0 };
+        nic.paused.store(false, Ordering::Release);
+        nic.start();
+    }
+    st
+}
+
 fn probe(dev: &DeviceInfo) -> Status {
     let Some(io) = dev.io(0) else { return E_NODEV };
     arcdrv::Pci(dev.id).enable(true, false, true);
 
-    // Reset (either width): the card comes back in 16-bit mode.
-    port::inl(io + RESET);
-    port::inw(io + RESET16);
-    arcdrv::sleep_ms(2);
+    reset(io);
     // The address PROM can be read byte by byte only in 16-bit mode.
     let mut mac = [0u8; 6];
     for (i, b) in mac.iter_mut().enumerate() {
         *b = port::inb(io + i as u16);
     }
-    // A 32-bit write to RDP switches to 32-bit registers.
-    port::outl(io + RDP, 0);
     let (Some(rings), Some(rx_bufs), Some(tx_bufs)) =
         (Dma::new(TX_RING + TX_COUNT * 16), Dma::new(RX_COUNT * BUF), Dma::new(TX_COUNT * BUF))
     else {
@@ -220,41 +306,13 @@ fn probe(dev: &DeviceInfo) -> Status {
         state: IrqLock::new(State { rx_next: 0, tx_next: 0 }),
         iface: AtomicI32::new(-1),
         has_irq: AtomicBool::new(false),
+        mac,
+        paused: AtomicBool::new(false),
     }));
-    nic.set_csr(0, CSR0_STOP);
-    // Software style 2: 32-bit descriptors and initialisation block.
-    nic.set_bcr(20, (nic.bcr(20) & !0xFF) | 2);
-    // Pick the cable automatically.
-    nic.set_bcr(2, nic.bcr(2) | (1 << 1));
-
-    for i in 0..RX_COUNT {
-        let at = RX_RING + i * 16;
-        nic.rings.write::<u32>(at, (nic.rx_bufs.phys() + (i * BUF) as u64) as u32);
-        nic.give_rx(i);
+    let st = nic.init();
+    if st != OK {
+        return st;
     }
-    let ib = &nic.rings;
-    ib.write::<u16>(INIT_BLOCK, 0); // normal mode
-    ib.write::<u8>(INIT_BLOCK + 2, (RX_LOG2 << 4) as u8);
-    ib.write::<u8>(INIT_BLOCK + 3, (TX_LOG2 << 4) as u8);
-    for (i, b) in mac.iter().enumerate() {
-        ib.write::<u8>(INIT_BLOCK + 4 + i, *b);
-    }
-    ib.write::<u64>(INIT_BLOCK + 12, u64::MAX); // every multicast group
-    ib.write::<u32>(INIT_BLOCK + 20, (ib.phys() + RX_RING as u64) as u32);
-    ib.write::<u32>(INIT_BLOCK + 24, (ib.phys() + TX_RING as u64) as u32);
-
-    let block = ib.phys() + INIT_BLOCK as u64;
-    nic.set_csr(1, block as u32 & 0xFFFF);
-    nic.set_csr(2, (block >> 16) as u32 & 0xFFFF);
-    // No interrupt for "initialisation done"; pad short frames.
-    nic.set_csr(3, 1 << 10);
-    nic.set_csr(4, nic.csr(4) | (1 << 11));
-    nic.set_csr(0, CSR0_INIT);
-    if !arcdrv::wait_until(100, || nic.csr(0) & CSR0_IDON != 0) {
-        arcdrv::warn!("the card does not take its settings");
-        return E_IO;
-    }
-    nic.set_csr(0, CSR0_IDON);
 
     let ctx = nic as *const Nic as *mut c_void;
     let desc: &'static NetDesc = Box::leak(Box::new(NetDesc { ctx, mac, _pad: [0; 2], mtu: 1500, send }));
@@ -266,9 +324,10 @@ fn probe(dev: &DeviceInfo) -> Status {
     nic.iface.store(iface, Ordering::Relaxed);
     let has_irq = arcdrv::irq_attach_any(dev, irq, ctx);
     nic.has_irq.store(has_irq, Ordering::Relaxed);
-    nic.set_csr(0, CSR0_STRT | if has_irq { CSR0_IENA } else { 0 });
+    nic.start();
     // Interrupt routing can be wrong on some boards; poll as a safety net.
     arcdrv::spawn("pcnet-rx", poller, ctx);
+    arcdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
     arcdrv::info!("link {}, {}", if nic.link_up() { "up" } else { "down" }, if has_irq { "interrupts" } else { "polling" });
     OK
 }

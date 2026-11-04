@@ -11,6 +11,37 @@ const PIC2_DATA: u16 = 0xA1;
 static MASK: IrqLock<u16> = IrqLock::new(0xFFFF);
 
 pub fn init() {
+    program();
+    let mut mask = MASK.lock();
+    *mask = !(1 << 2); // everything masked but the cascade
+    apply(*mask);
+}
+
+/// Which lines are level-triggered (the chipset's ELCR), kept across sleep.
+static ELCR: IrqLock<Option<u16>> = IrqLock::new(None);
+/// Lines that are always edge-triggered (timer, keyboard, cascade, clock,
+/// FPU): never set in the ELCR.
+const ELCR_EDGE_ONLY: u16 = 1 << 0 | 1 << 1 | 1 << 2 | 1 << 8 | 1 << 13;
+
+/// Before sleep: remembers the trigger mode of each line.
+pub fn suspend() {
+    let v = inb(0x4D0) as u16 | (inb(0x4D1) as u16) << 8;
+    // All ones: no ELCR (nothing answers at these ports).
+    *ELCR.lock() = (v != 0xFFFF).then_some(v & !ELCR_EDGE_ONLY);
+}
+
+/// After sleep: the controllers start from scratch; the lines in use are
+/// unmasked again, with their trigger modes.
+pub fn resume() {
+    if let Some(v) = *ELCR.lock() {
+        outb(0x4D0, v as u8);
+        outb(0x4D1, (v >> 8) as u8);
+    }
+    program();
+    apply(*MASK.lock());
+}
+
+fn program() {
     outb(PIC1_CMD, 0x11); // ICW1: init, ICW4 follows
     io_wait();
     outb(PIC2_CMD, 0x11);
@@ -27,9 +58,6 @@ pub fn init() {
     io_wait();
     outb(PIC2_DATA, 1);
     io_wait();
-    let mut mask = MASK.lock();
-    *mask = !(1 << 2); // everything masked but the cascade
-    apply(*mask);
 }
 
 fn apply(mask: u16) {

@@ -88,6 +88,7 @@ enum MenuAct {
     Store,
     Restart,
     PowerOff,
+    Sleep,
     NextWallpaper,
     Display,
     Activity,
@@ -1280,6 +1281,7 @@ impl Desktop {
         match act {
             MenuAct::Restart => self.end(l, Ending::Restart),
             MenuAct::PowerOff => self.end(l, Ending::PowerOff),
+            MenuAct::Sleep => crate::sleep::request("sleep chosen from the menu"),
             MenuAct::About => self.open_id(l, "about"),
             MenuAct::Lock => self.lock_screen(l),
             MenuAct::Screenshot => self.screenshot(l),
@@ -1562,24 +1564,23 @@ impl Desktop {
         }
         if self.logo_btn().contains(x, y) {
             let b = self.logo_btn();
-            let p = Popup::menu(
-                b.x,
-                b.bottom() + 12,
-                alloc::vec![
-                    ("Info su arcOS", Some(MenuAct::About)),
-                    ("", None),
-                    ("Impostazioni di sistema…", Some(MenuAct::Settings)),
-                    ("Negozio…", Some(MenuAct::Store)),
-                    ("Monitor attività", Some(MenuAct::Activity)),
-                    ("Desktop e finestre (F3)", Some(MenuAct::Overview)),
-                    ("Schermata", Some(MenuAct::Screenshot)),
-                    ("", None),
-                    ("Blocca schermo", Some(MenuAct::Lock)),
-                    ("Riavvia…", Some(MenuAct::Restart)),
-                    ("Spegni…", Some(MenuAct::PowerOff)),
-                ],
-                self.w,
-            );
+            let mut items = alloc::vec![
+                ("Info su arcOS", Some(MenuAct::About)),
+                ("", None),
+                ("Impostazioni di sistema…", Some(MenuAct::Settings)),
+                ("Negozio…", Some(MenuAct::Store)),
+                ("Monitor attività", Some(MenuAct::Activity)),
+                ("Desktop e finestre (F3)", Some(MenuAct::Overview)),
+                ("Schermata", Some(MenuAct::Screenshot)),
+                ("", None),
+                ("Blocca schermo", Some(MenuAct::Lock)),
+            ];
+            if crate::sleep::available().is_ok() {
+                items.push(("Sospendi", Some(MenuAct::Sleep)));
+            }
+            items.push(("Riavvia…", Some(MenuAct::Restart)));
+            items.push(("Spegni…", Some(MenuAct::PowerOff)));
+            let p = Popup::menu(b.x, b.bottom() + 12, items, self.w);
             self.show_popup(l, p);
             return;
         }
@@ -2949,6 +2950,9 @@ impl Desktop {
                 }
                 while let Some((title, body, icon)) = super::take_notification() {
                     self.notify(l, title, body, icon);
+                }
+                if super::take_sleep_lock() && settings::has_password() {
+                    self.lock_screen(l);
                 }
                 if self.notes.iter().any(|n| n.gone()) {
                     self.notes.retain(|n| !n.gone());

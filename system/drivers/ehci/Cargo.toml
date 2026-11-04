@@ -1,7 +1,7 @@
 [package]
 name = "ehci"
 description = "arcOS driver: USB 2.0 host controllers (EHCI)"
-version = "1.0.0"
+version = "1.1.0"
 edition.workspace = true
 publish.workspace = true
 authors.workspace = true

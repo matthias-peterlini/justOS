@@ -16,16 +16,17 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 use arcdrv::{
     BlockDesc, DeviceInfo, Mmio, Mutex, Pci, Status, BLOCK_READONLY, BLOCK_REMOVABLE, BUS_SD, DEVICE_OWNED, E_GONE, E_IO, E_NODEV,
     E_TIMEOUT, OK, RES_MEMORY,
 };
 use core::ffi::c_void;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 arcdrv::driver! {
     name: "sdhci",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -147,13 +148,75 @@ struct Slot {
     /// "00:07.0-0"
     name: String,
     parent: u32,
+    /// Asleep: the slot is left alone.
+    paused: AtomicBool,
+    /// The card in use (null if none).
+    card: AtomicPtr<Card>,
 }
 
 struct Card {
     slot: &'static Slot,
     /// Sector addresses (SDHC, SDXC, eMMC over 2 GB) instead of bytes.
     block_addressing: bool,
+    /// The card's identity, to recognise it after sleep.
+    cid: u128,
     gone: AtomicBool,
+}
+
+/// Status bits are latched only when enabled; nothing interrupts.
+fn enable_status(regs: &Mmio) {
+    regs.write16(INT_ENABLE, 0x00FF & !(1 << 8));
+    regs.write16(ERR_ENABLE, 0x03FF);
+    regs.write16(INT_SIGNAL, 0);
+    regs.write16(ERR_SIGNAL, 0);
+}
+
+/// The slots of one controller, for its power hooks.
+struct Controller {
+    slots: Vec<&'static Slot>,
+}
+
+/// Before sleep: the transfers have ended (the kernel holds new ones back);
+/// the cards lose power.
+unsafe extern "C" fn suspend(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the leaked Controller.
+    let c = unsafe { &*(ctx as *const Controller) };
+    for s in &c.slots {
+        s.paused.store(true, Ordering::Release);
+        let _io = s.io.lock();
+        s.power_off();
+    }
+    OK
+}
+
+/// After sleep: each controller reset and its card started again, if it is
+/// still the same card; a card swapped meanwhile counts as taken out.
+unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the leaked Controller.
+    let c = unsafe { &*(ctx as *const Controller) };
+    for s in &c.slots {
+        s.regs.write8(RESET, RESET_ALL);
+        if !arcdrv::wait_until(100, || s.regs.read8(RESET) & RESET_ALL == 0) {
+            arcdrv::warn!("{}: the controller does not come out of reset", s.name);
+        }
+        enable_status(&s.regs);
+        let card = s.card.load(Ordering::Acquire);
+        if !card.is_null() {
+            // SAFETY: cards are leaked when found.
+            let card = unsafe { &*card };
+            let same = s.card_present() && {
+                let _io = s.io.lock();
+                matches!(identify(s), Ok(id) if id.cid == card.cid && id.block_addressing == card.block_addressing)
+            };
+            if !same {
+                arcdrv::warn!("{}: the card is not the one there before sleep", s.name);
+                card.gone.store(true, Ordering::Release);
+                s.power_off();
+            }
+        }
+        s.paused.store(false, Ordering::Release);
+    }
+    OK
 }
 
 impl Slot {
@@ -373,6 +436,7 @@ struct Identity {
     block_addressing: bool,
     sectors: u64,
     description: String,
+    cid: u128,
 }
 
 /// Bits `hi..=lo` of a 128-bit register (CID, CSD).
@@ -516,7 +580,7 @@ fn identify(s: &Slot) -> Result<Identity, Status> {
     let name = product_name(cid, mmc);
     let description =
         if name.is_empty() { format!("{kind}, {}", size_text(sectors)) } else { format!("{kind} {name}, {}", size_text(sectors)) };
-    Ok(Identity { block_addressing, sectors, description })
+    Ok(Identity { block_addressing, sectors, description, cid })
 }
 
 fn transfer(card: &Card, lba: u64, count: u32, buf: *mut u8, write: bool) -> Status {
@@ -598,7 +662,8 @@ fn insert(s: &'static Slot) -> Option<(&'static Card, u32)> {
     if device < 0 {
         return None;
     }
-    let card: &'static Card = Box::leak(Box::new(Card { slot: s, block_addressing: id.block_addressing, gone: AtomicBool::new(false) }));
+    let card: &'static Card =
+        Box::leak(Box::new(Card { slot: s, block_addressing: id.block_addressing, cid: id.cid, gone: AtomicBool::new(false) }));
     let desc: &'static BlockDesc = Box::leak(Box::new(BlockDesc {
         ctx: card as *const Card as *mut c_void,
         sector_size: SECTOR as u32,
@@ -611,6 +676,7 @@ fn insert(s: &'static Slot) -> Option<(&'static Card, u32)> {
     }));
     arcdrv::info!("{}: {}{}", s.name, id.description, if readonly { ", write-protected" } else { "" });
     arcdrv::block_register(device as u32, desc);
+    s.card.store(card as *const Card as *mut Card, Ordering::Release);
     Some((card, device as u32))
 }
 
@@ -622,6 +688,10 @@ unsafe extern "C" fn watch(ctx: *mut c_void) {
     // A card that failed to start is not retried until it is taken out.
     let mut failed = false;
     loop {
+        if s.paused.load(Ordering::Acquire) {
+            arcdrv::sleep_ms(300);
+            continue;
+        }
         let present = s.card_present();
         match card {
             None if present && !failed => {
@@ -629,13 +699,17 @@ unsafe extern "C" fn watch(ctx: *mut c_void) {
                 card = insert(s);
                 failed = card.is_none();
             }
-            Some((c, device)) if !present => {
+            Some((c, device)) if !present || c.gone.load(Ordering::Acquire) => {
                 c.gone.store(true, Ordering::Release);
+                s.card.store(core::ptr::null_mut(), Ordering::Release);
                 drop(s.io.lock()); // the transfer in progress has ended
                 arcdrv::device_remove(device);
                 s.power_off();
                 arcdrv::info!("{}: card removed", s.name);
                 card = None;
+                // A card that stopped answering is not retried until it is
+                // taken out.
+                failed = present;
             }
             None if !present => failed = false,
             _ => {}
@@ -654,6 +728,7 @@ fn probe(dev: &DeviceInfo) -> Status {
     let mut slots = 0;
     let mut spec = 0;
     let mut dma = Mode::Pio;
+    let mut list = Vec::new();
     for i in 0..count {
         let Some(bar) = dev.resources.get(first + i).filter(|r| r.kind == RES_MEMORY && r.base != 0) else { continue };
         let Some(regs) = Mmio::map(bar.base, 0x100) else { continue };
@@ -685,11 +760,7 @@ fn probe(dev: &DeviceInfo) -> Status {
                 None
             }
         };
-        // Status bits are latched only when enabled; nothing interrupts.
-        regs.write16(INT_ENABLE, 0x00FF & !(1 << 8));
-        regs.write16(ERR_ENABLE, 0x03FF);
-        regs.write16(INT_SIGNAL, 0);
-        regs.write16(ERR_SIGNAL, 0);
+        enable_status(&regs);
         let slot: &'static Slot = Box::leak(Box::new(Slot {
             regs,
             version,
@@ -698,8 +769,11 @@ fn probe(dev: &DeviceInfo) -> Status {
             io: Mutex::new(bufs),
             name: format!("{:02x}:{:02x}.{}-{i}", loc >> 8, (loc >> 3) & 0x1F, loc & 7),
             parent: dev.id,
+            paused: AtomicBool::new(false),
+            card: AtomicPtr::new(core::ptr::null_mut()),
         }));
         arcdrv::spawn("sdhci", watch, slot as *const Slot as *mut c_void);
+        list.push(slot);
         slots += 1;
         spec = version;
         dma = mode;
@@ -707,6 +781,8 @@ fn probe(dev: &DeviceInfo) -> Status {
     if slots == 0 {
         return E_NODEV;
     }
+    let c: &'static Controller = Box::leak(Box::new(Controller { slots: list }));
+    arcdrv::power_hooks(dev.id, c as *const Controller as *mut c_void, Some(suspend), resume);
     let how = match dma {
         Mode::Adma2 => "ADMA2",
         Mode::Sdma => "SDMA",

@@ -99,6 +99,20 @@ impl Display {
         Ok(())
     }
 
+    /// After sleep the display driver may have set the same mode again with
+    /// another framebuffer (a virtio GPU's own memory instead of the VGA
+    /// window the firmware used): draw there from now on.
+    pub fn follow_framebuffer(&mut self) {
+        let Some(fb) = crate::console::framebuffer() else { return };
+        if fb.virt == self.fb.virt || fb.width as i32 != self.scene.w || fb.height as i32 != self.scene.h {
+            return;
+        }
+        self.fb = fb;
+        if let Some(p) = PANIC.lock().as_mut() {
+            p.0 = fb;
+        }
+    }
+
     /// The current resolution.
     pub fn mode(&self) -> arcdk::DisplayMode {
         arcdk::DisplayMode { width: self.scene.w as u32, height: self.scene.h as u32 }
@@ -249,6 +263,28 @@ fn take_notification() -> Option<(alloc::string::String, alloc::string::String, 
     } else {
         Some(q.remove(0))
     }
+}
+
+/// The computer is about to sleep: the desktop locks (with a password).
+static SLEEP_LOCK: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// The computer woke up: the display lost its picture, everything is
+/// drawn again.
+static REDRAW: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+pub fn before_sleep() {
+    SLEEP_LOCK.store(true, core::sync::atomic::Ordering::Release);
+}
+
+pub fn after_sleep() {
+    REDRAW.store(true, core::sync::atomic::Ordering::Release);
+}
+
+fn take_sleep_lock() -> bool {
+    SLEEP_LOCK.swap(false, core::sync::atomic::Ordering::AcqRel)
+}
+
+fn take_redraw() -> bool {
+    REDRAW.swap(false, core::sync::atomic::Ordering::AcqRel)
 }
 
 /// A resolution the user chose, applied by the interface thread.

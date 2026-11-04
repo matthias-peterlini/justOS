@@ -1,7 +1,7 @@
 # The Cirrus Logic GD5446 that QEMU emulates (-vga cirrus): 32-bit colour
 # up to 800x600 with 2 MiB, 1022 pixels wide at most.
 name        = cirrus
-version     = 1.0.0
+version     = 1.1.0
 class       = display
 description = Cirrus Logic GD5446 display
 author      = arcOS

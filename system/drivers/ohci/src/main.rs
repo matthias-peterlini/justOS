@@ -29,7 +29,7 @@ use core::sync::atomic::{fence, AtomicBool, AtomicU16, AtomicU32, AtomicU8, Orde
 
 arcdrv::driver! {
     name: "ohci",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -271,6 +271,10 @@ struct Ohci {
     polls: IrqLock<Vec<Arc<Pipe>>>,
     wake: Event,
     has_irq: AtomicBool,
+    /// Frame interval the firmware left (bit times per frame).
+    fi: u32,
+    /// Stopped for sleep.
+    asleep: AtomicBool,
 }
 
 impl Ohci {
@@ -673,6 +677,68 @@ impl Host for Ohci {
         }
         self.schedule_remove(&pipes);
     }
+
+    const SLEEPS: bool = true;
+
+    fn stop(&self) {
+        self.asleep.store(true, Ordering::Release);
+        self.regs.write32(HC_INT_DISABLE, 0xFFFF_FFFF);
+        self.regs.write32(HC_CONTROL, 0); // reset state: the bus stops
+    }
+
+    fn restart(&self) -> Status {
+        take_ownership(&self.regs);
+        let st = init(&self.regs, &self.hcca, self.fi);
+        if st == OK {
+            self.regs.write32(HC_INT_ENABLE, INT_MIE | INT_WDH | INT_UE);
+            self.power_ports();
+        }
+        self.asleep.store(false, Ordering::Release);
+        st
+    }
+}
+
+impl Ohci {
+    /// Powers the ports, globally and one by one (whichever the board has),
+    /// and waits for the power to be good.
+    fn power_ports(&self) {
+        self.regs.write32(HC_RH_STATUS, RH_LPSC);
+        for p in 1..=self.ports {
+            self.regs.write32(self.port_reg(p), PORT_PPS);
+        }
+        arcdrv::sleep_ms(((self.regs.read32(HC_RH_DESC_A) >> 24) as u64 * 2).max(20));
+    }
+}
+
+/// Resets the bus, then the controller, and makes it operational with
+/// empty lists. It has 2 ms to go operational after the reset, so
+/// everything is ready before.
+fn init(regs: &Mmio, hcca: &Dma, fi: u32) -> Status {
+    regs.write32(HC_INT_DISABLE, 0xFFFF_FFFF);
+    regs.write32(HC_CONTROL, 0);
+    arcdrv::sleep_ms(50);
+    for anchor in [ANCHOR_CONTROL, ANCHOR_BULK, ANCHOR_PERIODIC] {
+        hcca.write::<u32>(anchor, ED_SKIP);
+    }
+    let periodic = (hcca.phys() + ANCHOR_PERIODIC as u64) as u32;
+    for i in 0..32 {
+        hcca.write::<u32>(i * 4, periodic);
+    }
+    regs.write32(HC_COMMAND, CMD_HCR);
+    if !arcdrv::wait_until(10, || regs.read32(HC_COMMAND) & CMD_HCR == 0) {
+        arcdrv::warn!("controller reset timed out");
+        return E_TIMEOUT;
+    }
+    regs.write32(HC_HCCA, hcca.phys() as u32);
+    regs.write32(HC_CONTROL_HEAD, (hcca.phys() + ANCHOR_CONTROL as u64) as u32);
+    regs.write32(HC_BULK_HEAD, (hcca.phys() + ANCHOR_BULK as u64) as u32);
+    let fsmps = (fi - 210) * 6 / 7;
+    regs.write32(HC_FM_INTERVAL, fi | fsmps << 16 | (!regs.read32(HC_FM_INTERVAL) & (1 << 31)));
+    regs.write32(HC_PERIODIC_START, fi * 9 / 10);
+    regs.write32(HC_LS_THRESHOLD, 0x628);
+    regs.write32(HC_INT_STATUS, 0xFFFF_FFFF);
+    regs.write32(HC_CONTROL, CTL_OPERATIONAL | CTL_CLE | CTL_BLE | CTL_PLE | CTL_CBSR);
+    OK
 }
 
 /// Stops polling a pipe; never returns while its callback runs (the driver
@@ -711,7 +777,7 @@ unsafe extern "C" fn poll_thread(ctx: *mut c_void) {
         let sts = o.regs.read32(HC_INT_STATUS);
         // Let the controller report its next done queue.
         o.regs.write32(HC_INT_STATUS, sts & INT_WDH);
-        if sts & INT_UE != 0 && !reported {
+        if sts & INT_UE != 0 && !reported && !o.asleep.load(Ordering::Acquire) {
             arcdrv::error!("controller stopped (unrecoverable error)");
             reported = true;
         }
@@ -751,35 +817,13 @@ fn probe(dev: &DeviceInfo) -> Status {
         0 => 11999,
         v => v,
     };
-    // Reset the bus, then the controller; it then has 2 ms to go
-    // operational, so everything is ready before.
-    regs.write32(HC_CONTROL, 0);
-    arcdrv::sleep_ms(50);
     let Some(hcca) = Dma::new(4096) else { return E_NOMEM };
-    for anchor in [ANCHOR_CONTROL, ANCHOR_BULK, ANCHOR_PERIODIC] {
-        hcca.write::<u32>(anchor, ED_SKIP);
+    let st = init(&regs, &hcca, fi);
+    if st != OK {
+        return st;
     }
-    let periodic = (hcca.phys() + ANCHOR_PERIODIC as u64) as u32;
-    for i in 0..32 {
-        hcca.write::<u32>(i * 4, periodic);
-    }
-    regs.write32(HC_COMMAND, CMD_HCR);
-    if !arcdrv::wait_until(10, || regs.read32(HC_COMMAND) & CMD_HCR == 0) {
-        arcdrv::warn!("controller reset timed out");
-        return E_TIMEOUT;
-    }
-    regs.write32(HC_HCCA, hcca.phys() as u32);
-    regs.write32(HC_CONTROL_HEAD, (hcca.phys() + ANCHOR_CONTROL as u64) as u32);
-    regs.write32(HC_BULK_HEAD, (hcca.phys() + ANCHOR_BULK as u64) as u32);
-    let fsmps = (fi - 210) * 6 / 7;
-    regs.write32(HC_FM_INTERVAL, fi | fsmps << 16 | (!regs.read32(HC_FM_INTERVAL) & (1 << 31)));
-    regs.write32(HC_PERIODIC_START, fi * 9 / 10);
-    regs.write32(HC_LS_THRESHOLD, 0x628);
-    regs.write32(HC_INT_STATUS, 0xFFFF_FFFF);
-    regs.write32(HC_CONTROL, CTL_OPERATIONAL | CTL_CLE | CTL_BLE | CTL_PLE | CTL_CBSR);
 
-    let desc_a = regs.read32(HC_RH_DESC_A);
-    let ports = (desc_a & 0xFF).min(15) as u8;
+    let ports = (regs.read32(HC_RH_DESC_A) & 0xFF).min(15) as u8;
     if ports == 0 {
         return E_NODEV;
     }
@@ -794,18 +838,14 @@ fn probe(dev: &DeviceInfo) -> Status {
         polls: IrqLock::new(Vec::new()),
         wake: Event::new(),
         has_irq: AtomicBool::new(false),
+        fi,
+        asleep: AtomicBool::new(false),
     }));
     let ctx = o as *const Ohci as *mut c_void;
     o.has_irq.store(arcdrv::irq_attach_any(dev, irq, ctx), Ordering::Relaxed);
     arcdrv::spawn("ohci-poll", poll_thread, ctx);
     o.regs.write32(HC_INT_ENABLE, INT_MIE | INT_WDH | INT_UE);
-
-    // Power the ports, globally and one by one (whichever the board has).
-    o.regs.write32(HC_RH_STATUS, RH_LPSC);
-    for p in 1..=ports {
-        o.regs.write32(o.port_reg(p), PORT_PPS);
-    }
-    arcdrv::sleep_ms(((desc_a >> 24) as u64 * 2).max(20));
+    o.power_ports();
     arcdrv::info!("{} ports, {}", ports, if o.has_irq.load(Ordering::Relaxed) { "interrupts" } else { "polling" });
     arcusb::start(o, dev.id, "ohci-ports");
     OK

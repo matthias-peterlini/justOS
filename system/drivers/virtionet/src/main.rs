@@ -18,7 +18,7 @@ use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 arcdrv::driver! {
     name: "virtionet",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -47,10 +47,25 @@ struct Net {
     header: usize,
     iface: AtomicI32,
     has_irq: AtomicBool,
+    /// The features agreed on (again after sleep).
+    features: u64,
+    /// Asleep: the queues are left alone.
+    paused: AtomicBool,
 }
 
 impl Net {
+    /// Every receive buffer offered to the device.
+    fn fill_rx(&self, rx: &mut Queue) {
+        for i in 0..self.rx_count {
+            rx.desc(i, self.rx_bufs.phys() + (i as usize * BUF) as u64, BUF as u32, DESC_WRITE, 0);
+            rx.publish(i);
+        }
+    }
+
     fn receive(&self) {
+        if self.paused.load(Ordering::Acquire) {
+            return;
+        }
         let iface = self.iface.load(Ordering::Relaxed);
         let mut rx = self.rx.lock();
         let mut returned = false;
@@ -82,6 +97,9 @@ impl Net {
     fn send(&self, frame: &[u8]) -> Status {
         if frame.is_empty() || frame.len() + self.header > BUF {
             return E_INVAL;
+        }
+        if self.paused.load(Ordering::Acquire) {
+            return E_IO;
         }
         let start = arcdrv::time_ms();
         let mut tx = loop {
@@ -135,6 +153,44 @@ unsafe extern "C" fn poller(ctx: *mut c_void) {
     }
 }
 
+/// Before sleep: the device stops.
+unsafe extern "C" fn suspend(ctx: *mut c_void) -> Status {
+    // SAFETY: the leaked Net.
+    let net = unsafe { &*(ctx as *const Net) };
+    net.paused.store(true, Ordering::Release);
+    // Wait for a receive or send under way.
+    drop(net.rx.lock());
+    drop(net.tx.lock());
+    net.vio.reset();
+    OK
+}
+
+/// After sleep: the device set up again, the receive buffers offered anew.
+unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
+    // SAFETY: the leaked Net.
+    let net = unsafe { &*(ctx as *const Net) };
+    net.paused.store(true, Ordering::Release);
+    if net.vio.negotiate(net.features).is_none() {
+        return E_IO;
+    }
+    {
+        let mut rx = net.rx.lock();
+        net.vio.requeue(&mut rx);
+        net.fill_rx(&mut rx);
+    }
+    {
+        let mut tx = net.tx.lock();
+        net.vio.requeue(&mut tx.queue);
+        tx.busy = [false; MAX_TX as usize];
+        tx.next = 0;
+    }
+    net.vio.reroute();
+    net.vio.ready();
+    net.vio.notify(&net.rx.lock());
+    net.paused.store(false, Ordering::Release);
+    OK
+}
+
 fn probe(dev: &DeviceInfo) -> Status {
     if dev.vendor != 0x1AF4 || !(dev.device == 0x1000 || dev.device == 0x1041) {
         return E_NODEV;
@@ -174,14 +230,10 @@ fn probe(dev: &DeviceInfo) -> Status {
         header,
         iface: AtomicI32::new(-1),
         has_irq: AtomicBool::new(false),
+        features,
+        paused: AtomicBool::new(false),
     }));
-    {
-        let mut rx = net.rx.lock();
-        for i in 0..rx_count {
-            rx.desc(i, net.rx_bufs.phys() + (i as usize * BUF) as u64, BUF as u32, DESC_WRITE, 0);
-            rx.publish(i);
-        }
-    }
+    net.fill_rx(&mut net.rx.lock());
     let ctx = net as *const Net as *mut c_void;
     net.has_irq.store(net.vio.attach_irq(dev, irq, ctx), Ordering::Relaxed);
     net.vio.ready();
@@ -194,6 +246,7 @@ fn probe(dev: &DeviceInfo) -> Status {
     }
     net.iface.store(iface, Ordering::Relaxed);
     arcdrv::spawn("virtionet-rx", poller, ctx);
+    arcdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
     arcdrv::info!(
         "{} interface, {}",
         if net.vio.is_modern() { "modern" } else { "legacy" },

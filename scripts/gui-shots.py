@@ -18,6 +18,8 @@ A script is a list of steps, one per line:
     type <text>                 letters, digits, space and simple punctuation
     key <name>                  a QEMU key name: ret, esc, spc, tab, ctrl-spc...
     hold <name> / unhold <name> keep a key down (ctrl, shift, alt) and let go
+    serial <text>               a command line typed on the serial console
+                                (the shell there), e.g. "serial suspend 3"
 
 Usage: scripts/gui-shots.py <image> <script> <out folder> [qemu options...]
 Environment: QEMU (default qemu-system-x86_64), UEFI=1 for OVMF, CDROM=1 to
@@ -28,10 +30,13 @@ import json
 import os
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+import zlib
 
 # Screen size the pointer positions refer to (SCREEN=1920x1080 for a
 # loader that picked another mode).
@@ -82,6 +87,49 @@ class Qmp:
         self.cmd("input-send-event", events=[{"type": "key", "data": {"down": down, "key": {"type": "qcode", "data": name}}}])
 
 
+def ppm_to_png(src, dst):
+    """Converts QEMU's binary PPM screendump to PNG with the standard library."""
+    with open(src, "rb") as f:
+        data = f.read()
+    # Header: "P6", width, height, maxval, each followed by white space.
+    fields, pos = [], 0
+    while len(fields) < 4:
+        while data[pos:pos + 1].isspace():
+            pos += 1
+        if data[pos:pos + 1] == b"#":
+            pos = data.index(b"\n", pos) + 1
+            continue
+        end = pos
+        while not data[end:end + 1].isspace():
+            end += 1
+        fields.append(data[pos:end])
+        pos = end
+    pos += 1
+    if fields[0] != b"P6":
+        raise SystemExit(f"{src}: not a binary PPM")
+    w, h = int(fields[1]), int(fields[2])
+    stride = w * 3
+    pixels = data[pos:pos + stride * h]
+    raw = b"".join(b"\0" + pixels[y * stride:(y + 1) * stride] for y in range(h))
+
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+
+    with open(dst, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n")
+        f.write(chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)))
+        f.write(chunk(b"IDAT", zlib.compress(raw, 6)))
+        f.write(chunk(b"IEND", b""))
+
+
+def drain(conn):
+    try:
+        while conn.recv(4096):
+            pass
+    except OSError:
+        pass
+
+
 CHARS = {" ": "spc", ".": "dot", ",": "comma", "-": "minus", "/": "slash", ":": "shift-semicolon", "!": "shift-1", "+": "kp_add", "*": "kp_multiply", "=": "equal"}
 
 
@@ -93,8 +141,12 @@ def main():
     disk = os.path.join(work, "disk.img")
     shutil.copy(image, disk)
     sock = os.path.join(work, "qmp.sock")
+    ser = os.path.join(work, "serial.sock")
     qemu = os.environ.get("QEMU", "qemu-system-x86_64")
-    args = [qemu, "-m", "512M", "-display", "none", "-no-reboot", "-serial", f"file:{out}/serial.log",
+    # The serial console goes to serial.log, and to a socket the "serial"
+    # step types on.
+    args = [qemu, "-m", "512M", "-display", "none", "-no-reboot",
+            "-chardev", f"socket,id=ser,path={ser},server=on,wait=off,logfile={out}/serial.log", "-serial", "chardev:ser",
             "-qmp", f"unix:{sock},server,nowait", "-usb", "-device", "usb-tablet"]
     if os.environ.get("CDROM") == "1":
         args += ["-cdrom", disk]
@@ -109,6 +161,7 @@ def main():
     try:
         q = Qmp(sock)
         at = (W // 2, H // 2)
+        console = None
         for line in open(script):
             line = line.strip()
             if not line or line.startswith("#"):
@@ -121,8 +174,7 @@ def main():
                 ppm = os.path.join(work, "shot.ppm")
                 q.cmd("screendump", filename=ppm)
                 time.sleep(0.3)
-                from PIL import Image
-                Image.open(ppm).save(os.path.join(out, a[0] + ".png"))
+                ppm_to_png(ppm, os.path.join(out, a[0] + ".png"))
                 print("shot", a[0], flush=True)
             elif op in ("click", "double", "right"):
                 x, y = int(a[0]), int(a[1])
@@ -174,6 +226,14 @@ def main():
                     time.sleep(0.08)
             elif op == "key":
                 q.key(a[0])
+            elif op == "serial":
+                if console is None:
+                    console = socket.socket(socket.AF_UNIX)
+                    console.connect(ser)
+                    # What the system writes back is in the log already;
+                    # reading it keeps the console from stalling.
+                    threading.Thread(target=drain, args=(console,), daemon=True).start()
+                console.sendall((rest + "\r").encode())
             else:
                 raise SystemExit(f"unknown step: {line}")
             if op in ("click", "double", "right", "move", "press", "glide", "release"):

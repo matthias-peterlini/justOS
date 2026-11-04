@@ -831,6 +831,14 @@ pub fn boot_framebuffer() -> Option<Framebuffer> {
     (unsafe { (api().boot_framebuffer)(&mut fb) } == OK).then_some(fb)
 }
 
+/// Registers what a device does when the machine goes to sleep and wakes
+/// up (see [`PowerHooks`]).
+pub fn power_hooks(device: u32, ctx: *mut c_void, suspend: Option<PowerHook>, resume: PowerHook) -> Status {
+    let hooks = PowerHooks { ctx, suspend, resume };
+    // SAFETY: kernel call; the kernel copies the hooks.
+    unsafe { (api().power_hooks)(device, &hooks) }
+}
+
 /// Copies an ASCII model name into the fixed field of [`BlockDesc`].
 pub fn model_name(name: &str) -> [u8; 40] {
     let mut out = [0u8; 40];
@@ -859,6 +867,8 @@ pub mod pcm {
 
     struct State {
         running: bool,
+        /// The machine sleeps: the device is off and writers wait.
+        paused: bool,
         /// Bytes written since the start (not wrapped).
         written: u64,
         /// Bytes of whole laps the device played.
@@ -880,7 +890,31 @@ pub mod pcm {
         /// A ring of `buf.len()` bytes (a multiple of the frame size).
         pub fn new(hw: H, buf: Dma) -> PcmRing<H> {
             let size = buf.len();
-            PcmRing { hw, buf, size, state: Mutex::new(State { running: false, written: 0, laps: 0, last: 0 }), progress: Event::new() }
+            PcmRing {
+                hw,
+                buf,
+                size,
+                state: Mutex::new(State { running: false, paused: false, written: 0, laps: 0, last: 0 }),
+                progress: Event::new(),
+            }
+        }
+
+        /// Before sleep: the device stops (what was queued is dropped) and
+        /// writers wait until [`PcmRing::unpause`].
+        pub fn pause(&self) {
+            let mut st = self.state.lock();
+            if st.running {
+                self.hw.stop();
+            }
+            st.running = false;
+            st.paused = true;
+        }
+
+        /// After sleep, once the device is set up again: playing goes on
+        /// with the next sound written.
+        pub fn unpause(&self) {
+            self.state.lock().paused = false;
+            self.progress.signal();
         }
 
         pub fn phys(&self) -> u64 {
@@ -921,13 +955,19 @@ pub mod pcm {
         pub fn write(&self, mut data: &[u8]) {
             let mut st = self.state.lock();
             while !data.is_empty() {
+                if st.paused {
+                    drop(st);
+                    self.progress.wait(20);
+                    st = self.state.lock();
+                    continue;
+                }
                 if !st.running {
                     // Fill the ring from the start, then let it play.
                     self.buf.as_mut_slice().fill(0);
                     let n = data.len().min(self.size);
                     self.copy_in(0, &data[..n]);
                     data = &data[n..];
-                    *st = State { running: true, written: n as u64, laps: 0, last: 0 };
+                    *st = State { running: true, paused: false, written: n as u64, laps: 0, last: 0 };
                     self.hw.start();
                     continue;
                 }
@@ -954,7 +994,7 @@ pub mod pcm {
         /// Plays what is queued to its end, then stops the device.
         pub fn drain(&self) {
             let mut st = self.state.lock();
-            if !st.running {
+            if !st.running || st.paused {
                 return;
             }
             let played = self.played(&mut st);
@@ -972,6 +1012,9 @@ pub mod pcm {
                 drop(st);
                 self.progress.wait(5);
                 st = self.state.lock();
+                if st.paused || !st.running {
+                    return; // the machine went to sleep meanwhile
+                }
             }
             self.hw.stop();
             st.running = false;

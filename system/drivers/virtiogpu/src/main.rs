@@ -18,7 +18,7 @@ use core::ffi::c_void;
 
 arcdrv::driver! {
     name: "virtiogpu",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -66,6 +66,64 @@ struct Gpu {
     state: Mutex<(Queue, Dma, Screen)>,
     /// The host's preferred size for the first output.
     preferred: (u32, u32),
+    /// The features agreed on (again after sleep).
+    features: u64,
+}
+
+impl Gpu {
+    /// Shows `screen` on the first output: a resource of its size on the
+    /// host, backed by its memory.
+    fn show(&self, q: &mut Queue, page: &Dma, screen: &Screen) -> bool {
+        let Some(memory) = &screen.memory else { return false };
+        let (id, w, h) = (screen.resource, screen.width, screen.height);
+        self.ok(q, page, RESOURCE_CREATE_2D, |c| {
+            c.u32(id).u32(FORMAT_B8G8R8X8).u32(w).u32(h);
+        }) && self.ok(q, page, RESOURCE_ATTACH_BACKING, |c| {
+            c.u32(id).u32(1).u64(memory.phys()).u32(memory.len() as u32).u32(0);
+        }) && self.ok(q, page, SET_SCANOUT, |c| {
+            c.u32(0).u32(0).u32(w).u32(h).u32(0).u32(id);
+        })
+    }
+}
+
+/// Before sleep: the command under way ends, then the device stops.
+unsafe extern "C" fn suspend(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the leaked Gpu.
+    let g = unsafe { &*(ctx as *const Gpu) };
+    let _st = g.state.lock();
+    g.vio.reset();
+    OK
+}
+
+/// After sleep the host forgot the screen's resource: the device set up
+/// again and the same screen (same memory) shown anew.
+unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the leaked Gpu.
+    let g = unsafe { &*(ctx as *const Gpu) };
+    let mut st = g.state.lock();
+    let (q, page, screen) = &mut *st;
+    if !g.vio.restore(g.features, &mut [&mut *q]) {
+        return E_IO;
+    }
+    q.quiet();
+    g.vio.ready();
+    if screen.memory.is_none() {
+        return OK;
+    }
+    if !g.show(q, page, screen) {
+        return E_IO;
+    }
+    let (id, w, h) = (screen.resource, screen.width, screen.height);
+    let whole = g.ok(q, page, TRANSFER_TO_HOST_2D, |c| {
+        c.u32(0).u32(0).u32(w).u32(h).u64(0).u32(id).u32(0);
+    }) && g.ok(q, page, RESOURCE_FLUSH, |c| {
+        c.u32(0).u32(0).u32(w).u32(h).u32(id).u32(0);
+    });
+    if whole {
+        OK
+    } else {
+        E_IO
+    }
 }
 
 /// Writes little-endian words into a command buffer.
@@ -139,15 +197,9 @@ unsafe extern "C" fn set_mode(ctx: *mut c_void, mode: DisplayMode, fb: *mut Fram
     let Some(memory) = Dma::new(w as usize * h as usize * 4) else { return E_NOMEM };
     let mut st = g.state.lock();
     let (q, page, screen) = &mut *st;
-    let id = screen.resource + 1;
-    let created = g.ok(q, page, RESOURCE_CREATE_2D, |c| {
-        c.u32(id).u32(FORMAT_B8G8R8X8).u32(w).u32(h);
-    }) && g.ok(q, page, RESOURCE_ATTACH_BACKING, |c| {
-        c.u32(id).u32(1).u64(memory.phys()).u32(memory.len() as u32).u32(0);
-    }) && g.ok(q, page, SET_SCANOUT, |c| {
-        c.u32(0).u32(0).u32(w).u32(h).u32(0).u32(id);
-    });
-    if !created {
+    let (phys, virt) = (memory.phys(), memory.as_ptr() as u64);
+    let new = Screen { resource: screen.resource + 1, width: w, height: h, memory: Some(memory) };
+    if !g.show(q, page, &new) {
         return E_IO;
     }
     // The old screen goes once the new one shows.
@@ -160,8 +212,8 @@ unsafe extern "C" fn set_mode(ctx: *mut c_void, mode: DisplayMode, fb: *mut Fram
     // SAFETY: as above.
     unsafe {
         *fb = Framebuffer {
-            phys: memory.phys(),
-            virt: memory.as_ptr() as u64,
+            phys,
+            virt,
             width: w,
             height: h,
             pitch: w * 4,
@@ -171,7 +223,7 @@ unsafe extern "C" fn set_mode(ctx: *mut c_void, mode: DisplayMode, fb: *mut Fram
             _pad: 0,
         };
     }
-    *screen = Screen { resource: id, width: w, height: h, memory: Some(memory) };
+    *screen = new;
     OK
 }
 
@@ -198,16 +250,21 @@ fn probe(dev: &DeviceInfo) -> Status {
         arcdrv::warn!("no usable virtio registers");
         return E_NODEV;
     };
-    if vio.negotiate(0).is_none() {
+    let Some(features) = vio.negotiate(0) else {
         return E_IO;
-    }
+    };
     let (Some(q), Some(page)) = (vio.queue(0, 16), Dma::new(4096)) else {
         vio.set_status(arcvirtio::STATUS_FAILED);
         return E_IO;
     };
     q.quiet();
     vio.ready();
-    let mut g = Gpu { vio, state: Mutex::new((q, page, Screen { resource: 0, width: 0, height: 0, memory: None })), preferred: (0, 0) };
+    let mut g = Gpu {
+        vio,
+        state: Mutex::new((q, page, Screen { resource: 0, width: 0, height: 0, memory: None })),
+        preferred: (0, 0),
+        features,
+    };
     let preferred = {
         let mut st = g.state.lock();
         let (q, page, _) = &mut *st;
@@ -233,5 +290,6 @@ fn probe(dev: &DeviceInfo) -> Status {
     if n < 0 {
         return n;
     }
+    arcdrv::power_hooks(dev.id, g as *const Gpu as *mut c_void, Some(suspend), resume);
     OK
 }

@@ -5,17 +5,35 @@
 # and thermal zone of scripts/acpi/laptop.aml, checks that arcOS reads
 # them through the firmware's AML, empties the battery and checks that
 # arcOS turns itself off.
+# The sleep cases put the machine to sleep (S3) for a few seconds, on two
+# processors, and check that the disk, the file system and the network
+# work after it wakes up: sleep-pc (PIIX4, IDE), sleep-q35 (AHCI) and
+# sleep-uefi (OVMF).
 #
-# Usage: scripts/test-acpi.sh <image> [case...]   (cases: pc, q35, laptop)
+# Usage: scripts/test-acpi.sh <image> [case...]
+# (cases: pc, q35, laptop, sleep-pc, sleep-q35, sleep-uefi)
 set -u
 IMAGE=${1:?usage: test-acpi.sh <image> [case...]}
 shift
 HERE=$(dirname "$0")
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
-CASES=${*:-pc q35 laptop}
+CASES=${*:-pc q35 laptop sleep-pc sleep-q35 sleep-uefi}
 
 printf '@sleep 3\ndev\n@sleep 8\necho still-on\n' > "$WORK/cmds.txt"
+
+cat > "$WORK/sleep.txt" <<'EOT'
+@sleep 3
+sysinfo
+write sys:/home/s.txt kept across sleep
+suspend 3
+@sleep 9
+cat sys:/home/s.txt
+check sys
+ping 10.0.2.2 2
+sysinfo
+shutdown
+EOT
 
 # The battery drops to 2% (1000 of 50000 mWh) with the adapter unplugged.
 cat > "$WORK/laptop.txt" <<'EOT'
@@ -66,6 +84,20 @@ for c in $CASES; do
             for want in "AML ready" "on mains" "80%, charging" "Arc Cells ARC57 LION" "now 40000 of 50000 mWh (design 57000)" \
                 "health 87%, 123 cycles" "lid.* open" "TZ01 40.0 °C.*critical 100 °C" "battery *80% (on mains)" \
                 "battery empty: turning off"; do
+                grep -q "$want" "$WORK/out.txt" || problems="$problems [missing: $want]"
+            done
+            ;;
+        sleep-pc | sleep-q35 | sleep-uefi)
+            ARGS="-smp 2"
+            DISK=ide UEFI=
+            case $c in
+                sleep-q35) ARGS="$ARGS -machine q35" DISK=ahci ;;
+                sleep-uefi) UEFI=1 ;;
+            esac
+            UEFI=$UEFI DISK=$DISK "$HERE/test.sh" "$IMAGE" "$WORK/sleep.txt" $ARGS > "$WORK/out.txt" 2>&1
+            [ $? -ne 0 ] && problems="$problems [kernel stopped]"
+            for want in "sleep *ready$" "awake again after" "^kept across sleep" "sys: no problems found" \
+                "2 of 2 replies" "sleep *ready, slept 1 time"; do
                 grep -q "$want" "$WORK/out.txt" || problems="$problems [missing: $want]"
             done
             ;;

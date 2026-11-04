@@ -19,7 +19,7 @@ use core::ffi::c_void;
 
 arcdrv::driver! {
     name: "vmsvga",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -80,11 +80,37 @@ struct Svga {
     fb_start: u64,
     vram: u64,
     max: (u32, u32),
-    /// Serialises register and FIFO access.
-    lock: Mutex<()>,
+    /// Serialises register and FIFO access; holds the mode set (width,
+    /// height; 0 before the first).
+    lock: Mutex<(u32, u32)>,
+}
+
+/// Agrees on version II of the interface.
+fn negotiate(port: u16) -> bool {
+    outl(port, REG_ID);
+    outl(port + 1, SVGA_ID_2);
+    outl(port, REG_ID);
+    inl(port + 1) == SVGA_ID_2
 }
 
 impl Svga {
+    /// An empty FIFO, then the device told it is set up.
+    fn init_fifo(&self) {
+        self.set_fifo_reg(FIFO_MIN, FIFO_REGS);
+        self.set_fifo_reg(FIFO_MAX, self.fifo_size);
+        self.set_fifo_reg(FIFO_NEXT_CMD, FIFO_REGS);
+        self.set_fifo_reg(FIFO_STOP, FIFO_REGS);
+        self.write(REG_CONFIG_DONE, 1);
+    }
+
+    fn program(&self, w: u32, h: u32) -> bool {
+        self.write(REG_WIDTH, w);
+        self.write(REG_HEIGHT, h);
+        self.write(REG_BITS_PER_PIXEL, 32);
+        self.write(REG_ENABLE, 1);
+        self.read(REG_WIDTH) == w && self.read(REG_HEIGHT) == h
+    }
+
     fn read(&self, reg: u32) -> u32 {
         outl(self.port, reg);
         inl(self.port + 1)
@@ -158,14 +184,11 @@ unsafe extern "C" fn set_mode(ctx: *mut c_void, mode: DisplayMode, fb: *mut Fram
     if !s.fits(mode.width, mode.height) {
         return E_INVAL;
     }
-    let _l = s.lock.lock();
-    s.write(REG_WIDTH, mode.width);
-    s.write(REG_HEIGHT, mode.height);
-    s.write(REG_BITS_PER_PIXEL, 32);
-    s.write(REG_ENABLE, 1);
-    if s.read(REG_WIDTH) != mode.width || s.read(REG_HEIGHT) != mode.height {
+    let mut current = s.lock.lock();
+    if !s.program(mode.width, mode.height) {
         return E_IO;
     }
+    *current = (mode.width, mode.height);
     let pitch = s.read(REG_BYTES_PER_LINE);
     let offset = s.read(REG_FB_OFFSET) as u64;
     // SAFETY: as above.
@@ -192,13 +215,35 @@ unsafe extern "C" fn flush(ctx: *mut c_void, x: u32, y: u32, w: u32, h: u32) {
     s.command(&[CMD_UPDATE, x, y, w, h]);
 }
 
+/// Before sleep: the device finishes the commands in its FIFO.
+unsafe extern "C" fn suspend(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the leaked Svga.
+    let s = unsafe { &*(ctx as *const Svga) };
+    let _l = s.lock.lock();
+    s.sync();
+    OK
+}
+
+/// After sleep the device starts over: interface, FIFO, mode.
+unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the leaked Svga.
+    let s = unsafe { &*(ctx as *const Svga) };
+    let current = s.lock.lock();
+    if !negotiate(s.port) {
+        return E_IO;
+    }
+    s.init_fifo();
+    let (w, h) = *current;
+    if w != 0 && !s.program(w, h) {
+        return E_IO;
+    }
+    OK
+}
+
 fn probe(dev: &DeviceInfo) -> Status {
     let (Some(port), fb, fifo) = (dev.io(0), dev.resources[1], dev.resources[2]) else { return E_NODEV };
     Pci(dev.id).enable(true, true, false);
-    outl(port, REG_ID);
-    outl(port + 1, SVGA_ID_2);
-    outl(port, REG_ID);
-    if inl(port + 1) != SVGA_ID_2 {
+    if !negotiate(port) {
         arcdrv::info!("the device does not speak SVGA II");
         return E_NODEV;
     }
@@ -223,13 +268,9 @@ fn probe(dev: &DeviceInfo) -> Status {
         fb_start,
         vram: read(REG_VRAM_SIZE) as u64,
         max: (read(REG_MAX_WIDTH), read(REG_MAX_HEIGHT)),
-        lock: Mutex::new(()),
+        lock: Mutex::new((0, 0)),
     };
-    s.set_fifo_reg(FIFO_MIN, FIFO_REGS);
-    s.set_fifo_reg(FIFO_MAX, s.fifo_size);
-    s.set_fifo_reg(FIFO_NEXT_CMD, FIFO_REGS);
-    s.set_fifo_reg(FIFO_STOP, FIFO_REGS);
-    s.write(REG_CONFIG_DONE, 1);
+    s.init_fifo();
     arcdrv::info!("{} MiB of video memory, up to {}x{}", s.vram >> 20, s.max.0, s.max.1);
     let s: &'static Svga = Box::leak(Box::new(s));
     let desc: &'static DisplayDesc = Box::leak(Box::new(DisplayDesc {
@@ -243,5 +284,6 @@ fn probe(dev: &DeviceInfo) -> Status {
     if n < 0 {
         return n;
     }
+    arcdrv::power_hooks(dev.id, s as *const Svga as *mut c_void, Some(suspend), resume);
     OK
 }

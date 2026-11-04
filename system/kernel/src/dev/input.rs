@@ -77,6 +77,9 @@ struct State {
     clicks: VecDeque<(u8, bool, i32, i32)>,
     serial: [u8; 8],
     serial_len: usize,
+    /// The queue filled up with serial input: the console stopped reading
+    /// the chip (the sender waits) until the reader takes keys.
+    serial_held: bool,
 }
 
 static STATE: IrqLock<State> = IrqLock::new(State {
@@ -97,6 +100,7 @@ static STATE: IrqLock<State> = IrqLock::new(State {
     clicks: VecDeque::new(),
     serial: [0; 8],
     serial_len: 0,
+    serial_held: false,
 });
 
 static WAITERS: WaitQueue = WaitQueue::new();
@@ -226,6 +230,29 @@ pub fn driver_event(_device: u32, kind: u32, code: u32, value: i32) {
     }
 }
 
+/// Room for another byte from the serial console. Text pasted there comes
+/// faster than the shell takes it: rather than dropping keys, the console
+/// stops listening (the byte stays in the chip, the sender waits) until the
+/// reader has taken half the queue.
+pub fn serial_room() -> bool {
+    let mut s = STATE.lock();
+    if s.queue.len() < QUEUE_MAX {
+        return true;
+    }
+    s.serial_held = true;
+    crate::console::serial::listen(false);
+    false
+}
+
+fn pop(s: &mut State) -> Option<KeyEvent> {
+    let ev = s.queue.pop_front();
+    if s.serial_held && s.queue.len() <= QUEUE_MAX / 2 {
+        s.serial_held = false;
+        crate::console::serial::listen(true);
+    }
+    ev
+}
+
 /// A byte typed on the serial console (VT100 keys).
 pub fn serial_byte(b: u8) {
     {
@@ -276,12 +303,12 @@ pub fn serial_byte(b: u8) {
 
 /// Waits for the next key.
 pub fn read_key() -> KeyEvent {
-    WAITERS.wait_for(|| STATE.lock().queue.pop_front())
+    WAITERS.wait_for(|| pop(&mut STATE.lock()))
 }
 
 /// The next key if one is queued.
 pub fn try_read_key() -> Option<KeyEvent> {
-    STATE.lock().queue.pop_front()
+    pop(&mut STATE.lock())
 }
 
 pub fn layout() -> Layout {

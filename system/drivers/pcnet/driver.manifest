@@ -1,7 +1,7 @@
 # AMD PCnet-PCI family (Am79C970A/971/972/973/975): the default card of
 # VirtualBox and VMware on older guest settings.
 name        = pcnet
-version     = 1.0.0
+version     = 1.1.0
 class       = network
 description = AMD PCnet Ethernet
 author      = arcOS

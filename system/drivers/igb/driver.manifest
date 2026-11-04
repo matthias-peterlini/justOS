@@ -4,7 +4,7 @@
 # 82576 (QEMU); the others share the interface but are not verified on
 # hardware.
 name        = igb
-version     = 1.0.0
+version     = 1.1.0
 class       = network
 description = Intel 82576, I210, I211, I350, I225, I226 Ethernet
 author      = arcOS

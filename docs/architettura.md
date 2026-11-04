@@ -128,6 +128,7 @@ La metà bassa appartiene al programma in esecuzione.
 | programmi | `user.rs` | processi, spazi di indirizzi, caricatore, chiamate di sistema (anche le finestre, `WIN_*`) |
 | negozio | `store.rs` | i pacchetti di `sys:/store`: elenco, installazione, rimozione |
 | ACPI | `acpi/` | tabelle, spegnimento (`_PTS`, S5), riavvio, pulsante di accensione; l'AML del firmware: GPE, embedded controller, batteria, alimentatore, coperchio, temperature |
+| sospensione | `sleep.rs`, `acpi/sleep.rs`, `dev/pm.rs` | sospensione in RAM (S3): dispositivi, processori, firmware e risveglio |
 | shell | `shell.rs` | l'interfaccia a riga di comando |
 
 ### ACPI e AML
@@ -165,6 +166,45 @@ alto, nel centro di controllo, in Info sistema e con `acpi` nel Terminale
 `make test-acpi` prova il pulsante di accensione su PIIX4 e Q35 e un
 «portatile»: QEMU con la SSDT di `scripts/acpi/laptop.asl` (batteria,
 alimentatore, coperchio, zona termica), di cui scarica la batteria.
+
+### Sospensione
+
+La sospensione in RAM (S3) spegne tutto tranne la memoria; al risveglio
+il sistema riparte da dove era. La chiedono il menu della scrivania, il
+tasto di sospensione, la chiusura del coperchio o `suspend` nel Terminale
+(`suspend 10` si risveglia da sola dopo 10 secondi, con la sveglia del
+CMOS; `suspend check` dice se si può). `sleep.rs` fa i passi in ordine, e
+se uno fallisce disfa quelli già fatti:
+
+1. controlla che il firmware offra S3 (`\_S3`) e che ogni dispositivo
+   con un driver abbia i suoi hook (`dev/pm.rs`, vedi
+   [driver.md](driver.md#sospensione));
+2. con la grafica attiva mette su la schermata di blocco, se c'è una
+   password: è la prima cosa che si vede al risveglio;
+3. scrive i file system su disco (se la batteria si scarica, nulla va
+   perso), avvisa il firmware (`_TTS`), trattiene l'I/O verso i
+   dispositivi, salva la configurazione PCI e ferma i dispositivi, dai
+   figli ai genitori;
+4. arma i dispositivi che possono svegliare il computer (`_PRW`, `_DSW`),
+   chiama `_PTS(3)` e ferma gli altri processori;
+5. `acpi/sleep.rs` salva i registri sulla pila, scrive il vettore di
+   risveglio nella FACS e SLP_EN nel chipset.
+
+Al risveglio il firmware salta al vettore: è lo stesso trampolino in modo
+reale che avvia i processori secondari (`arch/smp.rs`), che ricarica le
+tabelle del kernel e torna in `enter` come se SLP_EN fosse appena stato
+scritto. Poi, con le interruzioni spente: l'orologio (il tempo passato
+dormendo si legge dal CMOS), la configurazione PCI, PIC e APIC, il timer,
+la porta seriale, gli eventi del chipset; con le interruzioni accese: MSI
+e MSI-X, gli altri processori, il controller PS/2, i dispositivi (dai
+genitori ai figli), l'I/O trattenuto, `_WAK(3)`. Infine lo schermo: se era
+ancora nel modo del firmware, il driver lo rimette (il BIOS di QEMU lascia
+la scheda in modo testo), e l'interfaccia ridisegna tutto.
+
+`make test-acpi` sospende e risveglia la macchina su PIIX4, Q35 e UEFI con
+due processori; con `SLEEP=1`, `make test-drivers` e `make test-audio`
+provano ogni driver dopo un risveglio; `make test-display` ha i casi
+`*-sleep` per gli schermi.
 
 ### Dispositivi e driver
 

@@ -13,7 +13,7 @@ use core::ffi::c_void;
 
 arcdrv::driver! {
     name: "ps2kbd",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
     remove: remove,
 }
@@ -133,7 +133,34 @@ fn probe(dev: &DeviceInfo) -> Status {
     if st != OK {
         return st;
     }
+    arcdrv::power_hooks(dev.id, core::ptr::null_mut(), None, resume);
     arcdrv::info!("keyboard ready on IRQ {}", dev.irq);
+    OK
+}
+
+/// After sleep (the kernel has set up the controller again): keys held
+/// when the computer went to sleep are let go, and the keyboard scans
+/// again.
+unsafe extern "C" fn resume(_: *mut c_void) -> Status {
+    let (device, held) = {
+        let mut s = STATE.lock();
+        s.prefix = false;
+        (s.device, core::mem::take(&mut s.pressed))
+    };
+    for (word, bits) in held.iter().enumerate() {
+        for bit in 0..64 {
+            if bits & (1 << bit) != 0 {
+                arcdrv::input_event(device, arcdrv::INPUT_KEY, (word * 64 + bit) as u32, KEY_RELEASED);
+            }
+        }
+    }
+    // The answers must not reach the interrupt handler.
+    arcdrv::irq_detach(device, 1);
+    while port::inb(STATUS) & 1 != 0 {
+        port::inb(DATA);
+    }
+    send(0xF4);
+    arcdrv::irq_attach(device, 1, irq, core::ptr::null_mut());
     OK
 }
 

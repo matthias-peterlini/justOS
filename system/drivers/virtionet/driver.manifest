@@ -1,7 +1,7 @@
 # Network cards of virtual machines (QEMU/KVM, cloud servers): virtio-net,
 # legacy and modern interface.
 name        = virtionet
-version     = 1.0.0
+version     = 1.1.0
 class       = network
 description = virtio network card
 author      = arcOS

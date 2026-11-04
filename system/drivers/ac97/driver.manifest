@@ -1,7 +1,7 @@
 # AC'97 audio: PCs from 1997 to about 2006 and the default sound card of
 # VirtualBox and of many virtual machines.
 name        = ac97
-version     = 1.0.0
+version     = 1.1.0
 class       = audio
 description = AC'97 sound
 author      = arcOS

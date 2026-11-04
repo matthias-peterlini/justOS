@@ -2,7 +2,7 @@
 # (Realtek, Conexant, IDT, VIA, Cirrus codecs behind Intel, AMD and NVIDIA
 # controllers), and of QEMU and VirtualBox.
 name        = hda
-version     = 1.0.0
+version     = 1.1.0
 class       = audio
 description = HD Audio sound
 author      = arcOS

@@ -123,6 +123,34 @@ pub unsafe fn write_cr3(pml4: u64) {
     unsafe { asm!("mov cr3, {}", in(reg) pml4, options(nostack, preserves_flags)) };
 }
 
+pub fn read_cr0() -> u64 {
+    let v: u64;
+    // SAFETY: ring 0.
+    unsafe { asm!("mov {}, cr0", out(reg) v, options(nomem, nostack, preserves_flags)) };
+    v
+}
+
+pub fn read_cr4() -> u64 {
+    let v: u64;
+    // SAFETY: ring 0.
+    unsafe { asm!("mov {}, cr4", out(reg) v, options(nomem, nostack, preserves_flags)) };
+    v
+}
+
+/// # Safety
+/// The value must keep the kernel's paging and protection working.
+pub unsafe fn write_cr4(v: u64) {
+    // SAFETY: guaranteed by the caller.
+    unsafe { asm!("mov cr4, {}", in(reg) v, options(nostack, preserves_flags)) };
+}
+
+/// Writes every modified cache line back to memory and empties the caches
+/// (before the processor loses its power).
+pub fn wbinvd() {
+    // SAFETY: ring 0; only costs time.
+    unsafe { asm!("wbinvd", options(nostack, preserves_flags)) };
+}
+
 #[inline]
 pub fn invlpg(addr: u64) {
     // SAFETY: only drops a TLB entry.

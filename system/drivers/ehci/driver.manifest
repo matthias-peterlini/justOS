@@ -2,7 +2,7 @@
 # about 2015. Low- and full-speed devices are handed to the companion UHCI
 # or OHCI controller, or reach EHCI through a hub.
 name        = ehci
-version     = 1.0.0
+version     = 1.1.0
 class       = usb
 description = USB host controller (EHCI)
 author      = arcOS

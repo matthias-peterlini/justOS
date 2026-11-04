@@ -9,7 +9,7 @@ use core::ffi::c_void;
 
 arcdrv::driver! {
     name: "ps2mouse",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
     remove: remove,
 }
@@ -89,12 +89,11 @@ unsafe extern "C" fn irq(_: *mut c_void) {
     }
 }
 
-fn probe(dev: &DeviceInfo) -> Status {
-    if dev.name() != "ps2-mouse" {
-        return E_NODEV;
-    }
+/// Defaults, the wheel if the mouse has one, reporting on. The packet
+/// size, or None if no mouse answers.
+fn setup() -> Option<usize> {
     if write_mouse(0xF6) != Some(0xFA) {
-        return E_IO; // no mouse answers on the port
+        return None;
     }
     // IntelliMouse detection: sample rates 200, 100, 80, then read the id.
     let mut size = 3;
@@ -105,6 +104,16 @@ fn probe(dev: &DeviceInfo) -> Status {
         size = 4;
     }
     write_mouse(0xF4); // start reporting
+    Some(size)
+}
+
+fn probe(dev: &DeviceInfo) -> Status {
+    if dev.name() != "ps2-mouse" {
+        return E_NODEV;
+    }
+    let Some(size) = setup() else {
+        return E_IO; // no mouse answers on the port
+    };
     {
         let mut s = STATE.lock();
         s.device = dev.id;
@@ -114,8 +123,42 @@ fn probe(dev: &DeviceInfo) -> Status {
     if st != OK {
         return st;
     }
+    arcdrv::power_hooks(dev.id, core::ptr::null_mut(), None, resume);
     arcdrv::info!("mouse ready on IRQ {}{}", dev.irq, if size == 4 { ", with wheel" } else { "" });
     OK
+}
+
+/// After sleep (the kernel has set up the controller again): the mouse is
+/// set up as at the start, with its interrupt off meanwhile so the answers
+/// come here.
+unsafe extern "C" fn resume(_: *mut c_void) -> Status {
+    let device = STATE.lock().device;
+    arcdrv::irq_detach(device, 12);
+    while port::inb(STATUS) & 1 != 0 {
+        port::inb(DATA);
+    }
+    let size = setup();
+    {
+        let mut s = STATE.lock();
+        s.len = 0;
+        if let Some(size) = size {
+            s.size = size;
+        }
+        if s.buttons != 0 {
+            for (bit, code) in [(1u8, 0u32), (2, 1), (4, 2)] {
+                if s.buttons & bit != 0 {
+                    arcdrv::input_event(device, INPUT_BUTTON, code, 0);
+                }
+            }
+            s.buttons = 0;
+        }
+    }
+    arcdrv::irq_attach(device, 12, irq, core::ptr::null_mut());
+    if size.is_some() {
+        OK
+    } else {
+        E_IO
+    }
 }
 
 fn remove(device: u32) {

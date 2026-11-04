@@ -29,7 +29,7 @@ use core::sync::atomic::{fence, AtomicBool, AtomicU16, AtomicU32, AtomicU8, Orde
 
 arcdrv::driver! {
     name: "ehci",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -289,6 +289,10 @@ struct Ehci {
     iaa: AtomicBool,
     has_irq: AtomicBool,
     bus: IrqLock<Option<&'static Bus<Ehci>>>,
+    /// Kernel id of the controller (for its PCI configuration).
+    pci: u32,
+    /// Stopped for sleep (a halted controller is not an error then).
+    asleep: AtomicBool,
 }
 
 impl Ehci {
@@ -734,6 +738,81 @@ impl Host for Ehci {
         }
         self.schedule_remove(&pipes);
     }
+
+    const SLEEPS: bool = true;
+
+    fn stop(&self) {
+        self.asleep.store(true, Ordering::Release);
+        self.op_write(USBINTR, 0);
+        self.op_write(USBCMD, self.op_read(USBCMD) & !CMD_RUN);
+        arcdrv::wait_until(20, || self.op_read(USBSTS) & STS_HALTED != 0);
+    }
+
+    fn restart(&self) -> Status {
+        take_ownership(&Pci(self.pci), ((self.regs.read32(HCCPARAMS) >> 8) & 0xFF) as u16);
+        let mut st = reset(&self.regs, self.op);
+        if st == OK {
+            init_lists(&self.frames, &self.anchor);
+            st = self.start();
+        }
+        self.asleep.store(false, Ordering::Release);
+        st
+    }
+}
+
+impl Ehci {
+    /// Gives the controller its lists, runs it, takes every port and
+    /// powers them.
+    fn start(&self) -> Status {
+        self.op_write(CTRLDSSEGMENT, 0);
+        self.op_write(PERIODICLISTBASE, self.frames.phys() as u32);
+        self.op_write(ASYNCLISTADDR, self.anchor.phys() as u32);
+        self.op_write(USBSTS, STS_EVENTS);
+        self.op_write(USBINTR, INTR_ENABLE);
+        self.op_write(USBCMD, CMD_RUN | CMD_ASE | CMD_PSE | CMD_ITC);
+        if !arcdrv::wait_until(100, || self.op_read(USBSTS) & STS_HALTED == 0) {
+            arcdrv::warn!("controller does not start");
+            return E_IO;
+        }
+        // Route every port here; slower devices are handed back one by one.
+        self.op_write(CONFIGFLAG, 1);
+        arcdrv::sleep_ms(5);
+        if self.regs.read32(HCSPARAMS) & (1 << 4) != 0 {
+            for p in 1..=self.ports {
+                let v = self.portsc(p);
+                self.set_portsc(p, (v & !PORT_CHANGES) | PORT_PP);
+            }
+            arcdrv::sleep_ms(20);
+        }
+        OK
+    }
+}
+
+/// Stops and resets the controller.
+fn reset(regs: &Mmio, op: usize) -> Status {
+    regs.write32(op + USBINTR, 0);
+    regs.write32(op + USBCMD, regs.read32(op + USBCMD) & !CMD_RUN);
+    arcdrv::wait_until(20, || regs.read32(op + USBSTS) & STS_HALTED != 0);
+    regs.write32(op + USBCMD, CMD_RESET);
+    if !arcdrv::wait_until(250, || regs.read32(op + USBCMD) & CMD_RESET == 0) {
+        arcdrv::warn!("controller reset timed out");
+        return E_TIMEOUT;
+    }
+    OK
+}
+
+/// An empty periodic list, and the asynchronous ring with only its anchor:
+/// linked to itself, never active.
+fn init_lists(frames: &Dma, anchor: &Dma) {
+    for i in 0..FRAMES {
+        frames.write::<u32>(i * 4, LINK_T);
+    }
+    anchor.write::<u32>(0, anchor.phys() as u32 | LINK_QH);
+    anchor.write::<u32>(4, QH_HEAD);
+    anchor.write::<u32>(8, QH_MULT1);
+    anchor.write::<u32>(16, LINK_T);
+    anchor.write::<u32>(20, LINK_T);
+    anchor.write::<u32>(24, QTD_HALTED);
 }
 
 /// Stops polling a pipe; never returns while its callback runs (the driver
@@ -784,7 +863,7 @@ unsafe extern "C" fn poll_thread(ctx: *mut c_void) {
                 arcusb::port_changed(bus);
             }
         }
-        if sts & (STS_HSE | STS_HALTED) != 0 && !reported {
+        if sts & (STS_HSE | STS_HALTED) != 0 && !reported && !e.asleep.load(Ordering::Acquire) {
             arcdrv::error!("controller stopped (status {sts:#x})");
             reported = true;
         }
@@ -836,35 +915,13 @@ fn probe(dev: &DeviceInfo) -> Status {
     let hcc = regs.read32(HCCPARAMS);
     let ports = (hcs & 0xF) as u8;
     let companions = (hcs >> 12) & 0xF != 0;
-    let power_switch = hcs & (1 << 4) != 0;
     take_ownership(&pci, ((hcc >> 8) & 0xFF) as u16);
-
-    // Stop and reset.
-    regs.write32(op + USBINTR, 0);
-    regs.write32(op + USBCMD, regs.read32(op + USBCMD) & !CMD_RUN);
-    arcdrv::wait_until(20, || regs.read32(op + USBSTS) & STS_HALTED != 0);
-    regs.write32(op + USBCMD, CMD_RESET);
-    if !arcdrv::wait_until(250, || regs.read32(op + USBCMD) & CMD_RESET == 0) {
-        arcdrv::warn!("controller reset timed out");
-        return E_TIMEOUT;
+    let st = reset(&regs, op);
+    if st != OK {
+        return st;
     }
-
     let (Some(frames), Some(anchor)) = (Dma::new(FRAMES * 4), Dma::new(128)) else { return E_NOMEM };
-    for i in 0..FRAMES {
-        frames.write::<u32>(i * 4, LINK_T);
-    }
-    // The async anchor: head of the ring, linked to itself, never active.
-    anchor.write::<u32>(0, anchor.phys() as u32 | LINK_QH);
-    anchor.write::<u32>(4, QH_HEAD);
-    anchor.write::<u32>(8, QH_MULT1);
-    anchor.write::<u32>(16, LINK_T);
-    anchor.write::<u32>(20, LINK_T);
-    anchor.write::<u32>(24, QTD_HALTED);
-
-    regs.write32(op + CTRLDSSEGMENT, 0);
-    regs.write32(op + PERIODICLISTBASE, frames.phys() as u32);
-    regs.write32(op + ASYNCLISTADDR, anchor.phys() as u32);
-    regs.write32(op + USBSTS, STS_EVENTS);
+    init_lists(&frames, &anchor);
 
     let e: &'static Ehci = Box::leak(Box::new(Ehci {
         regs,
@@ -881,26 +938,15 @@ fn probe(dev: &DeviceInfo) -> Status {
         iaa: AtomicBool::new(false),
         has_irq: AtomicBool::new(false),
         bus: IrqLock::new(None),
+        pci: dev.id,
+        asleep: AtomicBool::new(false),
     }));
     let ctx = e as *const Ehci as *mut c_void;
     e.has_irq.store(arcdrv::irq_attach_any(dev, irq, ctx), Ordering::Relaxed);
     arcdrv::spawn("ehci-poll", poll_thread, ctx);
-
-    e.op_write(USBINTR, INTR_ENABLE);
-    e.op_write(USBCMD, CMD_RUN | CMD_ASE | CMD_PSE | CMD_ITC);
-    if !arcdrv::wait_until(100, || e.op_read(USBSTS) & STS_HALTED == 0) {
-        arcdrv::warn!("controller does not start");
-        return E_IO;
-    }
-    // Route every port here; slower devices are handed back one by one.
-    e.op_write(CONFIGFLAG, 1);
-    arcdrv::sleep_ms(5);
-    if power_switch {
-        for p in 1..=ports {
-            let v = e.portsc(p);
-            e.set_portsc(p, (v & !PORT_CHANGES) | PORT_PP);
-        }
-        arcdrv::sleep_ms(20);
+    let st = e.start();
+    if st != OK {
+        return st;
     }
     arcdrv::info!(
         "{} ports{}, {}",

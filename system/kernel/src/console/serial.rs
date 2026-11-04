@@ -6,8 +6,22 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 const COM1: u16 = 0x3F8;
 static PRESENT: AtomicBool = AtomicBool::new(false);
+static RX_IRQ: AtomicBool = AtomicBool::new(false);
 
 pub fn init() {
+    if setup() {
+        PRESENT.store(true, Ordering::Relaxed);
+    }
+}
+
+/// After sleep: the chip forgot its speed and interrupts.
+pub fn resume() {
+    if present() && setup() && RX_IRQ.load(Ordering::Relaxed) {
+        outb(COM1 + 1, 0x01);
+    }
+}
+
+fn setup() -> bool {
     outb(COM1 + 1, 0x00); // no interrupts yet
     outb(COM1 + 3, 0x80); // DLAB
     outb(COM1, 0x01); // divisor 1: 115200 baud
@@ -17,10 +31,10 @@ pub fn init() {
     outb(COM1 + 4, 0x1E); // loopback to test the chip
     outb(COM1, 0xAE);
     if inb(COM1) != 0xAE {
-        return;
+        return false;
     }
     outb(COM1 + 4, 0x0F); // normal operation, OUT2 (IRQ) on
-    PRESENT.store(true, Ordering::Relaxed);
+    true
 }
 
 pub fn present() -> bool {
@@ -48,19 +62,28 @@ pub fn write(bytes: &[u8]) {
     }
 }
 
-pub fn read_byte() -> Option<u8> {
-    (present() && inb(COM1 + 5) & 1 != 0).then(|| inb(COM1))
-}
-
 /// Interrupt on received data.
 pub fn enable_rx_irq() {
     if present() {
+        RX_IRQ.store(true, Ordering::Relaxed);
         outb(COM1 + 1, 0x01);
     }
 }
 
+/// Stops or restarts the interrupt on received data (the key queue is full
+/// / has room again). What arrives meanwhile waits in the chip; turned back
+/// on, the chip interrupts at once if anything is waiting.
+pub fn listen(on: bool) {
+    if present() && RX_IRQ.load(Ordering::Relaxed) {
+        outb(COM1 + 1, on as u8);
+    }
+}
+
 pub fn irq_handler() {
-    while let Some(b) = read_byte() {
-        crate::dev::input::serial_byte(b);
+    while present() && inb(COM1 + 5) & 1 != 0 {
+        if !crate::dev::input::serial_room() {
+            return;
+        }
+        crate::dev::input::serial_byte(inb(COM1));
     }
 }

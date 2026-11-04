@@ -26,6 +26,7 @@ mod net;
 mod rand;
 mod sandbox;
 mod shell;
+mod sleep;
 mod store;
 mod sync;
 mod task;

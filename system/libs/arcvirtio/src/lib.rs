@@ -200,41 +200,86 @@ impl Virtio {
         let avail = size as usize * 16;
         let used = (avail + 6 + 2 * size as usize).next_multiple_of(4096);
         let mem = Dma::new(used + 6 + 8 * size as usize)?;
-        let mut notify_off = 0;
+        let mut q = Queue { index, size, mem, avail, used, notify_off: 0, avail_idx: 0, last_used: 0 };
+        self.give(&mut q);
+        self.queues.fetch_max(index + 1, Ordering::Relaxed);
+        Some(q)
+    }
+
+    /// Hands a queue's memory to the device (the queue is selected).
+    fn give(&self, q: &mut Queue) {
+        let phys = q.mem.phys();
         match &self.regs {
-            Regs::Legacy { io } => port::outl(io + L_QUEUE_PFN, (mem.phys() >> 12) as u32),
+            Regs::Legacy { io } => port::outl(io + L_QUEUE_PFN, (phys >> 12) as u32),
             Regs::Modern { common, .. } => {
-                common.write16(C_QUEUE_SIZE, size);
-                common.write64(C_QUEUE_DESC, mem.phys());
-                common.write64(C_QUEUE_DRIVER, mem.phys() + avail as u64);
-                common.write64(C_QUEUE_DEVICE, mem.phys() + used as u64);
+                common.write16(C_QUEUE_SIZE, q.size);
+                common.write64(C_QUEUE_DESC, phys);
+                common.write64(C_QUEUE_DRIVER, phys + q.avail as u64);
+                common.write64(C_QUEUE_DEVICE, phys + q.used as u64);
                 common.write16(C_QUEUE_MSIX_VECTOR, 0xFFFF);
-                notify_off = common.read16(C_QUEUE_NOTIFY_OFF);
+                q.notify_off = common.read16(C_QUEUE_NOTIFY_OFF);
                 common.write16(C_QUEUE_ENABLE, 1);
             }
         }
-        self.queues.fetch_max(index + 1, Ordering::Relaxed);
-        Some(Queue { index, size, mem, avail, used, notify_off, avail_idx: 0, last_used: 0 })
+    }
+
+    /// After sleep, when the device has forgotten everything: a reset, the
+    /// same `features` agreed again, and every queue handed back empty
+    /// (the driver fills them again, then calls [`Virtio::ready`]).
+    pub fn restore(&self, features: u64, queues: &mut [&mut Queue]) -> bool {
+        if self.negotiate(features).is_none() {
+            return false;
+        }
+        for q in queues.iter_mut() {
+            self.requeue(q);
+        }
+        self.reroute();
+        true
+    }
+
+    /// For [`Virtio::restore`] in steps (when the queues sit behind locks
+    /// that must not be held while the device resets): after `negotiate`,
+    /// hands one queue back empty. Never waits.
+    pub fn requeue(&self, q: &mut Queue) {
+        q.mem.as_mut_slice().fill(0);
+        q.avail_idx = 0;
+        q.last_used = 0;
+        match &self.regs {
+            Regs::Legacy { io } => port::outw(io + L_QUEUE_SELECT, q.index),
+            Regs::Modern { common, .. } => common.write16(C_QUEUE_SELECT, q.index),
+        }
+        self.give(q);
+    }
+
+    /// The last step of [`Virtio::restore`]: MSI-X routed again.
+    pub fn reroute(&self) {
+        if self.uses_msix() {
+            self.route_msix();
+        }
+    }
+
+    /// Every MSI-X interrupt (configuration and queues) on the first vector.
+    fn route_msix(&self) {
+        if let Regs::Modern { common, .. } = &self.regs {
+            common.write16(C_MSIX_CONFIG, 0);
+            for q in 0..self.queues.load(Ordering::Relaxed) {
+                common.write16(C_QUEUE_SELECT, q);
+                common.write16(C_QUEUE_MSIX_VECTOR, 0);
+            }
+        }
     }
 
     /// Attaches `handler` to the device's interrupt: MSI-X or MSI on modern
     /// devices, the legacy line otherwise (legacy devices move their
     /// registers when MSI-X is on). Returns false if there is none.
     pub fn attach_irq(&self, dev: &DeviceInfo, handler: IrqHandler, ctx: *mut c_void) -> bool {
-        if let Regs::Modern { common, .. } = &self.regs {
-            if arcdrv::irq_attach_msi(dev.id, handler, ctx) >= 0 {
-                let msix = self.pci.find_capability(CAP_MSIX, 0).is_some_and(|c| self.pci.read16(c + 2) & (1 << 15) != 0);
-                if msix {
-                    // Everything on the first vector.
-                    common.write16(C_MSIX_CONFIG, 0);
-                    for q in 0..self.queues.load(Ordering::Relaxed) {
-                        common.write16(C_QUEUE_SELECT, q);
-                        common.write16(C_QUEUE_MSIX_VECTOR, 0);
-                    }
-                    self.msix.store(true, Ordering::Relaxed);
-                }
-                return true;
+        if self.is_modern() && arcdrv::irq_attach_msi(dev.id, handler, ctx) >= 0 {
+            let msix = self.pci.find_capability(CAP_MSIX, 0).is_some_and(|c| self.pci.read16(c + 2) & (1 << 15) != 0);
+            if msix {
+                self.route_msix();
+                self.msix.store(true, Ordering::Relaxed);
             }
+            return true;
         }
         dev.irq != IRQ_NONE && arcdrv::irq_attach(dev.id, dev.irq, handler, ctx) == OK
     }

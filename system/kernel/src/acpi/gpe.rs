@@ -75,6 +75,18 @@ pub fn disable_all() {
     }
 }
 
+/// Right before sleep: only the GPEs of devices that may wake the computer
+/// stay enabled, with nothing pending.
+pub fn arm(wake: &[u16]) {
+    disable_all();
+    let g = GPES.lock();
+    for &n in wake {
+        if let Some((_, en, bit)) = g.locate(n) {
+            outb(en, inb(en) | bit);
+        }
+    }
+}
+
 /// Clears a GPE's status bit (writing 1 clears it).
 pub fn clear(n: u16) {
     let g = GPES.lock();

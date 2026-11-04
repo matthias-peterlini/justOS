@@ -15,6 +15,8 @@
 # Usage: scripts/test-drivers.sh <image> [case...]
 # With no case, all of them run. Prints one line per case; exits non-zero
 # if any failed. VERBOSE=1 prints the whole session of failed cases.
+# SLEEP=1 puts the machine to sleep (S3) for a few seconds before each
+# check: the drivers must bring their devices back on waking.
 set -u
 IMAGE=${1:?usage: test-drivers.sh <image> [case...]}
 shift
@@ -66,6 +68,12 @@ cat stick:/w.txt
 check stick
 shutdown
 EOT
+if [ "${SLEEP:-0}" = 1 ]; then
+    for f in disk net sd usb; do
+        { head -n 1 "$WORK/$f.txt"; printf 'suspend 3\n@sleep 9\n'; tail -n +2 "$WORK/$f.txt"; } > "$WORK/$f.new"
+        mv "$WORK/$f.new" "$WORK/$f.txt"
+    done
+fi
 
 STICK="-drive if=none,id=stick,format=raw,file=$WORK/stick.img"
 EHCI="-device ich9-usb-ehci1,id=u,addr=1d.7,multifunction=on
@@ -117,10 +125,11 @@ for c in $CASES; do
     esac
     case $CMDS in
         net) EXPECT="3 of 3 replies" ;;
-        sd) EXPECT="sdhci 1.0.0 installed|$EXPECT_SD|written on the card|card: no problems found" ;;
+        sd) EXPECT="sdhci 1.1.0 installed|$EXPECT_SD|written on the card|card: no problems found" ;;
         usb) EXPECT="usbhid 1.0.0 installed|usbstorage 1.0.0 installed|Benvenuto in arcOS|stick: no problems found" ;;
     esac
     [ "$c" = multi-nic ] && EXPECT="$EXPECT|^net2 "
+    [ "${SLEEP:-0}" = 1 ] && EXPECT="$EXPECT|awake again after"
     QEMU=$RUN_QEMU DISK=$DISK "$HERE/test.sh" "$IMAGE" "$WORK/$CMDS.txt" $ARGS > "$WORK/out.txt" 2>&1
     STATUS=$?
     missing=

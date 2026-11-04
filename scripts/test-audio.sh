@@ -5,6 +5,8 @@
 #
 # Usage: scripts/test-audio.sh <image> [case...]
 # Cases: hda (ICH9 + line out), hda-duplex (ICH6), hda-speaker, ac97.
+# SLEEP=1 puts the machine to sleep (S3) for a few seconds first: the
+# drivers must set the card up again on waking.
 set -u
 IMAGE=${1:?usage: test-audio.sh <image> [case...]}
 shift
@@ -13,8 +15,12 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 CASES=${*:-hda hda-duplex hda-speaker ac97}
 
-cat > "$WORK/cmds.txt" <<'EOT'
+SLEEP_CMDS=
+[ "${SLEEP:-0}" = 1 ] && SLEEP_CMDS='suspend 3
+@sleep 9'
+cat > "$WORK/cmds.txt" <<EOT
 @sleep 3
+$SLEEP_CMDS
 display
 tone 440 2000
 @sleep 3
@@ -57,6 +63,9 @@ for c in $CASES; do
     [ $STATUS -ne 0 ] && problems="$problems [kernel stopped]"
     grep -q "^sound: audio0" "$WORK/out.txt" || problems="$problems [no sound output]"
     grep -q "^playing sys:/system/sounds/avvio.wav" "$WORK/out.txt" || problems="$problems [the WAV file did not play]"
+    if [ "${SLEEP:-0}" = 1 ]; then
+        grep -q "awake again after" "$WORK/out.txt" || problems="$problems [did not wake]"
+    fi
     if [ -f "$WORK/out.wav" ]; then
         set -- $(python3 "$WORK/look.py" "$WORK/out.wav")
         { [ "$2" -ge 435 ] && [ "$2" -le 445 ]; } || problems="$problems [tone at $2 Hz]"

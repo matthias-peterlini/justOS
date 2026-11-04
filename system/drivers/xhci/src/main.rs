@@ -29,7 +29,7 @@ use core::sync::atomic::{fence, AtomicBool, Ordering};
 
 arcdrv::driver! {
     name: "xhci",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -119,12 +119,20 @@ struct Ring {
 
 impl Ring {
     fn new() -> Option<Ring> {
-        let mem = Dma::new(RING_TRBS * 16)?;
+        let mut ring = Ring { mem: Dma::new(RING_TRBS * 16)?, enq: 0, cycle: true };
+        ring.clear();
+        Some(ring)
+    }
+
+    /// Empty again, from the start.
+    fn clear(&mut self) {
+        self.mem.as_mut_slice().fill(0);
         // The last TRB links back to the start and flips the cycle bit.
         let at = (RING_TRBS - 1) * 16;
-        mem.write::<u64>(at, mem.phys());
-        mem.write::<u32>(at + 12, TRB_LINK << 10 | TRB_TOGGLE);
-        Some(Ring { mem, enq: 0, cycle: true })
+        self.mem.write::<u64>(at, self.mem.phys());
+        self.mem.write::<u32>(at + 12, TRB_LINK << 10 | TRB_TOGGLE);
+        self.enq = 0;
+        self.cycle = true;
     }
 
     /// Writes a TRB (the cycle bit is added here) and returns its address.
@@ -232,6 +240,13 @@ struct Xhci {
     wake: Event,
     has_irq: AtomicBool,
     bus: IrqLock<Option<&'static Bus<Xhci>>>,
+    max_slots: usize,
+    /// The event ring segment table (one segment).
+    erst: Dma,
+    /// Kernel id of the controller (for its PCI configuration).
+    pci: u32,
+    /// An Intel controller whose ports start out wired to EHCI.
+    switchable: bool,
 }
 
 struct EventRing {
@@ -903,6 +918,84 @@ impl Host for Xhci {
         self.dcbaa.write::<u64>(slot.id as usize * 8, 0);
         // The slot's memory goes when the last transfer using it returns.
     }
+
+    const SLEEPS: bool = true;
+
+    fn stop(&self) {
+        self.op_write(USBCMD, self.op_read(USBCMD) & !(CMD_RUN | CMD_INTE));
+        arcdrv::wait_until(100, || self.op_read(USBSTS) & STS_HALTED != 0);
+    }
+
+    fn restart(&self) -> Status {
+        take_ownership(&self.regs, ((self.regs.read32(HCCPARAMS1) >> 16) as usize) * 4);
+        if self.switchable {
+            route_intel_ports(Pci(self.pci));
+        }
+        let st = reset(&self.regs, self.op);
+        if st != OK {
+            return st;
+        }
+        self.start()
+    }
+}
+
+impl Xhci {
+    /// Empty command and event rings given to the controller, which then
+    /// runs; every port powered.
+    fn start(&self) -> Status {
+        let (regs, op, ir) = (&self.regs, self.op, self.rt + 0x20);
+        let cmd = {
+            let mut ring = self.cmd_ring.lock();
+            ring.clear();
+            ring.mem.phys()
+        };
+        let events = {
+            let mut ev = self.events.lock();
+            ev.mem.as_mut_slice().fill(0);
+            ev.deq = 0;
+            ev.cycle = true;
+            ev.mem.phys()
+        };
+        *self.cmd_result.lock() = None;
+        regs.write32(op + CONFIG, self.max_slots as u32);
+        regs.write64(op + DCBAAP, self.dcbaa.phys());
+        regs.write64(op + CRCR, cmd | 1);
+        regs.write32(ir + 0x08, 1); // ERSTSZ
+        regs.write64(ir + 0x18, events); // ERDP
+        regs.write64(ir + 0x10, self.erst.phys()); // ERSTBA
+        regs.write32(ir + 0x04, 160); // moderation: 40 µs
+        regs.write32(ir, 0b11); // IMAN: clear pending, enable
+        regs.write32(op + USBCMD, CMD_RUN | CMD_INTE);
+        if !arcdrv::wait_until(1000, || regs.read32(op + USBSTS) & STS_HALTED == 0) {
+            arcdrv::warn!("controller does not start");
+            return E_IO;
+        }
+        // Power every port (a no-op where power is not switchable).
+        for p in 1..=self.ports {
+            let v = self.portsc(p);
+            if v & PORT_PP == 0 {
+                self.set_portsc(p, (v & PORT_PRESERVE) | PORT_PP);
+            }
+        }
+        OK
+    }
+}
+
+/// Stops and resets the controller.
+fn reset(regs: &Mmio, op: usize) -> Status {
+    arcdrv::wait_until(1000, || regs.read32(op + USBSTS) & STS_CNR == 0);
+    regs.write32(op + USBCMD, regs.read32(op + USBCMD) & !CMD_RUN);
+    if !arcdrv::wait_until(1000, || regs.read32(op + USBSTS) & STS_HALTED != 0) {
+        arcdrv::warn!("controller does not halt");
+        return E_IO;
+    }
+    regs.write32(op + USBCMD, CMD_RESET);
+    arcdrv::sleep_ms(1);
+    if !arcdrv::wait_until(1000, || regs.read32(op + USBCMD) & CMD_RESET == 0 && regs.read32(op + USBSTS) & STS_CNR == 0) {
+        arcdrv::warn!("controller reset timed out");
+        return E_TIMEOUT;
+    }
+    OK
 }
 
 // ----------------------------------------------------------------------------
@@ -970,13 +1063,14 @@ fn take_ownership(regs: &Mmio, xecp: usize) -> Vec<(u8, u8, u8)> {
 }
 
 /// Intel chipsets of 2012-2014 start with every port wired to the EHCI
-/// controllers; this hands them to xHCI.
-fn route_intel_ports(dev: &DeviceInfo) {
+/// controllers (again after sleep).
+fn switchable(dev: &DeviceInfo) -> bool {
     const SWITCHABLE: [u16; 5] = [0x1E31, 0x8C31, 0x9C31, 0x9CB1, 0x8CB1];
-    if dev.vendor != 0x8086 || !SWITCHABLE.contains(&dev.device) {
-        return;
-    }
-    let pci = Pci(dev.id);
+    dev.vendor == 0x8086 && SWITCHABLE.contains(&dev.device)
+}
+
+/// Hands the ports of a switchable controller to xHCI.
+fn route_intel_ports(pci: Pci) {
     pci.write32(0xD8, pci.read32(0xDC)); // USB 3 ports: SuperSpeed on
     pci.write32(0xD0, pci.read32(0xD4)); // USB 2 ports: to xHCI
     arcdrv::debug!("USB ports switched over from EHCI");
@@ -1004,20 +1098,12 @@ fn probe(dev: &DeviceInfo) -> Status {
     let rt = (regs.read32(RTSOFF) & !0x1F) as usize;
     let db = (regs.read32(DBOFF) & !0x3) as usize;
     let protocols = take_ownership(&regs, ((hcc1 >> 16) as usize) * 4);
-    route_intel_ports(dev);
-
-    // Stop and reset.
-    arcdrv::wait_until(1000, || regs.read32(op + USBSTS) & STS_CNR == 0);
-    regs.write32(op + USBCMD, regs.read32(op + USBCMD) & !CMD_RUN);
-    if !arcdrv::wait_until(1000, || regs.read32(op + USBSTS) & STS_HALTED != 0) {
-        arcdrv::warn!("controller does not halt");
-        return E_IO;
+    if switchable(dev) {
+        route_intel_ports(Pci(dev.id));
     }
-    regs.write32(op + USBCMD, CMD_RESET);
-    arcdrv::sleep_ms(1);
-    if !arcdrv::wait_until(1000, || regs.read32(op + USBCMD) & CMD_RESET == 0 && regs.read32(op + USBSTS) & STS_CNR == 0) {
-        arcdrv::warn!("controller reset timed out");
-        return E_TIMEOUT;
+    let st = reset(&regs, op);
+    if st != OK {
+        return st;
     }
 
     // Device context array, scratchpad, command ring, event ring.
@@ -1037,17 +1123,6 @@ fn probe(dev: &DeviceInfo) -> Status {
     let (Some(cmd_ring), Some(event_mem), Some(erst)) = (Ring::new(), Dma::new(RING_TRBS * 16), Dma::new(64)) else { return E_NOMEM };
     erst.write::<u64>(0, event_mem.phys());
     erst.write::<u32>(8, RING_TRBS as u32);
-
-    regs.write32(op + CONFIG, max_slots as u32);
-    regs.write64(op + DCBAAP, dcbaa.phys());
-    regs.write64(op + CRCR, cmd_ring.mem.phys() | 1);
-    let ir = rt + 0x20;
-    regs.write32(ir + 0x08, 1); // ERSTSZ
-    regs.write64(ir + 0x18, event_mem.phys()); // ERDP
-    regs.write64(ir + 0x10, erst.phys()); // ERSTBA
-    regs.write32(ir + 0x04, 160); // moderation: 40 µs
-    regs.write32(ir, 0b11); // IMAN: clear pending, enable
-    core::mem::forget(erst);
 
     let mut port_usb3 = alloc::vec![false; ports as usize];
     for &(major, first, count) in &protocols {
@@ -1077,22 +1152,17 @@ fn probe(dev: &DeviceInfo) -> Status {
         wake: Event::new(),
         has_irq: AtomicBool::new(false),
         bus: IrqLock::new(None),
+        max_slots,
+        erst,
+        pci: dev.id,
+        switchable: switchable(dev),
     }));
     let ctx = x as *const Xhci as *mut c_void;
     x.has_irq.store(arcdrv::irq_attach_any(dev, irq, ctx), Ordering::Relaxed);
     arcdrv::spawn("xhci-events", event_thread, ctx);
-
-    regs.write32(op + USBCMD, CMD_RUN | CMD_INTE);
-    if !arcdrv::wait_until(1000, || regs.read32(op + USBSTS) & STS_HALTED == 0) {
-        arcdrv::warn!("controller does not start");
-        return E_IO;
-    }
-    // Power every port (a no-op where power is not switchable).
-    for p in 1..=ports {
-        let v = x.portsc(p);
-        if v & PORT_PP == 0 {
-            x.set_portsc(p, (v & PORT_PRESERVE) | PORT_PP);
-        }
+    let st = x.start();
+    if st != OK {
+        return st;
     }
     let usb3 = x.port_usb3.iter().filter(|&&u| u).count();
     arcdrv::info!(

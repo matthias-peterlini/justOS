@@ -66,6 +66,14 @@ fn ps2() -> Ps2 {
     r
 }
 
+/// After sleep: the controller is set up again (before the keyboard and
+/// mouse drivers wake up their devices).
+pub fn resume_ps2() {
+    if PS2.load(Ordering::Relaxed) & 3 != 0 {
+        init_8042();
+    }
+}
+
 fn init_8042() -> Ps2 {
     let none = Ps2 { keyboard: false, mouse: false };
     if inb(STATUS) == 0xFF {

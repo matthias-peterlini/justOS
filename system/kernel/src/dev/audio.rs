@@ -242,11 +242,14 @@ fn queue(s: &Sound, from: usize, track: u64) -> Result<(), &'static str> {
         if frames == 0 {
             break;
         }
+        // The sound pauses while the machine sleeps.
+        super::pm::wait_awake();
         // SAFETY: the output exists while its driver does; the driver
         // copies the samples before returning.
         unsafe { ((*desc).write)((*desc).ctx, chunk.as_ptr(), frames) };
         at += n;
     }
+    super::pm::wait_awake();
     // SAFETY: as above.
     unsafe { ((*desc).drain)((*desc).ctx) };
     if track != 0 && TRACK.load(Ordering::Acquire) == track {

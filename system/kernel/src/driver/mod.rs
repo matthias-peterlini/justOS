@@ -273,6 +273,7 @@ impl Manager {
         for &d in &l.devices {
             // SAFETY: the module's own remove callback for a device it owns.
             unsafe { remove(d) };
+            dev::pm::forget(d);
             dev::irq::detach(d, None);
             let _ = dev::block::unregister_device(d);
             dev::net::remove_device(d);
@@ -291,6 +292,7 @@ impl Manager {
             released &= self.remove_device(child);
         }
         // No new I/O reaches the hardware from here on.
+        dev::pm::forget(id);
         dev::irq::detach(id, None);
         dev::block::device_gone(id);
         dev::net::remove_device(id);

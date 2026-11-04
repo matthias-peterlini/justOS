@@ -12,12 +12,13 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::string::String;
+use alloc::vec::Vec;
 use arcdrv::{port, BlockDesc, DeviceInfo, Mutex, Status, E_INVAL, E_IO, E_NODEV, E_TIMEOUT, OK, RES_IO};
 use core::ffi::c_void;
 
 arcdrv::driver! {
     name: "ata",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -44,6 +45,7 @@ const CMD_WRITE_EXT: u8 = 0x34;
 const CMD_FLUSH: u8 = 0xE7;
 const CMD_FLUSH_EXT: u8 = 0xEA;
 const CMD_IDENTIFY: u8 = 0xEC;
+const CMD_STANDBY_IMMEDIATE: u8 = 0xE0;
 
 struct Channel {
     base: u16,
@@ -203,6 +205,10 @@ impl Disk {
 
     fn flush(&self) -> Status {
         let ch = self.channel.lock();
+        self.flush_locked(&ch)
+    }
+
+    fn flush_locked(&self, ch: &Channel) -> Status {
         ch.select(self.slave, 0);
         port::outb(ch.base + COMMAND, if self.lba48 { CMD_FLUSH_EXT } else { CMD_FLUSH });
         match ch.wait_not_busy(30_000) {
@@ -211,6 +217,48 @@ impl Disk {
             Err(e) => e,
         }
     }
+}
+
+/// The channels and disks of one controller, for sleep.
+struct Controller {
+    channels: Vec<&'static Mutex<Channel>>,
+    disks: Vec<&'static Disk>,
+}
+
+/// Before sleep: the disks write out their caches and park their heads.
+unsafe extern "C" fn suspend(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the Controller registered with the hooks.
+    let c = unsafe { &*(ctx as *const Controller) };
+    for d in &c.disks {
+        let ch = d.channel.lock();
+        let st = d.flush_locked(&ch);
+        if st != OK {
+            return st;
+        }
+        ch.select(d.slave, 0);
+        port::outb(ch.base + COMMAND, CMD_STANDBY_IMMEDIATE);
+        let _ = ch.wait_not_busy(10_000);
+    }
+    OK
+}
+
+/// After sleep: each channel is reset and waits for its disks to spin up;
+/// interrupts stay off (we poll).
+unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
+    // SAFETY: as in suspend.
+    let c = unsafe { &*(ctx as *const Controller) };
+    let mut status = OK;
+    for ch in &c.channels {
+        let ch = ch.lock();
+        port::outb(ch.ctrl, 0x06); // software reset, interrupts off
+        arcdrv::sleep_ms(1);
+        port::outb(ch.ctrl, 0x02);
+        arcdrv::sleep_ms(2);
+        if ch.status() != 0xFF && ch.wait_not_busy(31_000).is_err() {
+            status = E_TIMEOUT;
+        }
+    }
+    status
 }
 
 unsafe extern "C" fn read(ctx: *mut c_void, lba: u64, count: u32, buf: *mut u8) -> Status {
@@ -251,6 +299,7 @@ fn probe(dev: &DeviceInfo) -> Status {
     arcdrv::Pci(dev.id).enable(true, false, false);
 
     let mut found = 0;
+    let mut ctl = Controller { channels: Vec::new(), disks: Vec::new() };
     for (base, ctrl) in [primary, secondary] {
         let (Some(base), Some(ctrl)) = (base, ctrl) else { continue };
         let channel = Channel { base, ctrl };
@@ -259,6 +308,7 @@ fn probe(dev: &DeviceInfo) -> Status {
         }
         port::outb(ctrl, 0x02); // no interrupts: we poll
         let channel: &'static Mutex<Channel> = Box::leak(Box::new(Mutex::new(channel)));
+        ctl.channels.push(channel);
         for slave in [false, true] {
             let Some(id) = channel.lock().identify(slave) else { continue };
             let lba48 = id[83] & (1 << 10) != 0;
@@ -283,6 +333,7 @@ fn probe(dev: &DeviceInfo) -> Status {
             }));
             if arcdrv::block_register(dev.id, desc) >= 0 {
                 found += 1;
+                ctl.disks.push(disk);
             }
         }
     }
@@ -290,5 +341,7 @@ fn probe(dev: &DeviceInfo) -> Status {
         // A controller with only CD drives or nothing: still ours.
         arcdrv::info!("no ATA disks on this controller");
     }
+    let ctl: &'static Controller = Box::leak(Box::new(ctl));
+    arcdrv::power_hooks(dev.id, ctl as *const Controller as *mut c_void, Some(suspend), resume);
     OK
 }

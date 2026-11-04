@@ -20,10 +20,11 @@ use alloc::vec::Vec;
 use arcdrv::pcm::{Hardware, PcmRing};
 use arcdrv::{AudioDesc, DeviceInfo, Dma, Mmio, Pci, Status, E_IO, E_NODEV, E_NOMEM, OK, RES_MEMORY};
 use core::ffi::c_void;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 arcdrv::driver! {
     name: "hda",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -350,6 +351,81 @@ unsafe impl Sync for Stream {}
 
 struct Device {
     ring: PcmRing<Stream>,
+    /// Used at probe and after sleep only (one thread at a time).
+    hda: Controller,
+    pci: Pci,
+    intel: bool,
+    /// The codec and audio function group playing.
+    codec: (u32, u32),
+    inputs: u16,
+    bdl: u64,
+    has_irq: AtomicBool,
+}
+
+/// Before sleep: playing stops, so do the controller's interrupts and rings.
+unsafe extern "C" fn suspend(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the leaked Device.
+    let d = unsafe { &*(ctx as *const Device) };
+    d.ring.pause();
+    let regs = &d.hda.regs;
+    regs.write32(INTCTL, 0);
+    regs.write8(CORBCTL, 0);
+    regs.write8(RIRBCTL, 0);
+    OK
+}
+
+/// After sleep the codec forgot everything: the controller, the codec's
+/// paths and the stream are set up again.
+unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the leaked Device.
+    let d = unsafe { &*(ctx as *const Device) };
+    let regs = &d.hda.regs;
+    if d.intel {
+        set_tcsel(d.pci);
+    }
+    let st = if reset(regs) {
+        start_rings(regs, &d.hda.corb, &d.hda.rirb);
+        d.hda.rirb_read.set(0);
+        let (addr, afg) = d.codec;
+        d.hda.command(addr, afg, SET_POWER << 8);
+        let widgets = d.hda.param(addr, afg, P_NODE_COUNT);
+        let codec = Codec { hda: &d.hda, addr, afg, first: (widgets >> 16) & 0xFF, count: widgets & 0xFF };
+        let (_, dacs) = codec.setup_outputs();
+        setup_stream(&d.ring.hw, d.bdl);
+        if d.has_irq.load(Ordering::Relaxed) {
+            regs.write32(INTCTL, 1 << 31 | 1 << d.inputs as u32);
+        }
+        if dacs.is_empty() {
+            E_IO
+        } else {
+            OK
+        }
+    } else {
+        E_IO
+    };
+    d.ring.unpause();
+    st
+}
+
+/// Intel: traffic class 0 for the stream DMA (TCSEL).
+fn set_tcsel(pci: Pci) {
+    let v = pci.read32(0x44);
+    pci.write32(0x44, v & !7);
+}
+
+/// The output stream reset and pointed at its buffer list.
+fn setup_stream(stream: &Stream, bdl: u64) {
+    let (regs, base) = (&stream.regs, stream.base);
+    stream.set_ctl(CTL_RESET);
+    arcdrv::wait_until(10, || stream.ctl() & CTL_RESET != 0);
+    stream.set_ctl(0);
+    arcdrv::wait_until(10, || stream.ctl() & CTL_RESET == 0);
+    regs.write32(base + SD_BDPL, bdl as u32);
+    regs.write32(base + SD_BDPU, (bdl >> 32) as u32);
+    regs.write32(base + SD_CBL, (PERIODS * PERIOD_BYTES) as u32);
+    regs.write16(base + SD_LVI, (PERIODS - 1) as u16);
+    regs.write16(base + SD_FMT, FORMAT);
+    stream.set_ctl(STREAM_TAG << 20);
 }
 
 unsafe extern "C" fn write(ctx: *mut c_void, samples: *const i16, frames: usize) -> Status {
@@ -424,10 +500,9 @@ fn probe(dev: &DeviceInfo) -> Status {
     }
     let pci = Pci(dev.id);
     pci.enable(false, true, true);
-    if dev.vendor == 0x8086 {
-        // Intel: traffic class 0 for the stream DMA (TCSEL).
-        let v = pci.read32(0x44);
-        pci.write32(0x44, v & !7);
+    let intel = dev.vendor == 0x8086;
+    if intel {
+        set_tcsel(pci);
     }
     let Some(regs) = Mmio::map(bar.base, 0x4000) else { return E_NOMEM };
     if !reset(&regs) {
@@ -461,7 +536,7 @@ fn probe(dev: &DeviceInfo) -> Status {
             let codec = Codec { hda: &hda, addr, afg: fg, first: (widgets >> 16) & 0xFF, count: widgets & 0xFF };
             let (kinds, dacs) = codec.setup_outputs();
             if !dacs.is_empty() {
-                chosen = Some((vendor, kinds));
+                chosen = Some((vendor, kinds, (addr, fg)));
                 break;
             }
         }
@@ -469,7 +544,7 @@ fn probe(dev: &DeviceInfo) -> Status {
             break;
         }
     }
-    let Some((vendor, kinds)) = chosen else {
+    let Some((vendor, kinds, codec)) = chosen else {
         arcdrv::info!("no analog output on the codecs (only HDMI or digital?)");
         return E_NODEV;
     };
@@ -477,31 +552,31 @@ fn probe(dev: &DeviceInfo) -> Status {
     // The first output stream.
     let base = 0x80 + inputs as usize * 0x20;
     let stream = Stream { regs, base };
-    stream.set_ctl(CTL_RESET);
-    arcdrv::wait_until(10, || stream.ctl() & CTL_RESET != 0);
-    stream.set_ctl(0);
-    arcdrv::wait_until(10, || stream.ctl() & CTL_RESET == 0);
     let (Some(buf), Some(bdl)) = (Dma::new(PERIODS * PERIOD_BYTES), Dma::new(4096)) else { return E_NOMEM };
     for i in 0..PERIODS {
         bdl.write::<u64>(i * 16, buf.phys() + (i * PERIOD_BYTES) as u64);
         bdl.write::<u32>(i * 16 + 8, PERIOD_BYTES as u32);
         bdl.write::<u32>(i * 16 + 12, 1); // interrupt on completion
     }
-    regs.write32(base + SD_BDPL, bdl.phys() as u32);
-    regs.write32(base + SD_BDPU, (bdl.phys() >> 32) as u32);
-    regs.write32(base + SD_CBL, (PERIODS * PERIOD_BYTES) as u32);
-    regs.write16(base + SD_LVI, (PERIODS - 1) as u16);
-    regs.write16(base + SD_FMT, FORMAT);
-    stream.set_ctl(STREAM_TAG << 20);
+    setup_stream(&stream, bdl.phys());
+    let bdl_phys = bdl.phys();
     // The descriptor table must outlive the stream.
     core::mem::forget(bdl);
-    core::mem::forget(hda);
 
-    let d: &'static Device = Box::leak(Box::new(Device { ring: PcmRing::new(stream, buf) }));
+    let d: &'static Device = Box::leak(Box::new(Device {
+        ring: PcmRing::new(stream, buf),
+        hda,
+        pci,
+        intel,
+        codec,
+        inputs,
+        bdl: bdl_phys,
+        has_irq: AtomicBool::new(false),
+    }));
     let ctx = d as *const Device as *mut c_void;
     if arcdrv::irq_attach_any(dev, irq, ctx) {
-        let stream_bit = inputs as u32;
-        regs.write32(INTCTL, 1 << 31 | 1 << stream_bit);
+        d.has_irq.store(true, Ordering::Relaxed);
+        regs.write32(INTCTL, 1 << 31 | 1 << inputs as u32);
     }
     let what = kinds.join(", ");
     let name = format!("HD Audio, {what}");
@@ -512,5 +587,6 @@ fn probe(dev: &DeviceInfo) -> Status {
     if n < 0 {
         return n;
     }
+    arcdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
     OK
 }

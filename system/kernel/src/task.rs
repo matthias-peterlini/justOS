@@ -131,6 +131,12 @@ impl Thread {
     }
 }
 
+/// Whether a thread may run on `cpu`: the other processors run no user
+/// programs, and nothing while they are being stopped (before sleep).
+fn allowed_on(t: &Thread, cpu: usize) -> bool {
+    cpu == 0 || (!t.pinned() && !smp::parking())
+}
+
 /// What the scheduler keeps for each processor.
 #[derive(Clone, Copy)]
 struct Cpu {
@@ -161,7 +167,7 @@ impl Sched {
     }
 
     fn runnable_on(&self, tid: Tid, cpu: usize) -> bool {
-        self.threads.get(&tid).is_some_and(|t| t.state == State::Ready && !t.on_cpu && (cpu == 0 || !t.pinned()))
+        self.threads.get(&tid).is_some_and(|t| t.state == State::Ready && !t.on_cpu && allowed_on(t, cpu))
     }
 
     /// Takes the next thread `cpu` may run from the ready queue. Threads it
@@ -375,9 +381,10 @@ fn schedule() {
             if state == Some(State::Running) {
                 s.threads.get_mut(&cur).unwrap().state = State::Ready;
             }
+            let stay = requeue && s.threads.get(&cur).is_some_and(|t| allowed_on(t, me));
             let next = match s.pick(me) {
                 Some(t) => t,
-                None if requeue => cur,
+                None if stay => cur,
                 None => idle,
             };
             s.cpus[me].slice = SLICE_TICKS;
@@ -517,7 +524,8 @@ fn tick(wake_sleepers: bool) {
         }
         let c = &mut s.cpus[me];
         c.slice = c.slice.saturating_sub(1);
-        (c.slice == 0 || cur == c.idle) && s.ready.iter().any(|&t| s.runnable_on(t, me))
+        let leave = me != 0 && cur != c.idle && smp::parking();
+        leave || ((c.slice == 0 || cur == c.idle) && s.ready.iter().any(|&t| s.runnable_on(t, me)))
     };
     if preempt {
         schedule();

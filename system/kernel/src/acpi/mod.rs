@@ -6,6 +6,7 @@ mod aml;
 pub mod ec;
 mod gpe;
 pub mod power;
+pub mod sleep;
 
 pub use aml::{ec_info, eval, ready as aml_ready, summary as aml_summary, tree};
 
@@ -34,6 +35,10 @@ struct Fadt {
     pm1_evt_len: u8,
     /// The power button is a fixed feature (not a control method one).
     fixed_power_button: bool,
+    /// The same for the sleep button.
+    fixed_sleep_button: bool,
+    /// The FACS (where the firmware finds the waking vector).
+    facs: u64,
     /// The general-purpose event blocks (I/O ports; lengths in bytes).
     gpe0_blk: u32,
     gpe1_blk: u32,
@@ -154,6 +159,11 @@ pub fn init(rsdp_hint: u64, memory: &'static [MemoryRegion]) {
             f.gpe1_len = t[93];
             f.gpe1_base = t[94];
             f.fixed_power_button = le32(t, 112) & (1 << 4) == 0;
+            f.fixed_sleep_button = le32(t, 112) & (1 << 5) == 0;
+            f.facs = le32(t, 36) as u64;
+            if t.len() >= 140 && le64(t, 132) != 0 {
+                f.facs = le64(t, 132);
+            }
             if t.len() >= 129 {
                 f.reset_supported = le32(t, 112) & (1 << 10) != 0;
                 f.reset_space = t[116];
@@ -202,8 +212,14 @@ pub fn summary() -> (String, Vec<String>) {
 
 /// SLP_TYPa/b for the S5 (soft off) state from the DSDT's `_S5_` package.
 fn s5_sleep_type(dsdt: u64) -> Option<(u16, u16)> {
+    scan_sleep_type(dsdt, b"_S5_")
+}
+
+/// SLP_TYPa/b of a sleep state (`_S3_`, `_S5_`) found by scanning the DSDT
+/// (without the AML interpreter).
+fn scan_sleep_type(dsdt: u64, name: &[u8; 4]) -> Option<(u16, u16)> {
     let t = table(dsdt)?;
-    let at = t.windows(4).position(|w| w == b"_S5_")?;
+    let at = t.windows(4).position(|w| w == name)?;
     let mut i = at + 4;
     if *t.get(i)? != 0x12 {
         return None; // PackageOp
@@ -245,6 +261,17 @@ fn enable_acpi_mode(f: &Fadt) {
 
 /// PM1 status: the power button was pressed.
 const PWRBTN: u16 = 1 << 8;
+/// PM1 status: the sleep button was pressed.
+const SLPBTN: u16 = 1 << 9;
+/// PM1 status: the clock's alarm went off.
+const RTC: u16 = 1 << 10;
+/// PM1 status: the machine woke up.
+const WAK: u16 = 1 << 15;
+
+/// The PM1 events the kernel listens to: the fixed buttons.
+fn pm1_events(f: &Fadt) -> u16 {
+    (if f.fixed_power_button { PWRBTN } else { 0 }) | (if f.fixed_sleep_button { SLPBTN } else { 0 })
+}
 
 /// Set when the computer should turn itself off: the power button, or the
 /// AML task (battery empty, too hot).
@@ -267,6 +294,9 @@ fn sci() {
             if pending & PWRBTN != 0 {
                 *POWER_REASON.lock() = "power button pressed";
                 POWER_BUTTON.signal();
+            }
+            if pending & SLPBTN != 0 {
+                sleep::request("sleep button pressed");
             }
         }
     }
@@ -297,13 +327,7 @@ pub fn start_events() {
     };
     enable_acpi_mode(&f);
     gpe::init(f.gpe0_blk, f.gpe0_len, f.gpe1_blk, f.gpe1_len, f.gpe1_base);
-    if f.pm1_evt_len >= 4 {
-        let button = if f.fixed_power_button { PWRBTN } else { 0 };
-        for (status, enable) in pm1_regs(&f) {
-            outw(status, 0xFFFF);
-            outw(enable, button);
-        }
-    }
+    listen_pm1(&f);
     crate::dev::irq::attach_kernel(line, sci);
     crate::task::spawn("power", || loop {
         POWER_BUTTON.wait(None);
@@ -315,23 +339,33 @@ pub fn start_events() {
     aml::start();
 }
 
+/// Clears the PM1 events and enables the fixed buttons.
+fn listen_pm1(f: &Fadt) {
+    if f.pm1_evt_len >= 4 {
+        for (status, enable) in pm1_regs(f) {
+            outw(status, 0xFFFF);
+            outw(enable, pm1_events(f));
+        }
+    }
+}
+
 /// Writes SLP_TYP and SLP_EN: the chipset enters the sleep state.
-fn enter_sleep(f: &Fadt, (a, b): (u16, u16)) {
+fn enter_sleep(f: &Fadt, slp: (u16, u16)) {
     // Wake events that are pending would wake the computer at once.
     for (status, _) in pm1_regs(f) {
         outw(status, 0xFFFF);
     }
     gpe::disable_all();
+    write_sleep_type(f, slp, false);
+    write_sleep_type(f, slp, true);
+}
+
+/// Sets SLP_TYP in the PM1 control registers, with SLP_EN if `go`.
+fn write_sleep_type(f: &Fadt, (a, b): (u16, u16), go: bool) {
     for (reg, typ) in [(f.pm1a_cnt, a), (f.pm1b_cnt, b)] {
         if reg != 0 && reg <= 0xFFFF {
             let v = inw(reg as u16) & !(7 << 10 | 1 << 13);
-            outw(reg as u16, v | (typ & 7) << 10);
-        }
-    }
-    for (reg, typ) in [(f.pm1a_cnt, a), (f.pm1b_cnt, b)] {
-        if reg != 0 && reg <= 0xFFFF {
-            let v = inw(reg as u16) & !(7 << 10 | 1 << 13);
-            outw(reg as u16, v | (typ & 7) << 10 | 1 << 13);
+            outw(reg as u16, v | (typ & 7) << 10 | if go { 1 << 13 } else { 0 });
         }
     }
 }

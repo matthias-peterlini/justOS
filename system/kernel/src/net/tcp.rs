@@ -753,7 +753,7 @@ pub fn open(ip: Ip, port: u16, local_port: u16) -> Result<Conn, &'static str> {
         let mut lport = if local_port != 0 { local_port } else { tab.next_port };
         if local_port == 0 {
             for _ in 0..16384 {
-                lport = if lport >= 65535 { 49152 } else { lport + 1 };
+                lport = if lport == u16::MAX { 49152 } else { lport + 1 };
                 if !tab.conns.values().any(|c| c.local_port == lport) {
                     break;
                 }
@@ -815,7 +815,7 @@ pub fn connect(ip: Ip, port: u16, timeout_ms: u64) -> Result<Conn, &'static str>
         let tab = &mut *t;
         let mut lport = tab.next_port;
         for _ in 0..16384 {
-            lport = if lport >= 65535 { 49152 } else { lport + 1 };
+            lport = if lport == u16::MAX { 49152 } else { lport + 1 };
             if !tab.conns.values().any(|c| c.local_port == lport) {
                 break;
             }

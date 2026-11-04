@@ -24,7 +24,7 @@ use core::sync::atomic::{fence, AtomicBool, AtomicI32, Ordering};
 
 arcdrv::driver! {
     name: "rtl8169",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -86,9 +86,75 @@ struct Nic {
     iface: AtomicI32,
     has_irq: AtomicBool,
     is_8125: bool,
+    mac: [u8; 6],
+    /// Asleep: the card is left alone.
+    paused: AtomicBool,
 }
 
 impl Nic {
+    /// Sets the card up, after [`reset`], to receive and send (interrupts
+    /// masked): fresh rings, address, filters.
+    fn configure(&self, r: &mut Rings) {
+        let regs = &self.regs;
+        self.tx_ring.as_mut_slice().fill(0);
+        for i in 0..RX_COUNT {
+            self.give_rx(i);
+        }
+        // The last transmit descriptor closes the ring.
+        self.tx_ring.write::<u32>((TX_COUNT - 1) * 16, EOR);
+        *r = Rings { rx_next: 0, tx_next: 0 };
+
+        regs.write8(CFG9346, 0xC0); // unlock the configuration registers
+        // The address again: some firmware leaves another one after sleep.
+        let m = self.mac;
+        regs.write32(IDR + 4, m[4] as u32 | (m[5] as u32) << 8);
+        regs.write32(IDR, u32::from_le_bytes([m[0], m[1], m[2], m[3]]));
+        // Checksums are left to the network stack; VLAN tags stay in the frame.
+        let cplus = regs.read16(CPLUS_CMD) & !((1 << 5) | (1 << 6));
+        regs.write16(CPLUS_CMD, cplus | (1 << 3)); // PCI multiple read/write
+        if !self.is_8125 {
+            regs.write16(INTR_MITIGATE, 0);
+        }
+        regs.write16(RX_MAX_SIZE, BUF as u16);
+        regs.write8(MAX_TX_SIZE, 0x3B);
+        regs.write32(TX_DESC, self.tx_ring.phys() as u32);
+        regs.write32(TX_DESC + 4, (self.tx_ring.phys() >> 32) as u32);
+        regs.write32(RX_DESC, self.rx_ring.phys() as u32);
+        regs.write32(RX_DESC + 4, (self.rx_ring.phys() >> 32) as u32);
+        // Older RTL8169s take the settings below only once both units run,
+        // the others only before: write them on both sides.
+        let configure = || {
+            if self.is_8125 {
+                // Default receive fetch, unlimited DMA bursts, own address,
+                // broadcast and multicast; automatic transmit FIFO.
+                regs.write32(RX_CONFIG, 8 << 27 | 7 << 8 | 0b1110);
+                regs.write32(TX_CONFIG, 3 << 24 | 7 << 8 | 1 << 7);
+                return;
+            }
+            // Own address, broadcast, multicast; unlimited DMA bursts; bits
+            // 13-15 are "no FIFO threshold" on the RTL8169 and "multiple and
+            // 128-byte interrupt" on the RTL8168, both wanted. Revision bits
+            // above stay as the chip has them.
+            regs.write32(RX_CONFIG, (regs.read32(RX_CONFIG) & 0xFFFF_1800) | (7 << 13) | (7 << 8) | 0b1110);
+            // Standard inter-frame gap, unlimited DMA bursts.
+            regs.write32(TX_CONFIG, (3 << 24) | (7 << 8));
+        };
+        configure();
+        regs.write8(CHIP_CMD, CMD_RX | CMD_TX);
+        configure();
+        for i in 0..2 {
+            regs.write32(MAR + i * 4, u32::MAX); // every multicast group
+        }
+        regs.write8(CFG9346, 0);
+    }
+
+    fn unmask(&self) {
+        if self.has_irq.load(Ordering::Relaxed) {
+            self.ack(u32::MAX);
+            self.set_mask(INTERRUPTS as u32);
+        }
+    }
+
     fn interrupt_status(&self) -> u32 {
         if self.is_8125 {
             self.regs.read32(INTR_STATUS_8125)
@@ -125,6 +191,9 @@ impl Nic {
     }
 
     fn receive(&self) {
+        if self.paused.load(Ordering::Acquire) {
+            return;
+        }
         let iface = self.iface.load(Ordering::Relaxed);
         let mut r = self.rings.lock();
         for _ in 0..RX_COUNT {
@@ -148,6 +217,9 @@ impl Nic {
     fn send(&self, frame: &[u8]) -> Status {
         if frame.is_empty() || frame.len() > MAX_FRAME - 4 {
             return E_INVAL;
+        }
+        if self.paused.load(Ordering::Acquire) {
+            return E_IO;
         }
         let start = arcdrv::time_ms();
         let mut r = loop {
@@ -214,11 +286,31 @@ unsafe extern "C" fn poller(ctx: *mut c_void) {
     }
 }
 
-fn probe(dev: &DeviceInfo) -> Status {
-    let Some(regs) = Regs::find(dev, true, 256) else {
-        return E_NODEV;
-    };
-    let is_8125 = matches!(dev.device, 0x8125 | 0x3000);
+/// Before sleep: the card stops.
+unsafe extern "C" fn suspend(ctx: *mut c_void) -> Status {
+    // SAFETY: the leaked Nic.
+    let nic = unsafe { &*(ctx as *const Nic) };
+    nic.paused.store(true, Ordering::Release);
+    let _r = nic.rings.lock(); // a send or receive under way ends
+    nic.set_mask(0);
+    nic.regs.write8(CHIP_CMD, 0);
+    OK
+}
+
+/// After sleep: the card set up again.
+unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
+    // SAFETY: the leaked Nic.
+    let nic = unsafe { &*(ctx as *const Nic) };
+    let st = reset(&nic.regs, nic.is_8125);
+    if st == OK {
+        nic.configure(&mut nic.rings.lock());
+        nic.paused.store(false, Ordering::Release);
+        nic.unmask();
+    }
+    st
+}
+
+fn reset(regs: &Regs, is_8125: bool) -> Status {
     if is_8125 {
         regs.write32(INTR_MASK_8125, 0);
     } else {
@@ -228,6 +320,18 @@ fn probe(dev: &DeviceInfo) -> Status {
     if !arcdrv::wait_until(100, || regs.read8(CHIP_CMD) & CMD_RESET == 0) {
         arcdrv::warn!("the card does not come out of reset");
         return E_IO;
+    }
+    OK
+}
+
+fn probe(dev: &DeviceInfo) -> Status {
+    let Some(regs) = Regs::find(dev, true, 256) else {
+        return E_NODEV;
+    };
+    let is_8125 = matches!(dev.device, 0x8125 | 0x3000);
+    let st = reset(&regs, is_8125);
+    if st != OK {
+        return st;
     }
     let mut mac = [0u8; 6];
     for (i, b) in mac.iter_mut().enumerate() {
@@ -249,51 +353,10 @@ fn probe(dev: &DeviceInfo) -> Status {
         iface: AtomicI32::new(-1),
         has_irq: AtomicBool::new(false),
         is_8125,
+        mac,
+        paused: AtomicBool::new(false),
     }));
-    for i in 0..RX_COUNT {
-        nic.give_rx(i);
-    }
-    // The last transmit descriptor closes the ring.
-    nic.tx_ring.write::<u32>((TX_COUNT - 1) * 16, EOR);
-
-    regs.write8(CFG9346, 0xC0); // unlock the configuration registers
-                                // Checksums are left to the network stack; VLAN tags stay in the frame.
-    let cplus = regs.read16(CPLUS_CMD) & !((1 << 5) | (1 << 6));
-    regs.write16(CPLUS_CMD, cplus | (1 << 3)); // PCI multiple read/write
-    if !is_8125 {
-        regs.write16(INTR_MITIGATE, 0);
-    }
-    regs.write16(RX_MAX_SIZE, BUF as u16);
-    regs.write8(MAX_TX_SIZE, 0x3B);
-    regs.write32(TX_DESC, nic.tx_ring.phys() as u32);
-    regs.write32(TX_DESC + 4, (nic.tx_ring.phys() >> 32) as u32);
-    regs.write32(RX_DESC, nic.rx_ring.phys() as u32);
-    regs.write32(RX_DESC + 4, (nic.rx_ring.phys() >> 32) as u32);
-    // Older RTL8169s take the settings below only once both units run, the
-    // others only before: write them on both sides.
-    let configure = || {
-        if is_8125 {
-            // Default receive fetch, unlimited DMA bursts, own address,
-            // broadcast and multicast; automatic transmit FIFO.
-            regs.write32(RX_CONFIG, 8 << 27 | 7 << 8 | 0b1110);
-            regs.write32(TX_CONFIG, 3 << 24 | 7 << 8 | 1 << 7);
-            return;
-        }
-        // Own address, broadcast, multicast; unlimited DMA bursts; bits
-        // 13-15 are "no FIFO threshold" on the RTL8169 and "multiple and
-        // 128-byte interrupt" on the RTL8168, both wanted. Revision bits
-        // above stay as the chip has them.
-        regs.write32(RX_CONFIG, (regs.read32(RX_CONFIG) & 0xFFFF_1800) | (7 << 13) | (7 << 8) | 0b1110);
-        // Standard inter-frame gap, unlimited DMA bursts.
-        regs.write32(TX_CONFIG, (3 << 24) | (7 << 8));
-    };
-    configure();
-    regs.write8(CHIP_CMD, CMD_RX | CMD_TX);
-    configure();
-    for i in 0..2 {
-        regs.write32(MAR + i * 4, u32::MAX); // every multicast group
-    }
-    regs.write8(CFG9346, 0);
+    nic.configure(&mut nic.rings.lock());
 
     let ctx = nic as *const Nic as *mut c_void;
     let desc: &'static NetDesc = Box::leak(Box::new(NetDesc { ctx, mac, _pad: [0; 2], mtu: 1500, send }));
@@ -305,11 +368,11 @@ fn probe(dev: &DeviceInfo) -> Status {
     nic.iface.store(iface, Ordering::Relaxed);
     if arcdrv::irq_attach_any(dev, irq, ctx) {
         nic.has_irq.store(true, Ordering::Relaxed);
-        nic.ack(u32::MAX);
-        nic.set_mask(INTERRUPTS as u32);
+        nic.unmask();
     }
     // Interrupt routing can be wrong on some boards; poll as a safety net.
     arcdrv::spawn("rtl8169-rx", poller, ctx);
+    arcdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
     arcdrv::info!(
         "link {}, {}",
         if nic.link_up() { "up" } else { "down" },

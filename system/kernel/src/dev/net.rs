@@ -64,6 +64,9 @@ pub fn poll(iface: u32) -> Option<Vec<u8>> {
 }
 
 pub fn send(iface: u32, frame: &[u8]) -> Status {
+    if !super::pm::awake() {
+        return OK; // the card sleeps: the frame is lost, as on a busy wire
+    }
     let desc = {
         let mut ifaces = IFACES.lock();
         let Some(Some(i)) = ifaces.get_mut(iface as usize) else { return E_INVAL };

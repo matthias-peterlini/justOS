@@ -7,17 +7,30 @@
 # Cases: std (QEMU VGA), bochs (bochs-display), qxl, vmware, virtio, cirrus
 # (800x600 at most in 32-bit colour), ati (no driver of its own: the generic
 # driver keeps the 1024x768 the loader set up).
+# std-sleep, vmware-sleep, virtio-sleep and cirrus-sleep put the computer to
+# sleep instead (QEMU's firmware leaves the card in text mode on waking) and
+# check the picture comes back in the mode it had.
 set -u
 IMAGE=${1:?usage: test-display.sh <image> [case...]}
 shift
 HERE=$(dirname "$0")
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
-CASES=${*:-std bochs qxl vmware virtio cirrus ati}
+CASES=${*:-std bochs qxl vmware virtio cirrus ati std-sleep vmware-sleep virtio-sleep cirrus-sleep}
 DEFAULT_MODE=${MODE:-1280x720}
 
 commands() {
-    cat > "$WORK/cmds.txt" <<EOT
+    if [ -n "$SLEEP" ]; then
+        cat > "$WORK/cmds.txt" <<EOT
+@sleep 4
+suspend 3
+@sleep 12
+display
+@sleep 1
+shutdown
+EOT
+    else
+        cat > "$WORK/cmds.txt" <<EOT
 @sleep 4
 display
 display $MODE
@@ -26,22 +39,32 @@ display
 @sleep 2
 shutdown
 EOT
+    fi
 }
 
-# Takes a screenshot through QMP after $2 seconds.
+# Takes screenshots through QMP into $2, $3... seconds after the start; the
+# last one stays. Without a window QEMU draws the screen only for a
+# screenshot, and a VGA that never drew before sleep shows QEMU's own
+# "not initialized" picture after waking up, whatever the guest did: the
+# sleep cases look once before sleeping too, as a real screen would.
 cat > "$WORK/shot.py" <<'EOT'
 import json, socket, sys, time
-sock, delay, out = sys.argv[1], float(sys.argv[2]), sys.argv[3]
-time.sleep(delay)
+start = time.time()
+sock, out, delays = sys.argv[1], sys.argv[2], [float(d) for d in sys.argv[3:]]
+time.sleep(delays[0])
 s = socket.socket(socket.AF_UNIX)
 s.connect(sock)
 f = s.makefile("rw")
 f.readline()
-for cmd in ({"execute": "qmp_capabilities"}, {"execute": "screendump", "arguments": {"filename": out}}):
-    f.write(json.dumps(cmd) + "\n")
+def cmd(c):
+    f.write(json.dumps(c) + "\n")
     f.flush()
     while "event" in json.loads(f.readline()):
         pass
+cmd({"execute": "qmp_capabilities"})
+for d in delays:
+    time.sleep(max(0, d - (time.time() - start)))
+    cmd({"execute": "screendump", "arguments": {"filename": out}})
 EOT
 
 # Width, height and number of distinct colours of a PPM screenshot.
@@ -58,6 +81,16 @@ EOT
 FAILED=0
 for c in $CASES; do
     MODE=$DEFAULT_MODE
+    SLEEP=
+    DELAY=16
+    case $c in
+        *-sleep)
+            # The mode the system started in: the loader's, or the one the
+            # driver chose (cirrus), kept across sleep.
+            SLEEP=1 DELAY="6 19" MODE=1024x768
+            c=${c%-sleep}
+            [ $c = cirrus ] && MODE=800x600 ;;
+    esac
     case $c in
         std) ARGS="-vga std" ;;
         bochs) ARGS="-vga none -device bochs-display" ;;
@@ -70,14 +103,18 @@ for c in $CASES; do
     esac
     commands
     rm -f "$WORK/shot.ppm"
-    python3 "$WORK/shot.py" "$WORK/qmp.sock" 16 "$WORK/shot.ppm" &
+    python3 "$WORK/shot.py" "$WORK/qmp.sock" "$WORK/shot.ppm" $DELAY &
     SHOT=$!
     "$HERE/test.sh" "$IMAGE" "$WORK/cmds.txt" $ARGS -qmp "unix:$WORK/qmp.sock,server,nowait" > "$WORK/out.txt" 2>&1
     STATUS=$?
     wait $SHOT
+    [ -n "$SLEEP" ] && c=$c-sleep
     problems=
     [ $STATUS -ne 0 ] && problems="$problems [kernel stopped]"
     grep -q "^screen $MODE" "$WORK/out.txt" || problems="$problems [no \"screen $MODE\"]"
+    if [ -n "$SLEEP" ]; then
+        grep -q "awake again" "$WORK/out.txt" || problems="$problems [did not wake]"
+    fi
     if [ -f "$WORK/shot.ppm" ]; then
         set -- $(python3 "$WORK/look.py" "$WORK/shot.ppm")
         [ "${1}x${2}" = "$MODE" ] || problems="$problems [screen is ${1}x${2}]"

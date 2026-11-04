@@ -18,6 +18,7 @@ pub mod keymap;
 pub mod net;
 pub mod pci;
 pub mod platform;
+pub mod pm;
 
 use crate::sync::IrqLock;
 use alloc::string::String;

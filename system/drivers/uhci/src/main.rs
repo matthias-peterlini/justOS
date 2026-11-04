@@ -30,7 +30,7 @@ use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU8, Ordering};
 
 arcdrv::driver! {
     name: "uhci",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -234,6 +234,10 @@ struct Uhci {
     polls: IrqLock<Vec<Arc<Pipe>>>,
     wake: Event,
     has_irq: AtomicBool,
+    /// Kernel id of the controller (for its PCI configuration).
+    pci: u32,
+    /// Stopped for sleep (a halted controller is not an error then).
+    asleep: AtomicBool,
 }
 
 impl Uhci {
@@ -641,6 +645,75 @@ impl Host for Uhci {
         }
         self.schedule_remove(&pipes);
     }
+
+    const SLEEPS: bool = true;
+
+    fn stop(&self) {
+        self.asleep.store(true, Ordering::Release);
+        outw(self.io + USBINTR, 0);
+        outw(self.io + USBCMD, 0);
+        arcdrv::wait_until(10, || inw(self.io + USBSTS) & STS_HALTED != 0);
+    }
+
+    fn restart(&self) -> Status {
+        let st = reset(self.io);
+        if st != OK {
+            return st;
+        }
+        init_frames(&self.frames);
+        let st = self.start();
+        self.asleep.store(false, Ordering::Release);
+        st
+    }
+}
+
+impl Uhci {
+    /// Points the controller at its frame list and lets it run.
+    fn start(&self) -> Status {
+        let io = self.io;
+        outl(io + FRBASEADD, self.frames.phys() as u32);
+        outw(io + FRNUM, 0);
+        outb(io + SOFMOD, 64);
+        outw(io + USBSTS, 0x3F);
+        outw(io + USBINTR, INTR_ENABLE);
+        Pci(self.pci).write16(USBLEGSUP, LEGSUP_PIRQ);
+        outw(io + USBCMD, CMD_RUN | CMD_CF | CMD_MAXP);
+        if !arcdrv::wait_until(100, || inw(io + USBSTS) & STS_HALTED == 0) {
+            arcdrv::warn!("controller does not start");
+            return E_IO;
+        }
+        if inw(io + USBSTS) & STS_FATAL != 0 {
+            arcdrv::warn!("controller reports an error");
+        }
+        OK
+    }
+}
+
+/// Global reset, then a host controller reset.
+fn reset(io: u16) -> Status {
+    outw(io + USBINTR, 0);
+    outw(io + USBCMD, 0);
+    arcdrv::wait_until(10, || inw(io + USBSTS) & STS_HALTED != 0);
+    outw(io + USBCMD, CMD_GRESET);
+    arcdrv::sleep_ms(50);
+    outw(io + USBCMD, 0);
+    arcdrv::sleep_ms(10);
+    outw(io + USBCMD, CMD_HCRESET);
+    if !arcdrv::wait_until(50, || inw(io + USBCMD) & CMD_HCRESET == 0) {
+        arcdrv::warn!("controller reset timed out");
+        return E_TIMEOUT;
+    }
+    OK
+}
+
+/// Every frame starts at the anchor queue head, which links nowhere yet.
+fn init_frames(frames: &Dma) {
+    frames.write::<u32>(ANCHOR, LINK_T);
+    frames.write::<u32>(ANCHOR + 4, LINK_T);
+    let anchor = (frames.phys() + ANCHOR as u64) as u32 | LINK_QH;
+    for i in 0..FRAMES {
+        frames.write::<u32>(i * 4, anchor);
+    }
 }
 
 /// Stops polling a pipe; never returns while its callback runs (the driver
@@ -681,7 +754,7 @@ unsafe extern "C" fn poll_thread(ctx: *mut c_void) {
             outw(u.io + USBSTS, sts & STS_EVENTS);
         }
         let sts = inw(u.io + USBSTS);
-        if sts & STS_HALTED != 0 && !reported {
+        if sts & STS_HALTED != 0 && !reported && !u.asleep.load(Ordering::Acquire) {
             arcdrv::error!("controller stopped (status {sts:#x})");
             reported = true;
         }
@@ -716,17 +789,9 @@ fn probe(dev: &DeviceInfo) -> Status {
     // Take the controller away from the firmware's keyboard emulation.
     pci.write16(USBLEGSUP, LEGSUP_OFF);
 
-    outw(io + USBINTR, 0);
-    outw(io + USBCMD, 0);
-    arcdrv::wait_until(10, || inw(io + USBSTS) & STS_HALTED != 0);
-    outw(io + USBCMD, CMD_GRESET);
-    arcdrv::sleep_ms(50);
-    outw(io + USBCMD, 0);
-    arcdrv::sleep_ms(10);
-    outw(io + USBCMD, CMD_HCRESET);
-    if !arcdrv::wait_until(50, || inw(io + USBCMD) & CMD_HCRESET == 0) {
-        arcdrv::warn!("controller reset timed out");
-        return E_TIMEOUT;
+    let st = reset(io);
+    if st != OK {
+        return st;
     }
     let ports = count_ports(io);
     if ports == 0 {
@@ -734,16 +799,7 @@ fn probe(dev: &DeviceInfo) -> Status {
     }
 
     let Some(frames) = Dma::new(ANCHOR + 16) else { return E_NOMEM };
-    frames.write::<u32>(ANCHOR, LINK_T);
-    frames.write::<u32>(ANCHOR + 4, LINK_T);
-    let anchor = (frames.phys() + ANCHOR as u64) as u32 | LINK_QH;
-    for i in 0..FRAMES {
-        frames.write::<u32>(i * 4, anchor);
-    }
-    outl(io + FRBASEADD, frames.phys() as u32);
-    outw(io + FRNUM, 0);
-    outb(io + SOFMOD, 64);
-    outw(io + USBSTS, 0x3F);
+    init_frames(&frames);
 
     let u: &'static Uhci = Box::leak(Box::new(Uhci {
         io,
@@ -755,20 +811,16 @@ fn probe(dev: &DeviceInfo) -> Status {
         polls: IrqLock::new(Vec::new()),
         wake: Event::new(),
         has_irq: AtomicBool::new(false),
+        pci: dev.id,
+        asleep: AtomicBool::new(false),
     }));
     let ctx = u as *const Uhci as *mut c_void;
     u.has_irq.store(arcdrv::irq_attach_any(dev, irq, ctx), Ordering::Relaxed);
     arcdrv::spawn("uhci-poll", poll_thread, ctx);
 
-    outw(io + USBINTR, INTR_ENABLE);
-    pci.write16(USBLEGSUP, LEGSUP_PIRQ);
-    outw(io + USBCMD, CMD_RUN | CMD_CF | CMD_MAXP);
-    if !arcdrv::wait_until(100, || inw(io + USBSTS) & STS_HALTED == 0) {
-        arcdrv::warn!("controller does not start");
-        return E_IO;
-    }
-    if inw(io + USBSTS) & STS_FATAL != 0 {
-        arcdrv::warn!("controller reports an error");
+    let st = u.start();
+    if st != OK {
+        return st;
     }
     arcdrv::info!("{} ports, {}", ports, if u.has_irq.load(Ordering::Relaxed) { "interrupts" } else { "polling" });
     arcusb::start(u, dev.id, "uhci-ports");

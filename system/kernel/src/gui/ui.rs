@@ -523,6 +523,10 @@ impl Looper {
     /// returns true.
     pub fn run(&mut self, d: &mut Display, view: &mut dyn View) {
         loop {
+            if super::take_redraw() {
+                d.follow_framebuffer();
+                self.damage_all(d);
+            }
             if let Some(mode) = super::take_mode_request() {
                 self.cursor.hide(d);
                 match d.set_mode(mode) {

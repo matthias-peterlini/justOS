@@ -2,7 +2,9 @@
 //!
 //! One admin queue pair and one I/O queue pair per controller, polled
 //! completions, transfers through a 64 KiB bounce buffer described by a PRP
-//! list. Every active namespace becomes a disk.
+//! list. Every active namespace becomes a disk. Before sleep the controller
+//! is flushed and shut down normally; after it, enabled again with the
+//! same queues.
 
 #![no_std]
 #![no_main]
@@ -16,7 +18,7 @@ use core::ffi::c_void;
 
 arcdrv::driver! {
     name: "nvme",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -45,6 +47,8 @@ struct Queue {
 struct Controller {
     regs: Mmio,
     stride: usize,
+    /// How long the controller may take to become ready, in ms.
+    timeout: u64,
     admin: Queue,
     io: Option<Queue>,
     bounce: Dma,
@@ -81,9 +85,53 @@ impl Queue {
             cid: 0,
         })
     }
+
+    /// Empty, as the controller sees a new queue.
+    fn clear(&mut self) {
+        self.sq.as_mut_slice().fill(0);
+        self.cq.as_mut_slice().fill(0);
+        self.sq_tail = 0;
+        self.cq_head = 0;
+        self.phase = true;
+    }
 }
 
 impl Controller {
+    /// Resets the controller and enables it with an empty admin queue.
+    fn enable(&mut self) -> Status {
+        let (regs, timeout) = (&self.regs, self.timeout);
+        regs.write32(REG_CC, regs.read32(REG_CC) & !1);
+        if !arcdrv::wait_until(timeout, || regs.read32(REG_CSTS) & 1 == 0) {
+            return E_TIMEOUT;
+        }
+        self.admin.clear();
+        let depth = (QUEUE_DEPTH - 1) as u32;
+        regs.write32(REG_AQA, depth << 16 | depth);
+        regs.write64(REG_ASQ, self.admin.sq.phys());
+        regs.write64(REG_ACQ, self.admin.cq.phys());
+        regs.write32(REG_CC, 1 | 6 << 16 | 4 << 20); // enable, 64-byte SQ and 16-byte CQ entries, 4 KiB pages
+        if !arcdrv::wait_until(timeout, || regs.read32(REG_CSTS) & 3 != 0) || regs.read32(REG_CSTS) & 2 != 0 {
+            arcdrv::warn!("controller failed to start");
+            return E_IO;
+        }
+        OK
+    }
+
+    /// Creates the I/O queue pair: completion queue 1, then submission
+    /// queue 1.
+    fn create_io(&mut self, mut io: Queue) -> Status {
+        io.clear();
+        let size = (QUEUE_DEPTH as u32 - 1) << 16 | 1;
+        if let Err(e) = self.admin(Command { opcode: 0x05, prp1: io.cq.phys(), cdw10: size, cdw11: 1, ..Command::default() }) {
+            return e;
+        }
+        if let Err(e) = self.admin(Command { opcode: 0x01, prp1: io.sq.phys(), cdw10: size, cdw11: 1 << 16 | 1, ..Command::default() }) {
+            return e;
+        }
+        self.io = Some(io);
+        OK
+    }
+
     /// Submits a command and polls for its completion.
     fn run(regs: &Mmio, stride: usize, q: &mut Queue, c: Command) -> Result<u32, Status> {
         q.cid = q.cid.wrapping_add(1);
@@ -200,6 +248,36 @@ unsafe extern "C" fn flush(ctx: *mut c_void) -> Status {
     }
 }
 
+/// Before sleep: everything written goes to flash, then a normal shutdown
+/// (the controller saves what it must).
+unsafe extern "C" fn suspend(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the leaked controller.
+    let mut c = unsafe { &*(ctx as *const Mutex<Controller>) }.lock();
+    // A flush of every namespace; not every controller takes it, but the
+    // shutdown below writes the cache out as well.
+    let _ = c.io(Command { opcode: 0x00, nsid: u32::MAX, ..Command::default() });
+    let regs = &c.regs;
+    regs.write32(REG_CC, (regs.read32(REG_CC) & !(3 << 14)) | 1 << 14);
+    if !arcdrv::wait_until(c.timeout.max(5000), || (regs.read32(REG_CSTS) >> 2) & 3 == 2) {
+        arcdrv::warn!("controller did not finish its shutdown");
+    }
+    OK
+}
+
+/// After sleep: enabled again, with the I/O queues created anew.
+unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the leaked controller.
+    let mut c = unsafe { &*(ctx as *const Mutex<Controller>) }.lock();
+    let st = c.enable();
+    if st != OK {
+        return st;
+    }
+    match c.io.take() {
+        Some(io) => c.create_io(io),
+        None => OK,
+    }
+}
+
 fn text(bytes: &[u8]) -> String {
     String::from(core::str::from_utf8(bytes).unwrap_or("").trim())
 }
@@ -220,26 +298,17 @@ fn probe(dev: &DeviceInfo) -> Status {
     let vs = regs.read32(REG_VS);
 
     // Reset, then bring the controller up with the admin queues.
-    regs.write32(REG_CC, regs.read32(REG_CC) & !1);
-    if !arcdrv::wait_until(timeout, || regs.read32(REG_CSTS) & 1 == 0) {
-        return E_TIMEOUT;
-    }
     let (Some(admin), Some(bounce), Some(prp_list)) = (Queue::new(0), Dma::new(BOUNCE_PAGES * PAGE), Dma::new(PAGE)) else {
         return E_NOMEM;
     };
     for i in 1..BOUNCE_PAGES {
         prp_list.write::<u64>((i - 1) * 8, bounce.phys() + (i * PAGE) as u64);
     }
-    let depth = (QUEUE_DEPTH - 1) as u32;
-    regs.write32(REG_AQA, depth << 16 | depth);
-    regs.write64(REG_ASQ, admin.sq.phys());
-    regs.write64(REG_ACQ, admin.cq.phys());
-    regs.write32(REG_CC, 1 | 6 << 16 | 4 << 20); // enable, 64-byte SQ and 16-byte CQ entries, 4 KiB pages
-    if !arcdrv::wait_until(timeout, || regs.read32(REG_CSTS) & 3 != 0) || regs.read32(REG_CSTS) & 2 != 0 {
-        arcdrv::warn!("controller failed to start");
-        return E_IO;
+    let mut ctrl = Controller { regs, stride, timeout, admin, io: None, bounce, prp_list };
+    let st = ctrl.enable();
+    if st != OK {
+        return st;
     }
-    let mut ctrl = Controller { regs, stride, admin, io: None, bounce, prp_list };
 
     // Identify the controller.
     let prp = ctrl.bounce.phys();
@@ -251,18 +320,14 @@ fn probe(dev: &DeviceInfo) -> Status {
     let namespaces = u32::from_le_bytes(id[516..520].try_into().unwrap());
     arcdrv::info!("{} (NVMe {}.{}), {} namespace(s)", model, vs >> 16, (vs >> 8) & 0xFF, namespaces);
 
-    // One I/O queue pair: completion queue 1, then submission queue 1.
     let Some(io) = Queue::new(1) else { return E_NOMEM };
-    let size = (QUEUE_DEPTH as u32 - 1) << 16 | 1;
-    if let Err(e) = ctrl.admin(Command { opcode: 0x05, prp1: io.cq.phys(), cdw10: size, cdw11: 1, ..Command::default() }) {
-        return e;
+    let st = ctrl.create_io(io);
+    if st != OK {
+        return st;
     }
-    if let Err(e) = ctrl.admin(Command { opcode: 0x01, prp1: io.sq.phys(), cdw10: size, cdw11: 1 << 16 | 1, ..Command::default() }) {
-        return e;
-    }
-    ctrl.io = Some(io);
 
     let ctrl: &'static Mutex<Controller> = Box::leak(Box::new(Mutex::new(ctrl)));
+    arcdrv::power_hooks(dev.id, ctrl as *const Mutex<Controller> as *mut c_void, Some(suspend), resume);
     for nsid in 1..=namespaces.min(16) {
         let mut c = ctrl.lock();
         let prp = c.bounce.phys();

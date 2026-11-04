@@ -2,7 +2,7 @@
 # desktop and laptop boards. Written from the chip documentation; verified
 # on the models in tools/qemu, not yet on hardware.
 name        = rtl8169
-version     = 1.0.0
+version     = 1.1.0
 class       = network
 description = Realtek RTL8169/8111/8125 Ethernet
 author      = arcOS

@@ -353,6 +353,98 @@ pub fn eval(path: &str, args: Vec<u64>) -> Option<Result<String, String>> {
     })
 }
 
+/// Set by the wake-up job: the AML task enables its GPEs again and reads
+/// batteries, lid and temperatures afresh.
+static RESUMED: AtomicBool = AtomicBool::new(false);
+
+/// Devices that may wake the computer: the buttons and the lid (as Linux
+/// does by default).
+const WAKE_IDS: [&str; 3] = ["PNP0C0C", "PNP0C0D", "PNP0C0E"];
+
+/// Runs a method with one integer argument if the firmware has it.
+fn call_if(aml: &mut Aml, path: &str, arg: u64) {
+    if aml.find(path).is_some() {
+        if let Err(e) = aml.evaluate(path, &[Value::Integer(arg)]) {
+            crate::debug!("acpi", "{path}({arg}): {e}");
+        }
+    }
+}
+
+/// Arms (or disarms) the devices that may wake the computer from `state`
+/// (`_DSW`, or the older `_PSW`). Their GPEs.
+fn arm_wake(aml: &mut Aml, state: u8, on: bool) -> Vec<u16> {
+    let mut gpes = Vec::new();
+    for dev in aml.find_devices(&WAKE_IDS) {
+        if aml.status(dev) & 1 == 0 {
+            continue;
+        }
+        let Ok(Some(Value::Package(p))) = aml.evaluate_child(dev, "_PRW", &[]) else { continue };
+        let (Some(Value::Integer(g)), Some(Value::Integer(deepest))) = (p.first(), p.get(1)) else { continue };
+        if *deepest < state as u64 {
+            continue;
+        }
+        let g = *g as u16;
+        let r = if aml.child(dev, "_DSW").is_some() {
+            let args = [Value::Integer(on as u64), Value::Integer(if on { state as u64 } else { 0 }), Value::Integer(0)];
+            aml.evaluate_child(dev, "_DSW", &args).map(|_| ())
+        } else if aml.child(dev, "_PSW").is_some() {
+            aml.evaluate_child(dev, "_PSW", &[Value::Integer(on as u64)]).map(|_| ())
+        } else {
+            Ok(())
+        };
+        if let Err(e) = r {
+            crate::debug!("acpi", "wake setup of {}: {e}", aml.path(dev));
+        }
+        if g < gpe::count() {
+            gpes.push(g);
+        }
+    }
+    gpes
+}
+
+/// Tells the firmware a sleep is coming (`_TTS`), before the devices stop.
+pub(super) fn will_sleep(state: u8) {
+    let _ = with(3000, move |aml| call_if(aml, "\\_TTS", state as u64));
+}
+
+/// What sleeping in a state takes, from the firmware.
+pub(super) struct SleepPlan {
+    /// SLP_TYPa/b of the state and of S0 (working).
+    pub slp: (u8, u8),
+    pub slp_s0: Option<(u8, u8)>,
+    /// The GPEs that may wake the computer.
+    pub wake_gpes: Vec<u16>,
+}
+
+/// Right before sleep in `state` (the devices stopped): the devices that
+/// may wake the computer are armed and the firmware is told (`_PTS`,
+/// `_SST`). None without AML or if the firmware has no such state.
+pub(super) fn prepare_sleep(state: u8) -> Option<SleepPlan> {
+    with(5000, move |aml| {
+        let slp = aml.sleep_type(state)?;
+        let slp_s0 = aml.sleep_type(0);
+        let wake_gpes = arm_wake(aml, state, true);
+        call_if(aml, "\\_PTS", state as u64);
+        call_if(aml, "\\_SI._SST", 3);
+        Some(SleepPlan { slp, slp_s0, wake_gpes })
+    })
+    .flatten()
+}
+
+/// After waking up: `_WAK`, the wake devices disarmed, the sleep light back
+/// to working; then the AML task enables its GPEs again and reads
+/// batteries, lid and temperatures afresh.
+pub(super) fn finish_sleep(state: u8) {
+    let _ = with(5000, move |aml| {
+        call_if(aml, "\\_SI._SST", 2);
+        call_if(aml, "\\_WAK", state as u64);
+        arm_wake(aml, state, false);
+        call_if(aml, "\\_SI._SST", 1);
+        call_if(aml, "\\_TTS", 0);
+        RESUMED.store(true, Ordering::Release);
+    });
+}
+
 /// The embedded controller's ports and how many transfers timed out.
 pub fn ec_info() -> Option<(u16, u16, u32)> {
     ec::present().then(|| {
@@ -556,13 +648,19 @@ fn handle_notes(aml: &mut Aml, devs: &mut power::Devices) {
                 }
                 power::refresh_batteries(aml, devs);
             } else if power::is_lid(devs, n) {
+                let was_open = power::state().lid_open;
                 power::refresh_lid(aml, devs);
+                if was_open == Some(true) && power::state().lid_open == Some(false) {
+                    super::sleep::request("lid closed");
+                }
             } else if power::is_zone(devs, n) {
                 power::refresh_thermal(aml, devs);
             } else {
                 let ids = aml.ids(n);
                 if ids.iter().any(|i| i == "PNP0C0C") && v == 0x80 {
                     super::request_power_off("power button pressed");
+                } else if ids.iter().any(|i| i == "PNP0C0E") && v == 0x80 {
+                    super::sleep::request("sleep button pressed");
                 } else {
                     crate::debug!("acpi", "notify {} {v:#x} {ids:?}", aml.path(n));
                 }
@@ -614,6 +712,16 @@ fn worker() {
             let job = JOBS.lock().pop_front();
             let Some(job) = job else { break };
             job(&mut aml);
+            handle_notes(&mut aml, &mut devs);
+        }
+        if RESUMED.swap(false, Ordering::AcqRel) {
+            // Every GPE was turned off for sleep.
+            for &g in ev.gpes.keys() {
+                gpe::clear(g);
+                gpe::enable(g);
+            }
+            ev.counts.clear();
+            power::refresh_all(&mut aml, &mut devs);
             handle_notes(&mut aml, &mut devs);
         }
         power::poll(&mut aml, &mut devs, crate::time::uptime_ms());

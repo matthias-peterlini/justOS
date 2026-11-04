@@ -230,6 +230,7 @@ funzioni sicure:
 | rete | `net_register` con un `NetDesc`, `net_receive` per i frame in arrivo |
 | suono | `audio_register` con un `AudioDesc` (scrittura di campioni a 16 bit, svuotamento); `pcm::PcmRing` gestisce il buffer circolare che quasi ogni scheda audio legge in loop |
 | schermo | `display_register` con un `DisplayDesc` (modi, cambio di modo, aggiornamento di un rettangolo); `map_framebuffer` mappa la memoria video in write-combining |
+| sospensione | `power_hooks`: come il dispositivo si ferma prima della sospensione e riparte al risveglio (vedi sotto) |
 
 Il driver dichiara la versione dell'ABI per cui è compilato
 (`ABI_VERSION`, oggi 2). Il kernel rifiuta i pacchetti di un'ABI diversa
@@ -261,6 +262,57 @@ dispositivo, anche se non gli servono. Una linea lasciata alta blocca
 anche tutti gli altri dispositivi collegati. I driver inclusi tengono
 anche un thread di polling come rete di sicurezza, perché su alcune schede
 madri le interruzioni arrivano instradate male.
+
+### Sospensione
+
+Durante la sospensione in RAM (S3) la memoria resta alimentata, i
+dispositivi no: al risveglio ogni registro è tornato al valore di reset.
+Un driver dice come il suo dispositivo si ferma e riparte, in `probe`:
+
+```rust
+arcdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
+
+unsafe extern "C" fn suspend(ctx: *mut c_void) -> Status { /* ... */ OK }
+unsafe extern "C" fn resume(ctx: *mut c_void) -> Status { /* ... */ OK }
+```
+
+- `suspend` (facoltativa) ferma il dispositivo: finisce o abbandona quello
+  che stava facendo e non fa più DMA. Un errore tiene sveglia la macchina
+  (i dispositivi già fermati ripartono).
+- `resume` lo rimette come lo aveva lasciato `probe`. Il kernel ha già
+  ripristinato la configurazione PCI (BAR, registro di comando, MSI e
+  MSI-X).
+
+Il kernel ferma i dispositivi dai figli ai genitori e li fa ripartire nel
+verso opposto. Da prima di `suspend` a dopo `resume` trattiene l'I/O
+diretto al dispositivo: i trasferimenti dei dischi aspettano, i frame di
+rete in uscita si scartano, il suono aspetta. Un dispositivo con un driver
+ma senza hook impedisce la sospensione: `suspend check` dice quale. I
+dispositivi aggiunti da un driver (quelli USB) sono affare del genitore.
+
+Le regole, imparate scrivendo gli hook dei driver inclusi:
+
+- **mai aspettare tenendo un `IrqLock`**: con le interruzioni spente il
+  tempo non avanza, quindi `wait_until` e `sleep_ms` non tornano più. Il
+  reset del chip (che aspetta) va fatto fuori dal lock, la
+  riconfigurazione (che scrive solo registri) dentro;
+- le schede di rete tengono un `paused: AtomicBool`: mentre è vero,
+  l'interruzione e la ricezione tornano subito e `send` risponde `E_IO`.
+  `suspend` lo alza, prende e lascia il lock (così nessuno è a metà di un
+  invio), maschera le interruzioni e ferma le unità; `resume` resetta,
+  riconfigura (anelli vuoti, MAC, filtri) e lo abbassa;
+- l'audio usa `PcmRing::pause` e `PcmRing::unpause`: chi scrive campioni
+  aspetta invece di trovare il buffer fermo;
+- un lettore SD rilegge la scheda al risveglio e la confronta (CID e
+  indirizzamento) con quella di prima: se è un'altra, o non c'è più, la
+  toglie come se fosse stata estratta;
+- uno schermo rimette il modo che aveva. Se era ancora quello scelto dal
+  firmware all'avvio, il kernel chiede al driver lo stesso modo al
+  risveglio (il BIOS di QEMU rimette la scheda in modo testo).
+
+Con `SLEEP=1`, `make test-drivers` e `make test-audio` sospendono la
+macchina prima di ogni prova; `make test-display` ha i casi `*-sleep`,
+`make test-acpi` i casi `sleep-pc`, `sleep-q35` e `sleep-uefi`.
 
 ## Driver USB
 
@@ -295,6 +347,12 @@ puntatore a `UsbInterface`, che contiene:
 Non sanno su quale controller si trovano. Le funzioni per leggere i
 descrittori sono in `arcdrv::usb`.
 
+Per la sospensione un driver di controller dichiara `const SLEEPS: bool =
+true` e implementa `Host::stop` (il controller si ferma) e `Host::restart`
+(reset e avvio come all'inizio, senza dispositivi). `arcusb` fa il resto:
+prima della sospensione toglie tutti i dispositivi collegati, al risveglio
+li trova di nuovo e li enumera, e i driver di classe ripartono con `probe`.
+
 ## Driver virtio
 
 `arcvirtio` è la parte comune ai driver virtio (`virtioblk`, `virtionet`).
@@ -302,6 +360,12 @@ Trova l'interfaccia moderna (virtio 1.0, con le capability PCI) o quella
 legacy (porte I/O), negozia le funzioni e prepara le code. Offre anche le
 interruzioni MSI-X o la linea classica. Un driver virtio nuovo deve solo
 descrivere le sue code e i suoi messaggi.
+
+Al risveglio `Virtio::restore` resetta il dispositivo, rinegozia le stesse
+funzioni, restituisce ogni coda vuota e rimette i vettori MSI-X; il driver
+riempie di nuovo le code e chiama `ready`. Quando le code stanno dietro un
+lock che non si può tenere durante il reset, gli stessi passi ci sono
+separati: `negotiate`, `requeue` per ogni coda, `reroute`.
 
 ## Hardware supportato
 

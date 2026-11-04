@@ -18,7 +18,7 @@ use core::sync::atomic::{fence, AtomicBool, AtomicI32, Ordering};
 
 arcdrv::driver! {
     name: "igb",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -89,6 +89,9 @@ struct Nic {
     has_irq: AtomicBool,
     /// Interrupts come by MSI-X vector 0.
     msix: AtomicBool,
+    mac: [u8; 6],
+    /// Asleep: the card is left alone.
+    paused: AtomicBool,
 }
 
 impl Nic {
@@ -99,7 +102,74 @@ impl Nic {
         self.rx_ring.write::<u64>(i * 16 + 8, 0);
     }
 
+    /// After [`reset`]: address, filters, fresh rings, both units on
+    /// (interrupts masked). Nothing else may use the rings meanwhile.
+    fn configure(&self) {
+        let regs = &self.regs;
+        let mac = self.mac;
+        regs.write32(RAL, u32::from_le_bytes([mac[0], mac[1], mac[2], mac[3]]));
+        regs.write32(RAH, u16::from_le_bytes([mac[4], mac[5]]) as u32 | 1 << 31);
+        for i in 0..128 {
+            regs.write32(MTA + i * 4, 0);
+        }
+        for i in 0..RX_COUNT {
+            self.give_rx(i);
+        }
+        self.tx_ring.as_mut_slice().fill(0);
+        *self.rings.lock() = Rings { rx_next: 0, tx_next: 0 };
+
+        // Receive: 2 KiB buffers, advanced one-buffer descriptors.
+        regs.write32(RCTL, 0);
+        regs.write32(RDBAL, self.rx_ring.phys() as u32);
+        regs.write32(RDBAH, (self.rx_ring.phys() >> 32) as u32);
+        regs.write32(RDLEN, (RX_COUNT * 16) as u32);
+        regs.write32(SRRCTL, (BUF / 1024) as u32 | 1 << 25);
+        regs.write32(RDH, 0);
+        regs.write32(RDT, 0);
+        regs.write32(RXDCTL, regs.read32(RXDCTL) | QUEUE_ENABLE);
+        if !arcdrv::wait_until(50, || regs.read32(RXDCTL) & QUEUE_ENABLE != 0) {
+            arcdrv::warn!("the receive queue does not start");
+        }
+        regs.write32(RDT, (RX_COUNT - 1) as u32);
+        // Enable, broadcast, strip the CRC.
+        regs.write32(RCTL, 1 << 1 | 1 << 15 | 1 << 26);
+
+        regs.write32(TDBAL, self.tx_ring.phys() as u32);
+        regs.write32(TDBAH, (self.tx_ring.phys() >> 32) as u32);
+        regs.write32(TDLEN, (TX_COUNT * 16) as u32);
+        regs.write32(TDH, 0);
+        regs.write32(TDT, 0);
+        regs.write32(TXDCTL, regs.read32(TXDCTL) | QUEUE_ENABLE);
+        if !arcdrv::wait_until(50, || regs.read32(TXDCTL) & QUEUE_ENABLE != 0) {
+            arcdrv::warn!("the transmit queue does not start");
+        }
+        // Enable, pad short frames, collision settings.
+        regs.write32(TCTL, 1 << 1 | 1 << 3 | 0x0F << 4 | 0x3F << 12);
+    }
+
+    /// Lets the card interrupt again (when it has a way to).
+    fn unmask(&self) {
+        if !self.has_irq.load(Ordering::Relaxed) {
+            return;
+        }
+        let regs = &self.regs;
+        if self.msix.load(Ordering::Relaxed) {
+            // MSI-X: queue 0 (both ways) and the other causes on vector 0,
+            // cleared automatically.
+            regs.write32(GPIE, 1 << 4 | 1 << 30 | 1 << 31 | 1 << 0);
+            regs.write32(IVAR0, 0x8080);
+            regs.write32(IVAR_MISC, 0x8000);
+            regs.write32(EIAC, 1);
+            regs.write32(EIMS, 1);
+        }
+        // Receive descriptor written back, receive timer, link change.
+        regs.write32(IMS, 1 << 7 | 1 << 4 | 1 << 2 | 1 << 0);
+    }
+
     fn receive(&self) {
+        if self.paused.load(Ordering::Acquire) {
+            return;
+        }
         let iface = self.iface.load(Ordering::Relaxed);
         let mut r = self.rings.lock();
         for _ in 0..RX_COUNT {
@@ -124,14 +194,28 @@ impl Nic {
         if frame.is_empty() || frame.len() > BUF {
             return E_INVAL;
         }
-        let mut r = self.rings.lock();
-        let i = r.tx_next;
-        let at = i * 16;
-        // Free once done, or never used (address still zero).
-        let used = self.tx_ring.read::<u64>(at) != 0;
-        if used && !arcdrv::wait_until(100, || self.tx_ring.read::<u32>(at + 12) & TX_DD != 0) {
+        if self.paused.load(Ordering::Acquire) {
             return E_IO;
         }
+        // Wait for the slot without holding the lock (time stands still
+        // while it is held).
+        let start = arcdrv::time_ms();
+        let mut r = loop {
+            let r = self.rings.lock();
+            let at = r.tx_next * 16;
+            // Free once done, or never used (address still zero).
+            let used = self.tx_ring.read::<u64>(at) != 0;
+            if !used || self.tx_ring.read::<u32>(at + 12) & TX_DD != 0 {
+                break r;
+            }
+            drop(r);
+            if arcdrv::time_ms() - start > 100 {
+                return E_IO;
+            }
+            arcdrv::yield_now();
+        };
+        let i = r.tx_next;
+        let at = i * 16;
         self.tx_bufs.as_mut_slice()[i * BUF..i * BUF + frame.len()].copy_from_slice(frame);
         self.tx_ring.write::<u64>(at, self.tx_bufs.phys() + (i * BUF) as u64);
         self.tx_ring.write::<u32>(at + 8, TX_CMD | frame.len() as u32);
@@ -156,7 +240,9 @@ unsafe extern "C" fn irq(ctx: *mut c_void) {
         // Clear the vector's cause and unmask it, then look at the queue.
         nic.regs.write32(EICR, u32::MAX);
         nic.regs.read32(ICR);
-        nic.regs.write32(EIMS, 1);
+        if !nic.paused.load(Ordering::Acquire) {
+            nic.regs.write32(EIMS, 1);
+        }
         nic.receive();
         return;
     }
@@ -174,6 +260,33 @@ unsafe extern "C" fn poller(ctx: *mut c_void) {
         nic.receive();
         arcdrv::sleep_ms(if nic.has_irq.load(Ordering::Relaxed) { 50 } else { 5 });
     }
+}
+
+/// Before sleep: the card stops.
+unsafe extern "C" fn suspend(ctx: *mut c_void) -> Status {
+    // SAFETY: the leaked Nic.
+    let nic = unsafe { &*(ctx as *const Nic) };
+    nic.paused.store(true, Ordering::Release);
+    let _r = nic.rings.lock(); // a send or receive under way ends
+    let regs = &nic.regs;
+    regs.write32(IMC, u32::MAX);
+    regs.write32(EIMC, u32::MAX);
+    regs.write32(RCTL, 0);
+    regs.write32(TCTL, 0);
+    OK
+}
+
+/// After sleep: the card set up again.
+unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
+    // SAFETY: the leaked Nic.
+    let nic = unsafe { &*(ctx as *const Nic) };
+    let st = reset(&nic.regs);
+    if st == OK {
+        nic.configure();
+        nic.paused.store(false, Ordering::Release);
+        nic.unmask();
+    }
+    st
 }
 
 /// Reads a PHY register (`None` if the PHY does not answer).
@@ -215,13 +328,8 @@ fn read_mac(regs: &Mmio) -> Option<[u8; 6]> {
     (mac != [0; 6] && mac != [0xFF; 6]).then_some(mac)
 }
 
-fn probe(dev: &DeviceInfo) -> Status {
-    let bar = dev.resources[0];
-    if dev.vendor != 0x8086 || bar.kind != RES_MEMORY || bar.base == 0 {
-        return E_NODEV;
-    }
-    arcdrv::Pci(dev.id).enable(false, true, true);
-    let Some(regs) = Mmio::map(bar.base, 0x20000) else { return E_NOMEM };
+/// Resets the card, sets the link up and wakes the PHY (interrupts masked).
+fn reset(regs: &Mmio) -> Status {
     regs.write32(IMC, u32::MAX);
     regs.write32(EIMC, u32::MAX);
     regs.write32(CTRL, regs.read32(CTRL) | CTRL_RST);
@@ -239,10 +347,23 @@ fn probe(dev: &DeviceInfo) -> Status {
     regs.write32(CTRL_EXT, regs.read32(CTRL_EXT) | 1 << 28); // driver loaded
 
     // Power up the PHY and restart auto-negotiation.
-    if let Some(bmcr) = phy_read(&regs, 0) {
-        phy_write(&regs, 0, (bmcr & !(1 << 11)) | 1 << 12 | 1 << 9);
+    if let Some(bmcr) = phy_read(regs, 0) {
+        phy_write(regs, 0, (bmcr & !(1 << 11)) | 1 << 12 | 1 << 9);
     }
+    OK
+}
 
+fn probe(dev: &DeviceInfo) -> Status {
+    let bar = dev.resources[0];
+    if dev.vendor != 0x8086 || bar.kind != RES_MEMORY || bar.base == 0 {
+        return E_NODEV;
+    }
+    arcdrv::Pci(dev.id).enable(false, true, true);
+    let Some(regs) = Mmio::map(bar.base, 0x20000) else { return E_NOMEM };
+    let st = reset(&regs);
+    if st != OK {
+        return st;
+    }
     let mac = match read_mac(&regs) {
         Some(m) => m,
         None => {
@@ -250,11 +371,6 @@ fn probe(dev: &DeviceInfo) -> Status {
             return E_IO;
         }
     };
-    regs.write32(RAL, u32::from_le_bytes([mac[0], mac[1], mac[2], mac[3]]));
-    regs.write32(RAH, u16::from_le_bytes([mac[4], mac[5]]) as u32 | 1 << 31);
-    for i in 0..128 {
-        regs.write32(MTA + i * 4, 0);
-    }
 
     let (Some(rx_ring), Some(rx_bufs), Some(tx_ring), Some(tx_bufs)) =
         (Dma::new(RX_COUNT * 16), Dma::new(RX_COUNT * BUF), Dma::new(TX_COUNT * 16), Dma::new(TX_COUNT * BUF))
@@ -271,38 +387,10 @@ fn probe(dev: &DeviceInfo) -> Status {
         iface: AtomicI32::new(-1),
         has_irq: AtomicBool::new(false),
         msix: AtomicBool::new(false),
+        mac,
+        paused: AtomicBool::new(false),
     }));
-    for i in 0..RX_COUNT {
-        nic.give_rx(i);
-    }
-
-    // Receive: 2 KiB buffers, advanced one-buffer descriptors.
-    regs.write32(RCTL, 0);
-    regs.write32(RDBAL, nic.rx_ring.phys() as u32);
-    regs.write32(RDBAH, (nic.rx_ring.phys() >> 32) as u32);
-    regs.write32(RDLEN, (RX_COUNT * 16) as u32);
-    regs.write32(SRRCTL, (BUF / 1024) as u32 | 1 << 25);
-    regs.write32(RDH, 0);
-    regs.write32(RDT, 0);
-    regs.write32(RXDCTL, regs.read32(RXDCTL) | QUEUE_ENABLE);
-    if !arcdrv::wait_until(50, || regs.read32(RXDCTL) & QUEUE_ENABLE != 0) {
-        arcdrv::warn!("the receive queue does not start");
-    }
-    regs.write32(RDT, (RX_COUNT - 1) as u32);
-    // Enable, broadcast, strip the CRC.
-    regs.write32(RCTL, 1 << 1 | 1 << 15 | 1 << 26);
-
-    regs.write32(TDBAL, nic.tx_ring.phys() as u32);
-    regs.write32(TDBAH, (nic.tx_ring.phys() >> 32) as u32);
-    regs.write32(TDLEN, (TX_COUNT * 16) as u32);
-    regs.write32(TDH, 0);
-    regs.write32(TDT, 0);
-    regs.write32(TXDCTL, regs.read32(TXDCTL) | QUEUE_ENABLE);
-    if !arcdrv::wait_until(50, || regs.read32(TXDCTL) & QUEUE_ENABLE != 0) {
-        arcdrv::warn!("the transmit queue does not start");
-    }
-    // Enable, pad short frames, collision settings.
-    regs.write32(TCTL, 1 << 1 | 1 << 3 | 0x0F << 4 | 0x3F << 12);
+    nic.configure();
 
     let ctx = nic as *const Nic as *mut c_void;
     let desc: &'static NetDesc = Box::leak(Box::new(NetDesc { ctx, mac, _pad: [0; 2], mtu: 1500, send }));
@@ -319,20 +407,12 @@ fn probe(dev: &DeviceInfo) -> Status {
     let attached = message || (dev.irq != arcdrv::IRQ_NONE && arcdrv::irq_attach(dev.id, dev.irq, irq, ctx) == OK);
     if attached {
         nic.has_irq.store(true, Ordering::Relaxed);
-        if message && arcdrv::Pci(dev.id).find_capability(0x11, 0).is_some() {
-            // MSI-X: queue 0 (both ways) and the other causes on vector 0,
-            // cleared automatically.
-            regs.write32(GPIE, 1 << 4 | 1 << 30 | 1 << 31 | 1 << 0);
-            regs.write32(IVAR0, 0x8080);
-            regs.write32(IVAR_MISC, 0x8000);
-            regs.write32(EIAC, 1);
-            regs.write32(EIMS, 1);
-            nic.msix.store(true, Ordering::Relaxed);
-        }
-        // Receive descriptor written back, receive timer, link change.
-        regs.write32(IMS, 1 << 7 | 1 << 4 | 1 << 2 | 1 << 0);
+        let msix = message && arcdrv::Pci(dev.id).find_capability(0x11, 0).is_some();
+        nic.msix.store(msix, Ordering::Relaxed);
+        nic.unmask();
     }
     arcdrv::spawn("igb-rx", poller, ctx);
+    arcdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
     let status = regs.read32(STATUS);
     let speed = match (status >> 6) & 3 {
         0 => "10 Mbit",

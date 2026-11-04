@@ -246,6 +246,14 @@ unsafe extern "C" fn api_boot_framebuffer(out: *mut Framebuffer) -> Status {
     OK
 }
 
+unsafe extern "C" fn api_power_hooks(device: u32, hooks: *const PowerHooks) -> Status {
+    if hooks.is_null() {
+        return E_INVAL;
+    }
+    // SAFETY: the module passes valid hooks for the call's duration.
+    dev::pm::register(device, unsafe { *hooks })
+}
+
 pub static KERNEL_API: KernelApi = KernelApi {
     abi_version: ABI_VERSION,
     size: core::mem::size_of::<KernelApi>() as u32,
@@ -279,4 +287,5 @@ pub static KERNEL_API: KernelApi = KernelApi {
     display_register: api_display_register,
     map_framebuffer: api_map_framebuffer,
     boot_framebuffer: api_boot_framebuffer,
+    power_hooks: api_power_hooks,
 };

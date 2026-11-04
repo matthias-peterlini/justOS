@@ -11,12 +11,15 @@
 #   make test-uefi  the same, started by UEFI firmware
 #   make test-iso   the same session on the live CD, with BIOS and with UEFI
 #   make test-drivers  boot once per emulated disk, network card and USB
-#                   controller and check that its driver works
+#                   controller and check that its driver works (SLEEP=1:
+#                   after the machine slept and woke up; test-audio too)
 #   make test-arcscript  run ArcScript programs on arcOS and check them
 #   make test-compat   run a Linux and a Windows program on arcOS and check them
 #   make test-audio    play sounds on every emulated sound card and check them
-#   make test-display  switch the resolution on every emulated display
-#   make test-acpi     power button, then a laptop's battery and sensors (AML)
+#   make test-display  switch the resolution on every emulated display, and
+#                   wake up with the picture back
+#   make test-acpi     power button, a laptop's battery and sensors (AML),
+#                   sleep and wake-up
 #   make test-net      TCP, HTTP and HTTPS against servers on this machine
 #   make test-linux    Linux programs with threads, sockets, poll (C, Rust, Go)
 #   make shots      boot headless, drive the GUI and save screenshots (build/shots)

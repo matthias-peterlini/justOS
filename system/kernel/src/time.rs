@@ -45,6 +45,58 @@ fn read_rtc_raw() -> [u8; 7] {
 }
 
 pub fn init() {
+    BOOT_TIME.store(read_rtc(), Ordering::Relaxed);
+}
+
+/// After sleep (the tick stopped): wall-clock time from the CMOS clock
+/// again. Returns the seconds the clock moved on.
+pub fn resync() -> u64 {
+    let before = now();
+    let rtc = read_rtc();
+    BOOT_TIME.store(rtc.saturating_sub(uptime_ms() / 1000), Ordering::Relaxed);
+    rtc.saturating_sub(before)
+}
+
+fn bcd_mode() -> bool {
+    cmos(0x0B) & 4 == 0
+}
+
+/// Sets the CMOS clock's alarm `secs` (less than a day) from now and lets
+/// it interrupt: with the chipset's RTC wake enabled, it wakes the computer.
+pub fn set_alarm(secs: u64) {
+    let at = read_rtc() + secs.clamp(1, 86_399);
+    let (h, m, s) = (at / 3600 % 24, at / 60 % 60, at % 60);
+    let enc = |x: u64| if bcd_mode() { (((x / 10) << 4) | (x % 10)) as u8 } else { x as u8 };
+    let pm_flag = |h: u64| {
+        // 12-hour mode: 12 AM is 12, PM sets the top bit.
+        if cmos(0x0B) & 2 != 0 {
+            enc(h)
+        } else {
+            let h12 = if h % 12 == 0 { 12 } else { h % 12 };
+            enc(h12) | if h >= 12 { 0x80 } else { 0 }
+        }
+    };
+    let hour = pm_flag(h);
+    write_cmos(0x01, enc(s));
+    write_cmos(0x03, enc(m));
+    write_cmos(0x05, hour);
+    let _ = cmos(0x0C); // clears pending flags
+    write_cmos(0x0B, cmos(0x0B) | 0x20);
+}
+
+/// Turns the alarm off again.
+pub fn clear_alarm() {
+    write_cmos(0x0B, cmos(0x0B) & !0x20);
+    let _ = cmos(0x0C);
+}
+
+fn write_cmos(reg: u8, v: u8) {
+    outb(0x70, reg);
+    outb(0x71, v);
+}
+
+/// The CMOS clock, in seconds since the Arc epoch.
+fn read_rtc() -> u64 {
     // Read twice until stable: the clock may tick between register reads.
     let mut v = read_rtc_raw();
     loop {
@@ -68,7 +120,7 @@ pub fn init() {
     let mut year = bcd(v[5]) as u64;
     let century = bcd(v[6]) as u64;
     year += if (19..=21).contains(&century) { century * 100 } else { 2000 };
-    BOOT_TIME.store(to_epoch(year, month, day, hour, min, sec), Ordering::Relaxed);
+    to_epoch(year, month, day, hour, min, sec)
 }
 
 fn is_leap(y: u64) -> bool {

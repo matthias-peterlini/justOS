@@ -28,7 +28,7 @@ Presa a modello da macOS:
 
 - **Barra in alto**: il logo (menu con *Info su arcOS*, *Impostazioni di
   sistema*, *Negozio*, *Monitor attività*, *Schermata*, *Blocca schermo*,
-  *Riavvia*, *Spegni*), il nome
+  *Sospendi* quando il computer può, *Riavvia*, *Spegni*), il nome
   dell'app in primo piano, ora e data al centro, il **centro di controllo**
   (volume con un cursore, stato della rete) e il pulsante di spegnimento.
   Sui portatili la barra mostra anche la carica della batteria (con il
@@ -88,8 +88,9 @@ Presa a modello da macOS:
   che Foto apre subito.
 - **Blocco**: **logo+L** o *Blocca schermo* nel menu del logo coprono tutto
   con l'ora sullo sfondo sfocato. Con una password (*Impostazioni →
-  Password*) arcOS si avvia bloccato e si blocca da solo dopo 2, 5 o 15
-  minuti senza usarlo; senza password basta Invio. La password non è salvata
+  Password*) arcOS si avvia bloccato, si blocca da solo dopo 2, 5 o 15
+  minuti senza usarlo e prima di ogni sospensione, così al risveglio chiede
+  la password; senza password basta Invio. La password non è salvata
   in chiaro: nelle impostazioni c'è un sale casuale e 20 000 passaggi di
   SHA-256.
 - **Aggiornamenti**: con la rete, all'avvio arcOS chiede a GitHub l'ultima

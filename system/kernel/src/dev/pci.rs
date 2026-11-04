@@ -175,6 +175,83 @@ pub fn scan() -> Vec<DeviceInfo> {
     out
 }
 
+/// A function's configuration, kept while the machine sleeps (the devices
+/// lose it; the firmware only restores part of the chipset).
+pub struct SavedConfig {
+    loc: u32,
+    id: u32,
+    words: [u32; 64],
+}
+
+/// Saves the configuration of every function (before sleeping).
+pub fn save_config(locations: &[u32]) -> Vec<SavedConfig> {
+    locations
+        .iter()
+        .map(|&loc| {
+            let mut words = [0u32; 64];
+            for (i, w) in words.iter_mut().enumerate() {
+                *w = read32(loc, i as u16 * 4);
+            }
+            SavedConfig { loc, id: words[0], words }
+        })
+        .collect()
+}
+
+/// Puts the saved configuration back (after waking up): bridges first (in
+/// the order saved, which is bus order), then the header of every function,
+/// command register last. Only registers that changed are written. ISA/LPC
+/// bridges and the chipset's other functions (power management) get their
+/// whole configuration back: interrupt routing, power management ports.
+pub fn restore_config(saved: &[SavedConfig]) {
+    for s in saved {
+        if read32(s.loc, 0) != s.id {
+            continue; // gone, or behind a bridge not restored yet
+        }
+        // Back to full power (D0) first: registers of a sleeping function
+        // may not stick.
+        if let Some(pm) = find_capability(s.loc, 0x01) {
+            let csr = read(s.loc, pm + 4, 2);
+            if csr & 3 != 0 {
+                write(s.loc, pm + 4, 2, csr & !3);
+                crate::time::spin_us(10_000);
+            }
+        }
+        let header = (s.words[3] >> 16) as u8 & 0x7F;
+        let put = |off: u16, mask: u32| {
+            let want = s.words[off as usize / 4] & mask;
+            if read32(s.loc, off) & mask != want {
+                if mask == 0xFFFF_FFFF {
+                    write32(s.loc, off, want);
+                } else {
+                    write(s.loc, off, 2, want);
+                }
+            }
+        };
+        let class = s.words[2] >> 16;
+        if class == 0x0601 || class == 0x0680 {
+            for off in (0x40..0x100).step_by(4) {
+                put(off, 0xFFFF_FFFF);
+            }
+        }
+        match header {
+            0 => {
+                for off in [0x10, 0x14, 0x18, 0x1C, 0x20, 0x24, 0x30, 0x3C] {
+                    put(off, 0xFFFF_FFFF);
+                }
+            }
+            1 => {
+                for off in [0x10, 0x14, 0x18, 0x20, 0x24, 0x28, 0x2C, 0x30, 0x38, 0x3C] {
+                    put(off, 0xFFFF_FFFF);
+                }
+                put(0x1C, 0xFFFF); // I/O base and limit; not the status
+            }
+            _ => {}
+        }
+        put(0x0C, 0xFFFF); // cache line size, latency timer
+        put(0x04, 0xFFFF); // command: decoding and bus mastering last
+    }
+}
+
 /// Human-readable name of a PCI class.
 pub fn class_name(class: u8, subclass: u8, prog_if: u8) -> &'static str {
     match (class, subclass, prog_if) {

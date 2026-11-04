@@ -446,7 +446,44 @@ pub struct KernelApi {
     /// The framebuffer the firmware set up before the kernel started (UEFI
     /// GOP or VESA), already mapped: [`OK`], or [`E_NODEV`] without one.
     pub boot_framebuffer: unsafe extern "C" fn(out: *mut Framebuffer) -> Status,
+
+    // Sleep (suspend to RAM)
+    /// Tells the kernel how a device the driver owns goes to sleep and wakes
+    /// up (see [`PowerHooks`]). The kernel copies `hooks`. A device with a
+    /// driver but without hooks keeps the machine from sleeping.
+    pub power_hooks: unsafe extern "C" fn(device: u32, hooks: *const PowerHooks) -> Status,
 }
+
+// ----------------------------------------------------------------------------
+// Sleep
+
+/// A device's part in suspending the machine: [`OK`] or an error.
+pub type PowerHook = unsafe extern "C" fn(ctx: *mut c_void) -> Status;
+
+/// While the machine sleeps its devices lose power: memory is kept, but
+/// every register is back to its reset value when it wakes up.
+///
+/// * `suspend` (optional) stops the device: it finishes or abandons what it
+///   was doing and does no more DMA. An error keeps the machine awake.
+/// * `resume` sets the device up again as `probe` left it, after the kernel
+///   has restored its PCI configuration (BARs, command register, message
+///   interrupts).
+///
+/// Both run in a kernel thread; the kernel holds back I/O to the device's
+/// disks, network interfaces and sound outputs from before `suspend` until
+/// after `resume`. Devices are suspended children first and resumed
+/// parents first.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct PowerHooks {
+    pub ctx: *mut c_void,
+    pub suspend: Option<PowerHook>,
+    pub resume: PowerHook,
+}
+
+// SAFETY: the context belongs to the driver, which only uses it from its
+// own hooks.
+unsafe impl Send for PowerHooks {}
 
 /// What a module tells the kernel about itself.
 #[repr(C)]

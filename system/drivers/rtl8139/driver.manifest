@@ -1,6 +1,6 @@
 # Realtek RTL8139 Fast Ethernet and the many cards built on it.
 name        = rtl8139
-version     = 1.0.0
+version     = 1.1.0
 class       = network
 description = Realtek RTL8139 Fast Ethernet
 author      = arcOS

@@ -4,14 +4,14 @@ version = 4
 
 [[package]]
 name = "ac97"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
 ]
 
 [[package]]
 name = "ahci"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
 ]
@@ -143,7 +143,7 @@ version = "0.6.0"
 
 [[package]]
 name = "ata"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
 ]
@@ -172,7 +172,7 @@ dependencies = [
 
 [[package]]
 name = "cirrus"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
 ]
@@ -196,7 +196,7 @@ dependencies = [
 
 [[package]]
 name = "e1000"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
 ]
@@ -210,7 +210,7 @@ dependencies = [
 
 [[package]]
 name = "ehci"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
  "arcusb",
@@ -233,7 +233,7 @@ dependencies = [
 
 [[package]]
 name = "hda"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
 ]
@@ -247,7 +247,7 @@ dependencies = [
 
 [[package]]
 name = "igb"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
 ]
@@ -268,14 +268,14 @@ dependencies = [
 
 [[package]]
 name = "nvme"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
 ]
 
 [[package]]
 name = "ohci"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
  "arcusb",
@@ -283,35 +283,35 @@ dependencies = [
 
 [[package]]
 name = "pcnet"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
 ]
 
 [[package]]
 name = "ps2kbd"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
 ]
 
 [[package]]
 name = "ps2mouse"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
 ]
 
 [[package]]
 name = "rtl8139"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
 ]
 
 [[package]]
 name = "rtl8169"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
 ]
@@ -325,7 +325,7 @@ dependencies = [
 
 [[package]]
 name = "sdhci"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
 ]
@@ -363,7 +363,7 @@ dependencies = [
 
 [[package]]
 name = "uhci"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
  "arcusb",
@@ -385,7 +385,7 @@ dependencies = [
 
 [[package]]
 name = "virtioblk"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
  "arcvirtio",
@@ -393,7 +393,7 @@ dependencies = [
 
 [[package]]
 name = "virtiogpu"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
  "arcvirtio",
@@ -401,7 +401,7 @@ dependencies = [
 
 [[package]]
 name = "virtionet"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
  "arcvirtio",
@@ -409,7 +409,7 @@ dependencies = [
 
 [[package]]
 name = "vmsvga"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
 ]
@@ -425,7 +425,7 @@ dependencies = [
 
 [[package]]
 name = "xhci"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "arcdrv",
  "arcusb",

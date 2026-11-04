@@ -17,10 +17,11 @@ use alloc::vec::Vec;
 use arcdrv::port::{inb, outb};
 use arcdrv::{DeviceInfo, DisplayDesc, DisplayMode, Framebuffer, Pci, Status, E_INVAL, E_IO, E_NODEV, OK, RES_MEMORY};
 use core::ffi::c_void;
+use core::sync::atomic::{AtomicU32, Ordering};
 
 arcdrv::driver! {
     name: "cirrus",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -43,7 +44,11 @@ const MODES: &[(u32, u32)] = &[(640, 480), (800, 600), (1024, 768), (1280, 720),
 struct Cirrus {
     fb_phys: u64,
     vram: u64,
+    /// The mode set (width, height; 0 before the first).
+    mode: (AtomicU32, AtomicU32),
 }
+
+const MISC_WRITE: u16 = 0x3C2;
 
 fn seq(reg: u8, v: u8) {
     outb(SEQ_INDEX, reg);
@@ -89,6 +94,20 @@ impl Cirrus {
         let hsync_end = (w + 120) / 8 + 1;
         let vtotal = h + 30 - 2;
         let vdisp = h - 1;
+
+        // The plain VGA side of a graphics mode, for a chip just out of
+        // reset (after sleep, when the firmware did not set it up): colour
+        // addressing (the CRTC at 0x3D4), screen on, all planes, chained
+        // linear memory, the attribute controller in graphics mode.
+        outb(MISC_WRITE, 0xE3);
+        seq(0x01, 0x01);
+        seq(0x02, 0x0F);
+        seq(0x04, 0x0E);
+        inb(INPUT_STATUS);
+        for (i, v) in [(0x10u8, 0x41u8), (0x11, 0), (0x12, 0x0F), (0x13, 0), (0x14, 0)] {
+            outb(ATTR, i);
+            outb(ATTR, v);
+        }
 
         // Unlock the extension registers, then CRTC 0-7.
         seq(0x06, 0x12);
@@ -180,13 +199,15 @@ unsafe extern "C" fn modes(ctx: *mut c_void, out: *mut DisplayMode, max: usize) 
 unsafe extern "C" fn set_mode(ctx: *mut c_void, mode: DisplayMode, fb: *mut Framebuffer) -> Status {
     // SAFETY: ctx is the leaked Cirrus; fb is valid for the call.
     let c = unsafe { &*(ctx as *const Cirrus) };
-    if !c.fits(mode.width, mode.height) || mode.width % 8 != 0 {
+    if !c.fits(mode.width, mode.height) || !mode.width.is_multiple_of(8) {
         return E_INVAL;
     }
     c.program(mode.width, mode.height);
     if crt_read(0x01) as u32 != mode.width / 8 - 1 {
         return E_IO;
     }
+    c.mode.0.store(mode.width, Ordering::Relaxed);
+    c.mode.1.store(mode.height, Ordering::Relaxed);
     // SAFETY: as above.
     unsafe {
         *fb = Framebuffer {
@@ -200,6 +221,22 @@ unsafe extern "C" fn set_mode(ctx: *mut c_void, mode: DisplayMode, fb: *mut Fram
             blue: 0,
             _pad: 0,
         };
+    }
+    OK
+}
+
+/// After sleep the chip lost its mode: the same one again (the picture in
+/// video memory is lost too; the interface draws it anew).
+unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the leaked Cirrus.
+    let c = unsafe { &*(ctx as *const Cirrus) };
+    let (w, h) = (c.mode.0.load(Ordering::Relaxed), c.mode.1.load(Ordering::Relaxed));
+    if w == 0 {
+        return OK; // still in the firmware's mode
+    }
+    c.program(w, h);
+    if crt_read(0x01) as u32 != w / 8 - 1 {
+        return E_IO;
     }
     OK
 }
@@ -219,7 +256,7 @@ fn probe(dev: &DeviceInfo) -> Status {
     }
     // SR0F bit 7: 4 MiB of video memory, else 2 MiB.
     let vram: u64 = if seq_read(0x0F) & 0x80 != 0 { 4 << 20 } else { 2 << 20 };
-    let c = Cirrus { fb_phys: bar0.base, vram: vram.min(bar0.size) };
+    let c = Cirrus { fb_phys: bar0.base, vram: vram.min(bar0.size), mode: (AtomicU32::new(0), AtomicU32::new(0)) };
     arcdrv::info!("Cirrus GD5446: {} MiB of video memory", c.vram >> 20);
     let c: &'static Cirrus = Box::leak(Box::new(c));
     let desc: &'static DisplayDesc = Box::leak(Box::new(DisplayDesc {
@@ -233,5 +270,6 @@ fn probe(dev: &DeviceInfo) -> Status {
     if n < 0 {
         return n;
     }
+    arcdrv::power_hooks(dev.id, c as *const Cirrus as *mut c_void, None, resume);
     OK
 }

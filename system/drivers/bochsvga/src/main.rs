@@ -73,6 +73,40 @@ struct Dispi {
     fb_phys: u64,
     vram: u64,
     max: (u32, u32),
+    /// The mode registers while the machine sleeps.
+    saved: arcdrv::IrqLock<[u16; 7]>,
+}
+
+/// The registers that make up the mode, in the order they are written back.
+const MODE_REGS: [u16; 7] = [XRES, YRES, BPP, VIRT_WIDTH, X_OFFSET, Y_OFFSET, ENABLE];
+/// ENABLE: keep the picture in video memory when the mode is set.
+const NO_CLEAR: u16 = 1 << 7;
+
+/// Before sleep: remembers the mode.
+unsafe extern "C" fn suspend(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the leaked Dispi.
+    let d = unsafe { &*(ctx as *const Dispi) };
+    let mut s = d.saved.lock();
+    for (v, &r) in s.iter_mut().zip(MODE_REGS.iter()) {
+        *v = d.read(r);
+    }
+    OK
+}
+
+/// After sleep: the controller is back in text mode; the same mode again.
+unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the leaked Dispi.
+    let d = unsafe { &*(ctx as *const Dispi) };
+    let s = *d.saved.lock();
+    d.write(ENABLE, 0);
+    for (&v, &r) in s.iter().zip(MODE_REGS.iter()) {
+        d.write(r, if r == ENABLE { (v & !GET_CAPS) | if v & ENABLED != 0 { NO_CLEAR } else { 0 } } else { v });
+    }
+    if d.read(XRES) == s[0] && d.read(YRES) == s[1] {
+        OK
+    } else {
+        E_IO
+    }
 }
 
 impl Dispi {
@@ -158,7 +192,7 @@ fn probe(dev: &DeviceInfo) -> Status {
         pci.enable(true, true, false);
         Regs::Ports
     };
-    let mut d = Dispi { regs, fb_phys: bar0.base, vram: bar0.size, max: (0, 0) };
+    let mut d = Dispi { regs, fb_phys: bar0.base, vram: bar0.size, max: (0, 0), saved: arcdrv::IrqLock::new([0; 7]) };
     let id = d.read(ID);
     if !(0xB0C0..=0xB0CF).contains(&id) {
         arcdrv::info!("no DISPI interface (id {id:#x})");
@@ -197,5 +231,6 @@ fn probe(dev: &DeviceInfo) -> Status {
     if n < 0 {
         return n;
     }
+    arcdrv::power_hooks(dev.id, d as *const Dispi as *mut c_void, Some(suspend), resume);
     OK
 }

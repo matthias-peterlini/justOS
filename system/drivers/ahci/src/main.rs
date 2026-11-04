@@ -1,7 +1,9 @@
 //! AHCI (Serial ATA) disk driver.
 //!
 //! One command slot per port, polled completion, DMA through a bounce buffer
-//! (the kernel's buffers are not physically contiguous).
+//! (the kernel's buffers are not physically contiguous). Before sleep the
+//! disks are flushed and put in standby; after it the controller and every
+//! port are set up again.
 
 #![no_std]
 #![no_main]
@@ -10,12 +12,13 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::string::String;
+use alloc::vec::Vec;
 use arcdrv::{BlockDesc, DeviceInfo, Dma, Mmio, Mutex, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, E_TIMEOUT, OK, RES_MEMORY};
 use core::ffi::c_void;
 
 arcdrv::driver! {
     name: "ahci",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -35,10 +38,13 @@ const P_CMD: usize = 0x18;
 const P_TFD: usize = 0x20;
 const P_SIG: usize = 0x24;
 const P_SSTS: usize = 0x28;
+const P_SCTL: usize = 0x2C;
 const P_SERR: usize = 0x30;
 const P_CI: usize = 0x38;
 
 const CMD_ST: u32 = 1;
+const CMD_SUD: u32 = 1 << 1;
+const CMD_POD: u32 = 1 << 2;
 const CMD_FRE: u32 = 1 << 4;
 const CMD_FR: u32 = 1 << 14;
 const CMD_CR: u32 = 1 << 15;
@@ -49,6 +55,7 @@ const ATA_READ_DMA_EXT: u8 = 0x25;
 const ATA_WRITE_DMA_EXT: u8 = 0x35;
 const ATA_FLUSH_EXT: u8 = 0xEA;
 const ATA_IDENTIFY: u8 = 0xEC;
+const ATA_STANDBY_IMMEDIATE: u8 = 0xE0;
 
 /// Sectors per transfer through the bounce buffer (the kernel never asks
 /// for more than 128 at a time).
@@ -91,6 +98,48 @@ impl Port {
         arcdrv::wait_until(500, || self.read(P_CMD) & CMD_CR == 0);
         self.write(P_CMD, self.read(P_CMD) | CMD_FRE);
         self.write(P_CMD, self.read(P_CMD) | CMD_ST);
+    }
+
+    /// Stops the port and gives it its command list and FIS area.
+    fn setup(&self) -> bool {
+        if !self.stop() {
+            return false;
+        }
+        let phys = self.mem.phys();
+        self.write(P_CLB, phys as u32);
+        self.write(P_CLB + 4, (phys >> 32) as u32);
+        self.write(P_FB, (phys + FIS_AREA as u64) as u32);
+        self.write(P_FB + 4, ((phys + FIS_AREA as u64) >> 32) as u32);
+        self.write(P_SERR, u32::MAX);
+        self.write(P_IS, u32::MAX);
+        self.write(P_IE, 0);
+        self.start();
+        true
+    }
+
+    /// After sleep: the device powered and spun up, the link up (with a
+    /// link reset if it does not come by itself), the port set up again,
+    /// and the disk ready.
+    fn wake(&self) -> Status {
+        self.write(P_CMD, self.read(P_CMD) | CMD_POD | CMD_SUD);
+        let link = || self.read(P_SSTS) & 0xF == 3;
+        if !arcdrv::wait_until(1000, link) {
+            self.write(P_SCTL, (self.read(P_SCTL) & !0xF) | 1);
+            arcdrv::sleep_ms(2);
+            self.write(P_SCTL, self.read(P_SCTL) & !0xF);
+            if !arcdrv::wait_until(1000, link) {
+                return E_IO;
+            }
+        }
+        if !self.setup() {
+            return E_IO;
+        }
+        // A hard disk takes seconds to spin up.
+        if arcdrv::wait_until(15_000, || self.read(P_TFD) & 0x88 == 0) {
+            OK
+        } else {
+            E_TIMEOUT
+        }
     }
 
     /// Runs one ATA command on slot 0. `bytes` of data move through the
@@ -209,26 +258,70 @@ fn model(id: &[u8]) -> String {
     String::from(s.trim())
 }
 
-fn setup_port(dev: u32, hba: Mmio, index: usize) -> Status {
-    let base = 0x100 + index * 0x80;
-    let (Some(mem), Some(bounce)) = (Dma::new(4096), Dma::new(MAX_SECTORS as usize * 512)) else { return E_NOMEM };
-    let port = Port { hba, base, mem, bounce };
-    if !port.stop() {
-        arcdrv::warn!("port {index} does not stop");
-        return E_IO;
+/// The controller and its disks, for sleep.
+struct Hba {
+    regs: Mmio,
+    disks: Vec<&'static Disk>,
+}
+
+/// Takes the controller from the firmware and switches it to AHCI mode,
+/// with its interrupt off (completion is polled).
+fn take_hba(hba: &Mmio) {
+    if hba.read32(CAP2) & 1 != 0 {
+        hba.write32(BOHC, hba.read32(BOHC) | 2);
+        arcdrv::wait_until(100, || hba.read32(BOHC) & 1 == 0);
     }
-    port.write(P_CLB, port.mem.phys() as u32);
-    port.write(P_CLB + 4, (port.mem.phys() >> 32) as u32);
-    port.write(P_FB, (port.mem.phys() + FIS_AREA as u64) as u32);
-    port.write(P_FB + 4, ((port.mem.phys() + FIS_AREA as u64) >> 32) as u32);
-    port.write(P_SERR, u32::MAX);
-    port.write(P_IS, u32::MAX);
-    port.write(P_IE, 0);
-    port.start();
+    hba.write32(GHC, hba.read32(GHC) | (1 << 31));
+    hba.write32(GHC, hba.read32(GHC) & !2);
+}
+
+/// Before sleep: everything written reaches the platters, the heads park,
+/// the ports stop.
+unsafe extern "C" fn suspend(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the leaked Hba.
+    let hba = unsafe { &*(ctx as *const Hba) };
+    // First every flush, so a disk that refuses leaves all of them running.
+    for d in &hba.disks {
+        let st = d.port.lock().command(ATA_FLUSH_EXT, 0, 0, 0, false);
+        if st != OK {
+            return st;
+        }
+    }
+    for d in &hba.disks {
+        let port = d.port.lock();
+        port.command(ATA_STANDBY_IMMEDIATE, 0, 0, 0, false);
+        port.stop();
+    }
+    OK
+}
+
+/// After sleep the controller is back in its power-on state.
+unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the leaked Hba.
+    let hba = unsafe { &*(ctx as *const Hba) };
+    take_hba(&hba.regs);
+    let mut result = OK;
+    for d in &hba.disks {
+        let st = d.port.lock().wake();
+        if st != OK {
+            result = st;
+        }
+    }
+    result
+}
+
+fn setup_port(dev: u32, hba: Mmio, index: usize) -> Result<&'static Disk, Status> {
+    let base = 0x100 + index * 0x80;
+    let (Some(mem), Some(bounce)) = (Dma::new(4096), Dma::new(MAX_SECTORS as usize * 512)) else { return Err(E_NOMEM) };
+    let port = Port { hba, base, mem, bounce };
+    if !port.setup() {
+        arcdrv::warn!("port {index} does not stop");
+        return Err(E_IO);
+    }
 
     let st = port.command(ATA_IDENTIFY, 0, 0, 512, false);
     if st != OK {
-        return st;
+        return Err(st);
     }
     let id = &port.bounce.as_slice()[..512];
     let word = |i: usize| u16::from_le_bytes([id[i * 2], id[i * 2 + 1]]) as u64;
@@ -236,7 +329,7 @@ fn setup_port(dev: u32, hba: Mmio, index: usize) -> Status {
         if word(83) & (1 << 10) != 0 { word(100) | word(101) << 16 | word(102) << 32 | word(103) << 48 } else { word(60) | word(61) << 16 };
     let name = model(id);
     if sectors == 0 {
-        return E_IO;
+        return Err(E_IO);
     }
     let disk: &'static Disk = Box::leak(Box::new(Disk { port: Mutex::new(port), sectors }));
     let desc: &'static BlockDesc = Box::leak(Box::new(BlockDesc {
@@ -251,9 +344,9 @@ fn setup_port(dev: u32, hba: Mmio, index: usize) -> Status {
     }));
     let n = arcdrv::block_register(dev, desc);
     if n < 0 {
-        n
+        Err(n)
     } else {
-        OK
+        Ok(disk)
     }
 }
 
@@ -270,18 +363,12 @@ fn probe(dev: &DeviceInfo) -> Status {
     pci.enable(false, true, true);
     let Some(hba) = Mmio::map(bar.base, (bar.size as usize).max(0x1100)) else { return E_NOMEM };
 
-    // Take the controller from the firmware, then switch to AHCI mode.
-    if hba.read32(CAP2) & 1 != 0 {
-        hba.write32(BOHC, hba.read32(BOHC) | 2);
-        arcdrv::wait_until(100, || hba.read32(BOHC) & 1 == 0);
-    }
-    hba.write32(GHC, hba.read32(GHC) | (1 << 31));
-    hba.write32(GHC, hba.read32(GHC) & !2); // no interrupts: we poll
+    take_hba(&hba);
 
     let ports = hba.read32(PI);
     let slots = (hba.read32(CAP) >> 8 & 0x1F) + 1;
     arcdrv::debug!("{} ports implemented, {slots} command slots", ports.count_ones());
-    let mut disks = 0;
+    let mut disks = Vec::new();
     for i in 0..32 {
         if ports & (1 << i) == 0 {
             continue;
@@ -295,12 +382,14 @@ fn probe(dev: &DeviceInfo) -> Status {
             continue; // ATAPI, port multiplier, enclosure...
         }
         match setup_port(dev.id, hba, i) {
-            OK => disks += 1,
-            e => arcdrv::warn!("port {i}: {}", arcdrv::status_name(e)),
+            Ok(d) => disks.push(d),
+            Err(e) => arcdrv::warn!("port {i}: {}", arcdrv::status_name(e)),
         }
     }
-    if disks == 0 {
+    if disks.is_empty() {
         arcdrv::info!("no SATA disks attached");
     }
+    let ctl: &'static Hba = Box::leak(Box::new(Hba { regs: hba, disks }));
+    arcdrv::power_hooks(dev.id, ctl as *const Hba as *mut c_void, Some(suspend), resume);
     OK
 }

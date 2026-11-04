@@ -83,6 +83,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("clear", "", "clear the screen (also: cls)"),
     ("restart", "", "restart the computer (also: reboot)"),
     ("shutdown", "", "turn the computer off (also: off)"),
+    ("suspend", "[seconds | check]", "sleep with memory kept (also: sleep); wake by key or button, or after seconds"),
     ("install", "[name]", "install a program from the store (also: pkg)"),
     ("uninstall", "<name>", "remove a program installed from the store"),
     ("play", "<file.wav> | stop", "play a sound file"),
@@ -880,6 +881,30 @@ impl Shell {
                 println!("{WARN}this computer cannot be turned off by software; it is safe to switch it off now{RESET}");
                 crate::arch::cpu::halt_forever();
             }
+            "suspend" | "sleep" => match rest.first().copied() {
+                Some("check") => match crate::sleep::available() {
+                    Ok(()) => println!("this computer can sleep (slept {} times since it started)", crate::sleep::count()),
+                    Err(e) => println!("{WARN}cannot sleep: {e}{RESET}"),
+                },
+                arg => {
+                    let secs = match arg.map(str::parse::<u64>) {
+                        None => None,
+                        Some(Ok(s)) if (1..86_400).contains(&s) => Some(s),
+                        Some(_) => {
+                            println!("{WARN}usage: suspend [seconds (1..86399) | check]{RESET}");
+                            return;
+                        }
+                    };
+                    match secs {
+                        Some(s) => println!("going to sleep for {s} s…"),
+                        None => println!("going to sleep; press the power button or a key to wake up…"),
+                    }
+                    match crate::sleep::suspend(secs) {
+                        Ok(s) => println!("awake again after {s} s"),
+                        Err(e) => println!("{WARN}cannot sleep: {e}{RESET}"),
+                    }
+                }
+            },
             "install" | "pkg" => self.install(&rest),
             "uninstall" => self.uninstall(rest.first().copied()),
             "kpanic" => panic!("stopped on purpose (kpanic)"),
@@ -1358,6 +1383,13 @@ impl Shell {
         }
         if let Some(t) = crate::acpi::power::hottest() {
             println!("  temperature {}.{} °C", t / 10, t % 10);
+        }
+        match crate::sleep::available() {
+            Ok(()) => match crate::sleep::count() {
+                0 => println!("  sleep      ready"),
+                n => println!("  sleep      ready, slept {n} time{}", if n == 1 { "" } else { "s" }),
+            },
+            Err(e) => println!("  sleep      {DIM}not available: {e}{RESET}"),
         }
         println!("  uptime     {} s", time::uptime_ms() / 1000);
     }

@@ -19,7 +19,7 @@ use core::ffi::c_void;
 
 arcdrv::driver! {
     name: "ac97",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -94,6 +94,45 @@ impl Hardware for Box97 {
 
 struct Device {
     ring: PcmRing<Box97>,
+    mixer: u16,
+}
+
+/// The codec out of cold reset, its outputs at full volume and 48 kHz.
+fn init_codec(mixer: u16, bm: u16) -> Status {
+    let glob = arcdrv::port::inl(bm + GLOB_CNT);
+    outl(bm + GLOB_CNT, (glob | 2) & !(1 << 2));
+    if !arcdrv::wait_until(1000, || arcdrv::port::inl(bm + GLOB_STA) & (1 << 8) != 0) {
+        arcdrv::warn!("the codec is not ready");
+        return E_IO;
+    }
+    outw(mixer + MIX_RESET, 1);
+    arcdrv::sleep_ms(10);
+    outw(mixer + MIX_MASTER, 0x0000); // 0 dB, unmuted
+    outw(mixer + MIX_HEADPHONE, 0x0000);
+    outw(mixer + MIX_PCM_OUT, 0x0808); // 0 dB
+    if inw(mixer + MIX_EXT_ID) & 1 != 0 {
+        // Variable rate: make sure it is 48 kHz.
+        outw(mixer + MIX_EXT_CTRL, inw(mixer + MIX_EXT_CTRL) | 1);
+        outw(mixer + MIX_FRONT_RATE, RATE as u16);
+    }
+    OK
+}
+
+/// Before sleep: playing stops.
+unsafe extern "C" fn suspend(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the leaked Device.
+    unsafe { &*(ctx as *const Device) }.ring.pause();
+    OK
+}
+
+/// After sleep: the codec set up again; the next sound plays.
+unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the leaked Device.
+    let d = unsafe { &*(ctx as *const Device) };
+    let st = init_codec(d.mixer, d.ring.hw.bm);
+    d.ring.hw.reset_box();
+    d.ring.unpause();
+    st
 }
 
 unsafe extern "C" fn write(ctx: *mut c_void, samples: *const i16, frames: usize) -> Status {
@@ -124,22 +163,9 @@ unsafe extern "C" fn irq(ctx: *mut c_void) {
 fn probe(dev: &DeviceInfo) -> Status {
     let (Some(mixer), Some(bm)) = (dev.io(0), dev.io(1)) else { return E_NODEV };
     Pci(dev.id).enable(true, false, true);
-    // Out of cold reset, then wait for the codec.
-    let glob = arcdrv::port::inl(bm + GLOB_CNT);
-    outl(bm + GLOB_CNT, (glob | 2) & !(1 << 2));
-    if !arcdrv::wait_until(1000, || arcdrv::port::inl(bm + GLOB_STA) & (1 << 8) != 0) {
-        arcdrv::warn!("the codec is not ready");
-        return E_IO;
-    }
-    outw(mixer + MIX_RESET, 1);
-    arcdrv::sleep_ms(10);
-    outw(mixer + MIX_MASTER, 0x0000); // 0 dB, unmuted
-    outw(mixer + MIX_HEADPHONE, 0x0000);
-    outw(mixer + MIX_PCM_OUT, 0x0808); // 0 dB
-    if inw(mixer + MIX_EXT_ID) & 1 != 0 {
-        // Variable rate: make sure it is 48 kHz.
-        outw(mixer + MIX_EXT_CTRL, inw(mixer + MIX_EXT_CTRL) | 1);
-        outw(mixer + MIX_FRONT_RATE, RATE as u16);
+    let st = init_codec(mixer, bm);
+    if st != OK {
+        return st;
     }
 
     let (Some(buf), Some(bdl)) = (Dma::new(PERIODS * PERIOD_BYTES), Dma::new(ENTRIES * 8)) else { return E_NOMEM };
@@ -154,7 +180,7 @@ fn probe(dev: &DeviceInfo) -> Status {
     // The list must outlive the device.
     core::mem::forget(bdl);
     hw.reset_box();
-    let d: &'static Device = Box::leak(Box::new(Device { ring: PcmRing::new(hw, buf) }));
+    let d: &'static Device = Box::leak(Box::new(Device { ring: PcmRing::new(hw, buf), mixer }));
     let ctx = d as *const Device as *mut c_void;
     arcdrv::irq_attach_any(dev, irq, ctx);
     let desc: &'static AudioDesc =
@@ -163,5 +189,6 @@ fn probe(dev: &DeviceInfo) -> Status {
     if n < 0 {
         return n;
     }
+    arcdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
     OK
 }

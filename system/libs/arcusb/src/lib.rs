@@ -105,6 +105,16 @@ pub trait Host: Send + Sync + 'static {
     fn reset_endpoint(&self, dev: Handle, endpoint: u8) -> Status;
     /// The device is gone: free everything the controller holds for it.
     fn remove_device(&self, dev: Handle);
+    /// The controller can follow the machine into sleep: [`Host::stop`] and
+    /// [`Host::restart`] work.
+    const SLEEPS: bool = false;
+    /// Before sleep, once every device is removed: the controller stops.
+    fn stop(&self) {}
+    /// After sleep the controller has lost its setup: reset it and start
+    /// it again as at the start, with no devices.
+    fn restart(&self) -> Status {
+        arcdrv::E_UNSUPPORTED
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -174,6 +184,10 @@ pub struct Bus<H: Host> {
     controller: u32,
     state: Mutex<State>,
     wake: Event,
+    /// Held while the bus thread looks at the ports.
+    busy: Mutex<()>,
+    /// Asleep: the ports are left alone.
+    paused: AtomicBool,
 }
 
 /// The part of a bus the interface trampolines need (no generics there).
@@ -229,14 +243,44 @@ pub fn start<H: Host>(host: &'static H, controller: u32, name: &str) -> &'static
         controller,
         state: Mutex::new(State { devices: Vec::new(), root: vec![None; host.ports() as usize], addresses: [false; 128] }),
         wake: Event::new(),
+        busy: Mutex::new(()),
+        paused: AtomicBool::new(false),
     }));
     unsafe extern "C" fn run<H: Host>(ctx: *mut c_void) {
         // SAFETY: the leaked bus passed below.
         let bus = unsafe { &*(ctx as *const Bus<H>) };
         bus.run();
     }
-    arcdrv::spawn(name, run::<H>, bus as *const Bus<H> as *mut c_void);
+    let ctx = bus as *const Bus<H> as *mut c_void;
+    arcdrv::spawn(name, run::<H>, ctx);
+    if H::SLEEPS {
+        arcdrv::power_hooks(controller, ctx, Some(sleep::<H>), wake::<H>);
+    }
     bus
+}
+
+/// Before sleep: the devices are let go as if unplugged (their drivers
+/// stop cleanly while the controller still works), then the controller
+/// stops.
+unsafe extern "C" fn sleep<H: Host>(ctx: *mut c_void) -> Status {
+    // SAFETY: the leaked bus.
+    let bus = unsafe { &*(ctx as *const Bus<H>) };
+    bus.paused.store(true, Ordering::Release);
+    let _busy = bus.busy.lock();
+    bus.remove_all();
+    bus.host.stop();
+    OK
+}
+
+/// After sleep: the controller starts again and the devices are found
+/// again as if plugged in.
+unsafe extern "C" fn wake<H: Host>(ctx: *mut c_void) -> Status {
+    // SAFETY: the leaked bus.
+    let bus = unsafe { &*(ctx as *const Bus<H>) };
+    let st = bus.host.restart();
+    bus.paused.store(false, Ordering::Release);
+    bus.wake.signal();
+    st
 }
 
 impl<H: Host> Bus<H> {
@@ -244,8 +288,13 @@ impl<H: Host> Bus<H> {
         // Give devices that were plugged in at power-on time to settle.
         arcdrv::sleep_ms(50);
         loop {
-            self.check_root_ports();
-            self.check_hubs();
+            if !self.paused.load(Ordering::Acquire) {
+                let _busy = self.busy.lock();
+                if !self.paused.load(Ordering::Acquire) {
+                    self.check_root_ports();
+                    self.check_hubs();
+                }
+            }
             self.wake.wait(250);
         }
     }

@@ -102,15 +102,33 @@ pub fn set_mode(mode: DisplayMode) -> Result<FbInfo, &'static str> {
     // SAFETY: the driver's descriptor stays valid while it is registered.
     *FLUSH.lock() = unsafe { (*desc).flush.is_some() }.then_some(DescPtr(desc));
     crate::console::set_framebuffer(info);
+    DRIVER_MODE.store(true, core::sync::atomic::Ordering::Release);
     crate::info!("display", "{}x{}", fb.width, fb.height);
     Ok(info)
+}
+
+/// A driver set the mode (the screen is no longer in the firmware's).
+static DRIVER_MODE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// After sleep. Drivers set their own mode again, but not one the firmware
+/// chose at boot, and the firmware does not set it up again on waking: the
+/// driver is asked for the same resolution.
+pub fn after_sleep() {
+    if DRIVER_MODE.load(core::sync::atomic::Ordering::Acquire) || first().is_none() {
+        return;
+    }
+    let Some((w, h)) = crate::console::pixel_size() else { return };
+    let mode = DisplayMode { width: w as u32, height: h as u32 };
+    if let Err(e) = set_mode(mode) {
+        crate::warn!("display", "{w}x{h} after sleep: {e}");
+    }
 }
 
 /// Tells the controller that a rectangle of the screen changed (only
 /// controllers that need it).
 pub fn flush(x: i32, y: i32, w: i32, h: i32) {
     let Some(DescPtr(desc)) = *FLUSH.lock() else { return };
-    if w <= 0 || h <= 0 {
+    if w <= 0 || h <= 0 || !super::pm::awake() {
         return;
     }
     // SAFETY: the driver's own function, while it is registered.

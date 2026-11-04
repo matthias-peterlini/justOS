@@ -26,6 +26,8 @@ pub const VEC_SPURIOUS: u8 = 0xFF;
 static APIC: IrqLock<(u64, u32)> = IrqLock::new((0, 0));
 /// The register page, for the paths that must not take a lock (EOI, IPIs).
 static BASE: AtomicU64 = AtomicU64::new(0);
+/// Its physical address.
+static PHYS: AtomicU64 = AtomicU64::new(0);
 
 fn read(base: u64, reg: usize) -> u32 {
     // SAFETY: inside the mapped register page.
@@ -54,6 +56,16 @@ pub fn enable() -> Option<u32> {
         unsafe { super::cpu::wrmsr(MSR_APIC_BASE, msr | (1 << 11)) };
     }
     let base = region::map_device(phys, 4096, paging::NO_CACHE)?;
+    PHYS.store(phys, Ordering::Relaxed);
+    setup_first(base);
+    let id = read(base, REG_ID) >> 24;
+    *a = (base, id);
+    BASE.store(base, Ordering::Release);
+    Some(id)
+}
+
+/// The first processor's APIC: on, with the PIC's line through.
+fn setup_first(base: u64) {
     let svr = read(base, REG_SVR);
     if svr & 0x100 == 0 {
         // Software-disabled until now: the PIC keeps working through LINT0
@@ -62,10 +74,22 @@ pub fn enable() -> Option<u32> {
         write(base, REG_LINT1, 0x400);
     }
     write(base, REG_SVR, svr | 0x100 | VEC_SPURIOUS as u32);
-    let id = read(base, REG_ID) >> 24;
-    *a = (base, id);
-    BASE.store(base, Ordering::Release);
-    Some(id)
+}
+
+/// After sleep, on the first processor: its APIC is back to its reset state.
+/// Turned on again at the same address if it was in use.
+pub fn resume() {
+    let base = BASE.load(Ordering::Acquire);
+    if base == 0 {
+        return;
+    }
+    let phys = PHYS.load(Ordering::Relaxed);
+    let msr = super::cpu::rdmsr(MSR_APIC_BASE);
+    if msr & 0xF_FFFF_F000 != phys || msr & (1 << 11) == 0 {
+        // SAFETY: the APIC at the address the kernel mapped.
+        unsafe { super::cpu::wrmsr(MSR_APIC_BASE, (msr & 0xFFF) | phys | (1 << 11)) };
+    }
+    setup_first(base);
 }
 
 /// Turns on the local APIC of another processor (the registers are at the

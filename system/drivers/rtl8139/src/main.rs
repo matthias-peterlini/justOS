@@ -16,7 +16,7 @@ use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 arcdrv::driver! {
     name: "rtl8139",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -69,10 +69,40 @@ struct Nic {
     state: IrqLock<State>,
     iface: AtomicI32,
     has_irq: AtomicBool,
+    /// Asleep: the card is left alone.
+    paused: AtomicBool,
 }
 
 impl Nic {
+    /// Sets the card up, after [`reset`], to receive and send (interrupts
+    /// masked).
+    fn configure(&self, st: &mut State) {
+        let regs = &self.regs;
+        regs.write32(RBSTART, self.rx.phys() as u32);
+        for i in 0..8 {
+            regs.write8(MAR + i, 0xFF); // every multicast group
+        }
+        // The receive and transmit settings only hold with both units on.
+        regs.write8(CR, CR_RX | CR_TX);
+        self.set_rcr();
+        // Standard inter-frame gap, 2 KiB DMA bursts.
+        regs.write32(TCR, (3 << 24) | (7 << 8));
+        regs.write16(CAPR, 0u16.wrapping_sub(16));
+        regs.write32(MPC, 0);
+        *st = State { rx_at: 0, tx_next: 0, tx_used: [false; TX_SLOTS] };
+    }
+
+    fn unmask(&self) {
+        if self.has_irq.load(Ordering::Relaxed) {
+            self.regs.write16(ISR, 0xFFFF);
+            self.regs.write16(IMR, INTERRUPTS);
+        }
+    }
+
     fn receive(&self) {
+        if self.paused.load(Ordering::Acquire) {
+            return;
+        }
         let iface = self.iface.load(Ordering::Relaxed);
         let mut st = self.state.lock();
         let ring = self.rx.as_slice();
@@ -121,6 +151,9 @@ impl Nic {
     fn send(&self, frame: &[u8]) -> Status {
         if frame.is_empty() || frame.len() > MAX_FRAME - 4 {
             return E_INVAL;
+        }
+        if self.paused.load(Ordering::Acquire) {
+            return E_IO;
         }
         let start = arcdrv::time_ms();
         let mut st = loop {
@@ -181,10 +214,31 @@ unsafe extern "C" fn poller(ctx: *mut c_void) {
     }
 }
 
-fn probe(dev: &DeviceInfo) -> Status {
-    let Some(regs) = Regs::find(dev, false, 256) else {
-        return E_NODEV;
-    };
+/// Before sleep: the card stops.
+unsafe extern "C" fn suspend(ctx: *mut c_void) -> Status {
+    // SAFETY: the leaked Nic.
+    let nic = unsafe { &*(ctx as *const Nic) };
+    nic.paused.store(true, Ordering::Release);
+    let _st = nic.state.lock(); // a send or receive under way ends
+    nic.regs.write16(IMR, 0);
+    nic.regs.write8(CR, 0);
+    OK
+}
+
+/// After sleep: the card set up again (it reloads its address itself).
+unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
+    // SAFETY: the leaked Nic.
+    let nic = unsafe { &*(ctx as *const Nic) };
+    let st = reset(&nic.regs);
+    if st == OK {
+        nic.configure(&mut nic.state.lock());
+        nic.paused.store(false, Ordering::Release);
+        nic.unmask();
+    }
+    st
+}
+
+fn reset(regs: &Regs) -> Status {
     regs.write8(CONFIG1, 0); // wake up
     regs.write8(CR, CR_RESET);
     if !arcdrv::wait_until(100, || regs.read8(CR) & CR_RESET == 0) {
@@ -192,6 +246,17 @@ fn probe(dev: &DeviceInfo) -> Status {
         return E_IO;
     }
     regs.write16(IMR, 0);
+    OK
+}
+
+fn probe(dev: &DeviceInfo) -> Status {
+    let Some(regs) = Regs::find(dev, false, 256) else {
+        return E_NODEV;
+    };
+    let st = reset(&regs);
+    if st != OK {
+        return st;
+    }
 
     let mut mac = [0u8; 6];
     for (i, b) in mac.iter_mut().enumerate() {
@@ -208,18 +273,9 @@ fn probe(dev: &DeviceInfo) -> Status {
         state: IrqLock::new(State { rx_at: 0, tx_next: 0, tx_used: [false; TX_SLOTS] }),
         iface: AtomicI32::new(-1),
         has_irq: AtomicBool::new(false),
+        paused: AtomicBool::new(false),
     }));
-    regs.write32(RBSTART, nic.rx.phys() as u32);
-    for i in 0..8 {
-        regs.write8(MAR + i, 0xFF); // every multicast group
-    }
-    // The receive and transmit settings only hold with both units on.
-    regs.write8(CR, CR_RX | CR_TX);
-    nic.set_rcr();
-    // Standard inter-frame gap, 2 KiB DMA bursts.
-    regs.write32(TCR, (3 << 24) | (7 << 8));
-    regs.write16(CAPR, 0u16.wrapping_sub(16));
-    regs.write32(MPC, 0);
+    nic.configure(&mut nic.state.lock());
 
     let ctx = nic as *const Nic as *mut c_void;
     let desc: &'static NetDesc = Box::leak(Box::new(NetDesc { ctx, mac, _pad: [0; 2], mtu: 1500, send }));
@@ -231,11 +287,11 @@ fn probe(dev: &DeviceInfo) -> Status {
     nic.iface.store(iface, Ordering::Relaxed);
     if arcdrv::irq_attach_any(dev, irq, ctx) {
         nic.has_irq.store(true, Ordering::Relaxed);
-        regs.write16(ISR, 0xFFFF);
-        regs.write16(IMR, INTERRUPTS);
+        nic.unmask();
     }
     // Interrupt routing can be wrong on some boards; poll as a safety net.
     arcdrv::spawn("rtl8139-rx", poller, ctx);
+    arcdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
     arcdrv::info!(
         "link {}, {}",
         if nic.link_up() { "up" } else { "down" },

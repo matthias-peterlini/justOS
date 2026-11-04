@@ -16,7 +16,7 @@ use core::ffi::c_void;
 
 arcdrv::driver! {
     name: "virtioblk",
-    version: "1.0.0",
+    version: "1.1.0",
     probe: probe,
 }
 
@@ -40,6 +40,36 @@ struct Disk {
     vio: Virtio,
     dev: Mutex<Device>,
     sectors: u64,
+    /// The features agreed on (again after sleep).
+    features: u64,
+}
+
+/// Before sleep: everything written is flushed, then the device stops.
+unsafe extern "C" fn suspend(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the leaked Disk.
+    let disk = unsafe { &*(ctx as *const Disk) };
+    let mut d = disk.dev.lock();
+    if d.flush {
+        let st = d.request(&disk.vio, T_FLUSH, 0, 0);
+        if st != OK {
+            return st;
+        }
+    }
+    disk.vio.reset();
+    OK
+}
+
+/// After sleep: the device set up again with its queue.
+unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
+    // SAFETY: ctx is the leaked Disk.
+    let disk = unsafe { &*(ctx as *const Disk) };
+    let mut d = disk.dev.lock();
+    if !disk.vio.restore(disk.features, &mut [&mut d.queue]) {
+        return E_IO;
+    }
+    d.queue.quiet();
+    disk.vio.ready();
+    OK
 }
 
 impl Device {
@@ -157,7 +187,7 @@ fn probe(dev: &DeviceInfo) -> Status {
 
     let sectors = vio.config32(0) as u64 | (vio.config32(4) as u64) << 32;
     let device = Device { queue, req, bounce, flush: accepted & F_FLUSH != 0 };
-    let disk: &'static Disk = Box::leak(Box::new(Disk { vio, dev: Mutex::new(device), sectors }));
+    let disk: &'static Disk = Box::leak(Box::new(Disk { vio, dev: Mutex::new(device), sectors, features: accepted }));
     disk.vio.attach_irq(dev, irq, disk as *const Disk as *mut c_void);
     disk.vio.ready();
     let desc: &'static BlockDesc = Box::leak(Box::new(BlockDesc {
@@ -172,8 +202,8 @@ fn probe(dev: &DeviceInfo) -> Status {
     }));
     let n = arcdrv::block_register(dev.id, desc);
     if n < 0 {
-        n
-    } else {
-        OK
+        return n;
     }
+    arcdrv::power_hooks(dev.id, disk as *const Disk as *mut c_void, Some(suspend), resume);
+    OK
 }

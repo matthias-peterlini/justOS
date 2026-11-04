@@ -1,7 +1,7 @@
 [package]
 name = "ohci"
 description = "arcOS driver: USB 1.1 host controllers (OHCI)"
-version = "1.0.0"
+version = "1.1.0"
 edition.workspace = true
 publish.workspace = true
 authors.workspace = true
