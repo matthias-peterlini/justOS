@@ -795,6 +795,17 @@ pub(crate) fn current_app() -> Option<crate::sandbox::App> {
     app_of(task::current_pid())
 }
 
+/// Lets process `pid` use a file outside its sandbox: one the user chose for
+/// it in the picker (`write`: and save over it) or dropped on its window.
+/// Nothing to do for a program without a sandbox.
+pub(crate) fn grant(pid: u32, path: Path, write: bool) {
+    if let Some(p) = PROCS.lock().get_mut(&pid) {
+        if p.app.is_some() && p.picked.len() < 256 && !p.picked.iter().any(|(q, w)| *q == path && (*w || !write)) {
+            p.picked.push((path, write));
+        }
+    }
+}
+
 /// The calling process's sandbox: its app and the files picked for it
 /// (None: no sandbox).
 pub(crate) fn sandbox() -> Option<(crate::sandbox::App, Vec<(Path, bool)>)> {
@@ -995,12 +1006,7 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
             let chosen = crate::gui::pick_file(&who, save, &suggested).ok_or(Error::Cancelled)?;
             let path = fs::abs(&chosen).map_err(fs_error)?;
             // What the user chose, the app may use (and save over).
-            let pid = task::current_pid();
-            if let Some(p) = PROCS.lock().get_mut(&pid) {
-                if p.app.is_some() && p.picked.len() < 256 {
-                    p.picked.push((path, true));
-                }
-            }
+            grant(task::current_pid(), path, true);
             let buf = user_slice(a[3], a[4])?;
             let n = chosen.len().min(buf.len());
             buf[..n].copy_from_slice(&chosen.as_bytes()[..n]);
@@ -1129,6 +1135,13 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
             }
         }
         sys::WIN_CLOSE => crate::gui::window::close(task::current_pid(), a[0]).map(|_| 0),
+        sys::WIN_DROPPED => {
+            let text = crate::gui::window::dropped(task::current_pid(), a[0])?;
+            let buf = user_slice(a[1], a[2])?;
+            let n = text.len().min(buf.len());
+            buf[..n].copy_from_slice(&text.as_bytes()[..n]);
+            Ok(text.len() as u64)
+        }
         sys::WIN_TITLE => {
             let title = user_str(a[1], a[2])?.to_string();
             crate::gui::window::set_title(task::current_pid(), a[0], &title).map(|_| 0)

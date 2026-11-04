@@ -49,7 +49,9 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 - **Come Windows e macOS dove conta**: Ctrl+Spazio cerca app, file,
   impostazioni e fa i conti (come Spotlight); le finestre si agganciano a
   metà o a un quarto dello schermo trascinandole sul bordo o con
-  Ctrl+Alt+frecce (come lo Snap di Windows). Cosa manca ancora per essere
+  Ctrl+Alt+frecce (come lo Snap di Windows); i file si trascinano tra le
+  finestre, nel Cestino del dock o sull'icona di un'app (con Ctrl si
+  copiano invece di spostarli). Cosa manca ancora per essere
   alla pari, e in che ordine arriverà, è nella [roadmap](docs/roadmap.md).
 - **L'ecosistema ticly**: ticly Do (attività, note, calendario), ticly AI
   (in anteprima: le risposte non sono ancora collegate) e il ticly browser,

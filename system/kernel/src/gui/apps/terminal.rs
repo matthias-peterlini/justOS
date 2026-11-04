@@ -91,6 +91,17 @@ impl App for Terminal {
         Action::None
     }
 
+    /// Files dropped on the terminal: their paths are typed at the prompt
+    /// (quoted when they have spaces), for the command being written.
+    fn drop_files(&mut self, paths: &[String], _x: i32, _y: i32, _area: Rect) -> Option<Action> {
+        let line = crate::gui::dnd::as_words(paths);
+        for ch in line.chars().chain(core::iter::once(' ')) {
+            input::inject(KeyEvent { key: input::Key::Char(ch), ctrl: false, alt: false, shift: false });
+        }
+        self.blink = true;
+        Some(Action::Redraw)
+    }
+
     fn tick(&mut self) -> bool {
         self.ticks += 1;
         let blink = self.ticks.is_multiple_of(6);

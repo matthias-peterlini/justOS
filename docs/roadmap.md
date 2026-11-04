@@ -217,7 +217,8 @@ dallo stesso interprete (`_BST`, `_TMP`). Stima: 3–4 mesi.
 | File: risorse, cartelle, apertura con l'app giusta, rinomina, Cestino | ✅ |
 | Anteprime (miniature di immagini) | 🟡 nelle Foto; in File icone per tipo |
 | Schede | ✅ Ctrl+T, Ctrl+W, Ctrl+Tab |
-| Trascinamento tra finestre | ⬜ |
+| Trascinamento tra finestre | ✅ File, Terminale, Editor, dock (Cestino e app), programmi con `WIN_DROPS` |
+| Selezione multipla | ✅ Ctrl+clic, Maiusc+clic, Ctrl+A |
 | Ricerca globale istantanea | ✅ per nome, per la home |
 | Ricerca nel contenuto dei file | ⬜ |
 
@@ -227,9 +228,18 @@ dallo stesso interprete (`_BST`, `_TMP`). Stima: 3–4 mesi.
 2. **Anteprime** (2 settimane): miniature QOI già decodificate dalle Foto
    (`gui/res.rs`), prima pagina dei testi, *Quick Look* con la barra
    spaziatrice.
-3. **Trascinamento** (2–3 settimane): un `Drag::Files(Vec<String>)` nel
-   desktop, consegnato alla finestra sotto il puntatore con un nuovo metodo
-   `App::drop(paths, x, y)`; per i programmi un evento `WIN_EV_DROP`.
+3. ~~**Trascinamento**~~ fatto: i file trascinati fuori da File li porta il
+   desktop (`gui/dnd.rs`), con l'icona sotto il puntatore; la finestra sotto
+   li riceve (`App::drop_files`) e illumina dove andrebbero. Dentro un
+   volume si spostano, verso un altro si copiano; Ctrl o Alt copia sempre,
+   Maiusc sposta sempre; un nome già usato diventa «foto 2.qoi»; una
+   cartella non va mai dentro sé stessa. Sul Terminale si scrivono i
+   percorsi, sull'Editor si apre il file, sull'icona del Cestino si
+   cestinano, su quella di un'app si aprono con lei. I programmi creano la
+   finestra con `WIN_DROPS`, ricevono `WIN_EV_DROP` e leggono i percorsi
+   con `WIN_DROPPED`: la sandbox lascia leggere (non scrivere) i file
+   rilasciati. Prova automatica: `dnd test`. Manca: trascinare *verso* File
+   da un programma, e il rettangolo di selezione.
 4. **Indice** (1 mese): un servizio che tiene un indice dei nomi e delle
    parole dei file di testo, aggiornato dal file system (ArcFS segnala le
    scritture a un osservatore: nuova chiamata `WATCH(path)`); la ricerca di
@@ -273,7 +283,7 @@ mostra i permessi dichiarati nel manifest di ogni app.
 | Fase | Contenuto | Durata indicativa |
 |---|---|---|
 | 1 | ✅ IPC a porte, identità delle app, desktop virtuali, schede in File | fatto |
-| 2 | trascinamento (sandbox, permessi e aggiornamenti delle app: fatti) | 2–3 settimane |
+| 2 | ✅ sandbox, permessi, aggiornamenti delle app, trascinamento | fatto |
 | 3 | interprete AML: sospensione, batteria, temperatura | 3–4 mesi |
 | 4 | aggiornamenti A/B, HiDPI, indice dei file | 2–3 mesi |
 | 5 | strato Linux completo (JavaScript in `arcweb`: fatto), poi Servo | 6–12 mesi |

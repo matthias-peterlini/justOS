@@ -2,6 +2,7 @@
 //! with tabs above it when more than one folder is open.
 
 use crate::fs::{self, Path};
+use crate::gui::dnd;
 use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::res;
 use crate::gui::text::{self, Font};
@@ -46,6 +47,28 @@ enum Do {
     OpenTab,
 }
 
+/// What a click on a selected item does once the button goes up without a
+/// drag (with a drag, the whole selection goes).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Up {
+    Nothing,
+    /// That item alone stays selected.
+    Only,
+    /// Ctrl+click: that item leaves the selection.
+    Deselect,
+}
+
+/// Where files carried over the window would land.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Target {
+    /// A folder in the grid.
+    Item(usize),
+    /// The folder shown.
+    Here,
+    Place(usize),
+    Tab(usize),
+}
+
 pub struct Files {
     trash: bool,
     /// The folder of each tab; the one shown is `dir`.
@@ -53,7 +76,16 @@ pub struct Files {
     tab: usize,
     dir: Path,
     items: Vec<Item>,
+    /// The items selected, and the one the keyboard is on (the last clicked).
+    selection: Vec<usize>,
     selected: Option<usize>,
+    /// A press on an item: where (in the content), which, and what the
+    /// selection becomes if the button goes up without a drag.
+    press_at: Option<(i32, i32, usize, Up)>,
+    /// Files dragged out of the window, for the desktop to take.
+    out: Option<Vec<String>>,
+    /// Where files carried over the window would land now.
+    drop_at: Option<Target>,
     scroll: i32,
     /// A menu from the right button: where, and its choices.
     menu: Option<(Rect, Vec<(&'static str, Do)>)>,
@@ -65,6 +97,9 @@ pub struct Files {
 }
 
 const MENU_ROW: i32 = 32;
+/// A place that takes the files carried over it.
+const DROP_FILL: u32 = 0x400A_84FF;
+const DROP_EDGE: u32 = 0xFF0A_84FF;
 
 /// The icon of a file or folder.
 pub fn icon_for(name: &str, dir: bool) -> &'static str {
@@ -105,7 +140,11 @@ impl Files {
             tab: 0,
             dir,
             items: Vec::new(),
+            selection: Vec::new(),
             selected: None,
+            press_at: None,
+            out: None,
+            drop_at: None,
             scroll: 0,
             menu: None,
             renaming: None,
@@ -127,8 +166,93 @@ impl Files {
         self.items = fs::list_dir(&self.dir)
             .map(|list| list.into_iter().map(|(e, st)| Item { name: e.name, dir: st.kind == arcfs::Kind::Dir }).collect())
             .unwrap_or_default();
+        self.selection.clear();
         self.selected = None;
         self.scroll = 0;
+    }
+
+    /// Only item `i` selected.
+    fn select_only(&mut self, i: usize) {
+        self.selection.clear();
+        self.selection.push(i);
+        self.selected = Some(i);
+    }
+
+    fn select_none(&mut self) {
+        self.selection.clear();
+        self.selected = None;
+    }
+
+    /// The names of the selected items, in the folder's order.
+    fn selected_names(&self) -> Vec<String> {
+        self.items.iter().enumerate().filter(|(i, _)| self.selection.contains(i)).map(|(_, it)| it.name.clone()).collect()
+    }
+
+    /// The selected items as absolute paths.
+    fn selected_paths(&self) -> Vec<String> {
+        self.selected_names().iter().map(|n| format!("{}", self.dir.join(n))).collect()
+    }
+
+    /// The item under a point of the window (absolute coordinates).
+    fn item_at(&self, ax: i32, ay: i32, area: Rect) -> Option<usize> {
+        let (grid, cols) = self.grid(area);
+        if !grid.contains(ax, ay) {
+            return None;
+        }
+        let col = (ax - grid.x) / TILE_W;
+        let row = (ay - grid.y + self.scroll) / TILE_H;
+        let i = (row * cols + col) as usize;
+        (col < cols && i < self.items.len()).then_some(i)
+    }
+
+    fn place_rect(i: usize, area: Rect) -> Rect {
+        Rect::new(area.x + 10, area.y + 40 + i as i32 * 36, SIDEBAR - 12, 32)
+    }
+
+    /// Where files carried to a point of the window would land.
+    fn target_at(&self, ax: i32, ay: i32, area: Rect, paths: &[String]) -> Option<Target> {
+        if self.trash {
+            return (self.content(area).contains(ax, ay) || area.contains(ax, ay)).then_some(Target::Here);
+        }
+        if let Some(i) = (0..PLACES.len()).find(|&i| Self::place_rect(i, area).contains(ax, ay)) {
+            return Some(Target::Place(i));
+        }
+        if self.tabs.len() > 1 {
+            let (rects, _) = self.tab_rects(area);
+            if let Some(i) = rects.iter().position(|r| r.contains(ax, ay)) {
+                return (i != self.tab).then_some(Target::Tab(i));
+            }
+        }
+        if let Some(i) = self.item_at(ax, ay, area) {
+            let it = &self.items[i];
+            let path = format!("{}", self.dir.join(&it.name));
+            if it.dir && !paths.contains(&path) {
+                return Some(Target::Item(i));
+            }
+        }
+        if !self.content(area).contains(ax, ay) {
+            return None;
+        }
+        // Here: unless everything comes from here (moving it would do nothing).
+        let here = format!("{}", self.dir);
+        let from_here = paths.iter().all(|p| fs::abs(p).is_ok_and(|p| format!("{}", p.parent()) == here));
+        (!from_here || dnd_copy_held()).then_some(Target::Here)
+    }
+
+    /// The folder a target stands for.
+    fn target_dir(&self, t: Target) -> Option<Path> {
+        match t {
+            Target::Item(i) => self.items.get(i).map(|it| self.dir.join(&it.name)),
+            Target::Here => Some(self.dir.clone()),
+            Target::Place(i) => {
+                let p = fs::abs(PLACES.get(i)?.1).ok()?;
+                if !fs::exists(&p) {
+                    let _ = fs::make_dir(&p);
+                }
+                Some(p)
+            }
+            Target::Tab(i) => self.tabs.get(i).cloned(),
+        }
     }
 
     fn do_action(&mut self, act: Do) -> Action {
@@ -145,32 +269,24 @@ impl Files {
                 }
             }
             Do::ToBin => {
-                if let (Some((_, name)), Ok(bin)) = (selected, fs::abs("sys:/home/Cestino")) {
-                    if !fs::exists(&bin) {
-                        let _ = fs::make_dir(&bin);
-                    }
-                    let from = self.dir.join(&name);
-                    let mut to = bin.join(&name);
-                    let mut n = 2;
-                    while fs::exists(&to) {
-                        to = bin.join(&format!("{name} {n}"));
-                        n += 1;
-                    }
-                    if let Err(e) = fs::rename(&from, &to) {
-                        return Action::Notify(name, format!("Non si può spostare nel Cestino: {e}"), "trash");
-                    }
+                let paths = self.selected_paths();
+                if !paths.is_empty() {
+                    let r = dnd::to_bin(&paths);
                     self.reload();
+                    if let Err(e) = r {
+                        return Action::Notify(String::from("Cestino"), format!("Non si può spostare nel Cestino: {e}"), "trash");
+                    }
                 }
             }
             Do::Delete => {
-                if let Some((_, name)) = selected {
-                    let p = self.dir.join(&name);
-                    let r = if fs::is_dir(&p) { fs::remove_all(&p) } else { fs::remove(&p) };
-                    if let Err(e) = r {
+                let names = self.selected_names();
+                for name in names {
+                    if let Err(e) = fs::remove_all(&self.dir.join(&name)) {
+                        self.reload();
                         return Action::Notify(name, format!("Non si può eliminare: {e}"), "trash");
                     }
-                    self.reload();
                 }
+                self.reload();
             }
             Do::NewFolder => {
                 let mut name = String::from("Nuova cartella");
@@ -184,7 +300,7 @@ impl Files {
                 }
                 self.reload();
                 if let Some(i) = self.items.iter().position(|it| it.name == name) {
-                    self.selected = Some(i);
+                    self.select_only(i);
                     self.renaming = Some((i, name));
                 }
             }
@@ -275,7 +391,9 @@ impl Files {
         }
         if fs::rename(&self.dir.join(&old), &self.dir.join(&name)).is_ok() {
             self.reload();
-            self.selected = self.items.iter().position(|it| it.name == name);
+            if let Some(i) = self.items.iter().position(|it| it.name == name) {
+                self.select_only(i);
+            }
         }
     }
 
@@ -344,6 +462,12 @@ fn place_icon(name: &str) -> &'static str {
     }
 }
 
+/// Is Ctrl or Alt (without Shift) held, so that a drop copies?
+fn dnd_copy_held() -> bool {
+    let (ctrl, alt, shift) = crate::dev::input::mods();
+    (ctrl || alt) && !shift
+}
+
 /// The button that closes a tab, at its right end.
 fn tab_close(tab: Rect) -> Rect {
     Rect::new(tab.right() - 24, tab.y + (tab.h - 18) / 2, 18, 18)
@@ -386,9 +510,13 @@ impl App for Files {
         // Places.
         crate::gui::ui::caps(c, area.x + 22, area.y + 18, "Risorse", TEXT_FAINT);
         for (i, (name, path)) in PLACES.iter().enumerate() {
-            let r = Rect::new(area.x + 10, area.y + 40 + i as i32 * 36, SIDEBAR - 12, 32);
+            let r = Self::place_rect(i, area);
             if fs::abs(path).is_ok_and(|p| p == self.dir) {
                 c.fill_round(r, 10, crate::gui::ui::SELECTED);
+            }
+            if self.drop_at == Some(Target::Place(i)) {
+                c.fill_round(r, 10, DROP_FILL);
+                c.stroke_round(r, 10, 2, DROP_EDGE);
             }
             res::draw_icon(c, place_icon(name), 20, r.x + 10, r.y + 6);
             text::draw(c, Font::Body, r.x + 40, r.y + 7, name, TEXT);
@@ -401,6 +529,10 @@ impl App for Files {
             for (i, r) in rects.iter().enumerate() {
                 let on = i == self.tab;
                 c.fill_round(*r, 10, if on { crate::gui::ui::SELECTED } else { 0x14FF_FFFF });
+                if self.drop_at == Some(Target::Tab(i)) {
+                    c.fill_round(*r, 10, DROP_FILL);
+                    c.stroke_round(*r, 10, 2, DROP_EDGE);
+                }
                 let name = Self::name_of(&self.tabs[i]);
                 res::draw_icon(c, place_icon(&name), 16, r.x + 9, r.y + (r.h - 16) / 2);
                 let name = text::fit(Font::Small, &name, r.w - 58);
@@ -438,8 +570,12 @@ impl App for Files {
             if t.bottom() < grid.y || t.y > grid.bottom() {
                 continue;
             }
-            if self.selected == Some(i) {
+            if self.selection.contains(&i) {
                 c.fill_round(t.grow(-4), 14, 0x33FF_FFFF);
+            }
+            if self.drop_at == Some(Target::Item(i)) {
+                c.fill_round(t.grow(-4), 14, DROP_FILL);
+                c.stroke_round(t.grow(-4), 14, 2, DROP_EDGE);
             }
             res::draw_icon(c, icon_for(&item.name, item.dir), 52, t.x + (TILE_W - 52) / 2, t.y + 10);
             match &self.renaming {
@@ -457,6 +593,10 @@ impl App for Files {
             }
         }
         c.set_clip(saved);
+        if self.drop_at == Some(Target::Here) {
+            // The whole folder takes them.
+            c.stroke_round(content.grow(-4), 14, 2, DROP_EDGE);
+        }
         self.grid_at = grid;
         if let Some((r, items)) = &self.menu {
             c.shadow(*r, 12, 12, 80);
@@ -476,16 +616,22 @@ impl App for Files {
     fn menu(&mut self, x: i32, y: i32, area: Rect) -> Action {
         self.finish_rename();
         let (ax, ay) = (area.x + x, area.y + y);
-        let (grid, cols) = self.grid(area);
+        let (grid, _) = self.grid(area);
         if !grid.contains(ax, ay) {
             return Action::None;
         }
-        let col = (ax - grid.x) / TILE_W;
-        let row = (ay - grid.y + self.scroll) / TILE_H;
-        let i = (row * cols + col) as usize;
-        let items: Vec<(&'static str, Do)> = if col < cols && i < self.items.len() {
+        let items: Vec<(&'static str, Do)> = if let Some(i) = self.item_at(ax, ay, area) {
+            if !self.selection.contains(&i) {
+                self.select_only(i);
+            }
             self.selected = Some(i);
-            if self.trash {
+            if self.selection.len() > 1 {
+                if self.trash {
+                    alloc::vec![("Elimina definitivamente", Do::Delete)]
+                } else {
+                    alloc::vec![("Sposta nel Cestino", Do::ToBin)]
+                }
+            } else if self.trash {
                 alloc::vec![("Elimina definitivamente", Do::Delete)]
             } else if self.items[i].dir {
                 alloc::vec![("Apri", Do::Open), ("Apri in una nuova scheda", Do::OpenTab), ("Rinomina", Do::Rename), ("Sposta nel Cestino", Do::ToBin)]
@@ -498,7 +644,7 @@ impl App for Files {
             }
             alloc::vec![("Svuota il Cestino", Do::EmptyBin)]
         } else {
-            self.selected = None;
+            self.select_none();
             alloc::vec![("Nuova cartella", Do::NewFolder)]
         };
         self.menu = Some((Self::menu_rect(ax, ay, items.len(), area), items));
@@ -549,8 +695,7 @@ impl App for Files {
             return Action::Redraw;
         }
         for (i, (_, path)) in PLACES.iter().enumerate() {
-            let r = Rect::new(area.x + 10, area.y + 40 + i as i32 * 36, SIDEBAR - 12, 32);
-            if r.contains(ax, ay) {
+            if Self::place_rect(i, area).contains(ax, ay) {
                 if let Ok(p) = fs::abs(path) {
                     if !fs::exists(&p) {
                         let _ = fs::make_dir(&p);
@@ -567,22 +712,111 @@ impl App for Files {
             self.go(parent);
             return Action::Redraw;
         }
-        let (grid, cols) = self.grid(area);
+        let (grid, _) = self.grid(area);
         if grid.contains(ax, ay) {
-            let col = (ax - grid.x) / TILE_W;
-            let row = (ay - grid.y + self.scroll) / TILE_H;
-            let i = (row * cols + col) as usize;
-            if col < cols && i < self.items.len() {
-                self.selected = Some(i);
-                if double {
+            let (ctrl, _, shift) = crate::dev::input::mods();
+            match self.item_at(ax, ay, area) {
+                Some(i) if double => {
+                    self.select_only(i);
                     return self.open_item(i);
                 }
-            } else {
-                self.selected = None;
+                // Ctrl: one more, or (without a drag: Ctrl also copies what
+                // is dragged) one less.
+                Some(i) if ctrl => {
+                    let had = self.selection.contains(&i);
+                    if !had {
+                        self.selection.push(i);
+                    }
+                    self.selected = Some(i);
+                    self.press_at = Some((x, y, i, if had { Up::Deselect } else { Up::Nothing }));
+                }
+                // Shift: all from the last one clicked.
+                Some(i) if shift && self.selected.is_some() => {
+                    let from = self.selected.unwrap_or(i);
+                    self.selection = (from.min(i)..=from.max(i)).collect();
+                    self.press_at = Some((x, y, i, Up::Nothing));
+                }
+                Some(i) => {
+                    // A press on a selection keeps it (to drag it all);
+                    // without a drag it ends up the only one selected.
+                    let keep = self.selection.contains(&i);
+                    if !keep {
+                        self.select_only(i);
+                    }
+                    self.selected = Some(i);
+                    self.press_at = Some((x, y, i, if keep && self.selection.len() > 1 { Up::Only } else { Up::Nothing }));
+                }
+                None if ctrl || shift => {}
+                None => self.select_none(),
             }
             return Action::Redraw;
         }
         Action::None
+    }
+
+    fn drag(&mut self, x: i32, y: i32, _area: Rect) -> bool {
+        let Some((px, py, _, _)) = self.press_at else { return false };
+        if (x - px).abs() > 6 || (y - py).abs() > 6 {
+            self.press_at = None;
+            let paths = self.selected_paths();
+            if !paths.is_empty() {
+                self.out = Some(paths);
+            }
+        }
+        false
+    }
+
+    fn release(&mut self, _area: Rect) -> Action {
+        match self.press_at.take() {
+            Some((_, _, i, Up::Only)) => {
+                self.select_only(i);
+                Action::Redraw
+            }
+            Some((_, _, i, Up::Deselect)) => {
+                self.selection.retain(|&k| k != i);
+                self.selected = self.selection.last().copied();
+                Action::Redraw
+            }
+            _ => Action::None,
+        }
+    }
+
+    fn drag_files(&mut self) -> Option<Vec<String>> {
+        self.out.take()
+    }
+
+    fn drop_over(&mut self, at: Option<(i32, i32)>, paths: &[String], area: Rect) -> bool {
+        let t = at.and_then(|(x, y)| self.target_at(area.x + x, area.y + y, area, paths));
+        let changed = t != self.drop_at;
+        self.drop_at = t;
+        changed
+    }
+
+    fn drop_files(&mut self, paths: &[String], x: i32, y: i32, area: Rect) -> Option<Action> {
+        self.drop_at = None;
+        let t = self.target_at(area.x + x, area.y + y, area, paths)?;
+        let dir = self.target_dir(t)?;
+        let r = if self.trash { dnd::to_bin(paths) } else { dnd::transfer(paths, &dir, dnd::copying(paths, &dir)) };
+        Some(match r {
+            Ok(_) => Action::Redraw,
+            Err(e) => Action::Notify(String::from("File"), e, "files"),
+        })
+    }
+
+    /// Lists the folder again, keeping what was selected and the scroll; a
+    /// folder that went away gives way to the nearest one still there.
+    fn refresh(&mut self) {
+        while !fs::is_dir(&self.dir) && self.dir.inner != "/" {
+            self.dir = self.dir.parent();
+            self.tabs[self.tab] = self.dir.clone();
+        }
+        let names = self.selected_names();
+        let scroll = self.scroll;
+        self.reload();
+        self.scroll = scroll;
+        self.selection = self.items.iter().enumerate().filter(|(_, it)| names.contains(&it.name)).map(|(i, _)| i).collect();
+        self.selected = self.selection.last().copied();
+        self.renaming = None;
     }
 
     fn key(&mut self, ev: crate::dev::input::KeyEvent) -> Action {
@@ -603,6 +837,11 @@ impl App for Files {
         let n = self.items.len();
         // Tabs: Ctrl+T opens one on this folder, Ctrl+W closes it, Ctrl+Tab
         // (with Shift backwards) goes to the next.
+        if ev.ctrl && matches!(ev.key, Key::Char('a' | 'A')) {
+            self.selection = (0..n).collect();
+            self.selected = n.checked_sub(1);
+            return Action::Redraw;
+        }
         if ev.ctrl && !self.trash {
             match ev.key {
                 Key::Char('t' | 'T') => self.new_tab(self.dir.clone()),
@@ -626,11 +865,11 @@ impl App for Files {
                 Action::Redraw
             }
             Key::Right | Key::Down if n > 0 => {
-                self.selected = Some(self.selected.map_or(0, |i| (i + 1).min(n - 1)));
+                self.select_only(self.selected.map_or(0, |i| (i + 1).min(n - 1)));
                 Action::Redraw
             }
             Key::Left | Key::Up if n > 0 => {
-                self.selected = Some(self.selected.map_or(0, |i| i.saturating_sub(1)));
+                self.select_only(self.selected.map_or(0, |i| i.saturating_sub(1)));
                 Action::Redraw
             }
             _ => Action::None,

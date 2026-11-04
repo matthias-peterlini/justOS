@@ -31,8 +31,25 @@ use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-pub use files::Files;
+pub use files::{icon_for, Files};
 pub use viewer::Viewer;
+
+/// Opens a file or folder dropped on an app's dock icon with that app (the
+/// app's window kind); None when the app does not take it.
+pub fn open_with(kind: &str, path: &str) -> Option<Box<dyn App>> {
+    let p = fs::abs(path).ok()?;
+    let dir = fs::is_dir(&p);
+    let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    Some(match kind {
+        "files" if dir => Box::new(Files::new(path)),
+        "files" => Box::new(Files::new(&alloc::format!("{}", p.parent()))),
+        "textedit" if !dir => Box::new(textedit::TextEdit::new(Some(path))),
+        "photos" | "viewer" if ext == "qoi" => Box::new(Viewer::new(path)),
+        "music" if ext == "wav" => Box::new(music::Music::with_file(path)),
+        "arcstudio" if !dir => Box::new(arcstudio::ArcStudio::new(Some(path))),
+        _ => return None,
+    })
+}
 
 /// The built-in apps: id, name, icon, window kind.
 pub const BUILT_IN: [(&str, &str, &str); 20] = [

@@ -272,13 +272,25 @@ impl App {
     /// Opens a picture the user chooses in the system's file picker.
     fn open(&mut self) {
         let Ok(path) = arcrt::app::pick_open() else { return };
+        self.load(path, true);
+    }
+
+    /// Puts a picture on the paper. `own`: the user chose it in the picker,
+    /// so saving goes back to it; a dropped one may only be read, so saving
+    /// makes a new picture.
+    fn load(&mut self, path: String, own: bool) {
         match arcrt::fs::read(&path).ok().and_then(|d| qoi::decode(&d)) {
             Some(img) => {
                 self.remember();
                 self.paper.px.fill(0xFFFF_FFFF);
                 let r = Rect::new(0, 0, img.w.min(self.paper.w), img.h.min(self.paper.h));
                 self.paper.blit(&img, 0, 0, r);
-                self.saved_as = Some(path);
+                if !own {
+                    let name = path.rsplit('/').next().unwrap_or(&path);
+                    self.note = format!("Aperto «{name}»");
+                    self.note_until = arcui::now_ms() + 3000;
+                }
+                self.saved_as = own.then_some(path);
             }
             None => {
                 self.note = String::from("Non è un'immagine QOI");
@@ -338,7 +350,7 @@ impl App {
 }
 
 fn main(_args: &str) -> i32 {
-    let Ok(mut win) = Window::new("Disegno", W, H) else { return 1 };
+    let Ok(mut win) = Window::with_flags("Disegno", W, H, arcui::DROPS) else { return 1 };
     let mut app = App::new();
     let mut dirty = true;
     loop {
@@ -429,6 +441,14 @@ fn main(_args: &str) -> i32 {
                     dirty = false;
                 }
             }
+            // A picture dragged from File onto the window.
+            Event::Drop { .. } => match win.dropped().into_iter().find(|p| p.to_ascii_lowercase().ends_with(".qoi")) {
+                Some(path) => app.load(path, false),
+                None => {
+                    app.note = String::from("Disegno apre le immagini QOI");
+                    app.note_until = arcui::now_ms() + 3000;
+                }
+            },
             _ => dirty = false,
         }
     }

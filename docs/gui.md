@@ -72,6 +72,15 @@ Presa a modello da macOS:
   ci portano la finestra in primo piano (oltre l'ultimo ne crea uno). Con
   più desktop, dei pallini dopo il logo dicono dove si è; il dock e Alt+Tab
   portano al desktop della finestra scelta.
+- **Trascinare i file**: da File si trascinano uno o più file (Ctrl+clic e
+  Maiusc+clic selezionano, Ctrl+A tutto) su una cartella, su una risorsa a
+  sinistra, su una scheda o su un'altra finestra di File. Sullo stesso
+  volume si spostano, tra volumi diversi si copiano; tenendo **Ctrl** (o
+  Alt) si copia sempre e compare un **+** verde, con **Maiusc** si sposta
+  sempre. Rilasciati sul Cestino del dock ci finiscono dentro; sull'icona di
+  un'app (Editor, Foto, Musica, ArcStudio, File) si aprono lì; sul
+  Terminale ne scrivono il percorso; nell'Editor si aprono. Le app del
+  Negozio che lo chiedono (Disegno) ricevono i file, solo in lettura.
 - **Schermata**: il tasto **Stamp** (o *Schermata* nel menu del logo) salva
   lo schermo in `sys:/home/Immagini` come `Schermata <data> alle <ora>.qoi`,
   che Foto apre subito.
@@ -115,7 +124,7 @@ si ridisegna a ogni fotogramma.
 | ticly Do | il workspace di ticly: panoramica, attività, note e calendario (mese, settimana, giorno) sugli stessi file di Promemoria, Note e Calendario; profilo dell'account |
 | ticly AI | l'interfaccia di ai.ticly.it con le chat salvate in `sys:/home/.ticly/ai`; per ora nessun modello risponde (il collegamento al servizio ticly arriverà) |
 | ticly browser | il browser di ticly: schede, barra degli indirizzi (indirizzi o ricerche DuckDuckGo), avanti/indietro, ricarica, pagina iniziale ticly, trova nella pagina (Ctrl+F), moduli, `<select>`, cookie; i file non visualizzabili vanno in `Scaricati` |
-| File | sfoglia i volumi: risorse a sinistra, cartelle e file a destra; doppio clic apre una cartella o il file con l'app giusta; **schede** (Ctrl+T o il **+**, Ctrl+W chiude, Ctrl+Tab passa alla successiva, *Apri in una nuova scheda* sulle cartelle); tasto destro per aprire, rinominare (anche F2), spostare nel Cestino (Canc), creare una cartella; nel Cestino eliminare o svuotare |
+| File | sfoglia i volumi: risorse a sinistra, cartelle e file a destra; doppio clic apre una cartella o il file con l'app giusta; **schede** (Ctrl+T o il **+**, Ctrl+W chiude, Ctrl+Tab passa alla successiva, *Apri in una nuova scheda* sulle cartelle); tasto destro per aprire, rinominare (anche F2), spostare nel Cestino (Canc), creare una cartella; nel Cestino eliminare o svuotare; **selezione multipla** (Ctrl+clic, Maiusc+clic, Ctrl+A) e **trascinamento** tra cartelle, schede e finestre |
 | Editor di testo | file di testo con selezione, copia e incolla, scorrimento; Nuovo, Apri, Salva (Ctrl+N, Ctrl+O, Ctrl+S) con la scelta del file; alla chiusura salva da solo |
 | ArcStudio | l'IDE di ArcScript, preinstallato: esplora i progetti di `sys:/home/arcscript`, editor con numeri di riga, colori della sintassi, rientro automatico ed errori sottolineati mentre si scrive; **anteprima dal vivo** della `view` (il programma gira nella finestra e risponde a pulsanti, interruttori, cursori e campi), console con l'output di `print()`, pannello Problemi (un clic porta alla riga); Esegui (F5), Compila in `.arc` (Ctrl+B) e Nel terminale passano da `arcc`. I file `.as` si aprono qui |
 | Note | note in `sys:/home/Note`, la prima riga è il titolo, ricerca, si salvano mentre si scrive |

@@ -104,6 +104,24 @@ pub trait App {
     fn alive(&self) -> bool {
         true
     }
+    /// Asked after each [`drag`](Self::drag): files the user started to
+    /// carry out of the window (absolute paths), if any. The desktop then
+    /// carries them until the button goes up.
+    fn drag_files(&mut self) -> Option<alloc::vec::Vec<String>> {
+        None
+    }
+    /// Files are carried over the content (`None`: they left); the app may
+    /// light up the place they would land. True to redraw.
+    fn drop_over(&mut self, _at: Option<(i32, i32)>, _paths: &[String], _area: Rect) -> bool {
+        false
+    }
+    /// Files were let go over the content. `None`: the app does not take
+    /// them (the desktop says so); otherwise what to do next.
+    fn drop_files(&mut self, _paths: &[String], _x: i32, _y: i32, _area: Rect) -> Option<Action> {
+        None
+    }
+    /// Files changed somewhere (a drop moved or copied some): show them again.
+    fn refresh(&mut self) {}
 }
 
 pub struct Window {

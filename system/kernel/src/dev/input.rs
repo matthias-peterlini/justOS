@@ -109,6 +109,12 @@ fn push(s: &mut State, ev: KeyEvent) {
     }
 }
 
+/// The modifier keys held now: (ctrl, alt, shift).
+pub fn mods() -> (bool, bool, bool) {
+    let s = STATE.lock();
+    (s.lctrl || s.rctrl, s.alt || s.altgr, s.lshift || s.rshift)
+}
+
 /// A key event from a driver (HID usage, press/release/repeat).
 fn key(usage: u32, value: i32) {
     let pressed = value != KEY_RELEASED;

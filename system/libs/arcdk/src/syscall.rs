@@ -121,6 +121,10 @@ pub const APP_ENTER: u64 = 38;
 pub const PICK_FILE: u64 = 39;
 pub const PICK_OPEN: u64 = 0;
 pub const PICK_SAVE: u64 = 1;
+/// (handle, buf, cap) -> length: the files of the last drop on the window
+/// (`WIN_EV_DROP`), absolute paths one per line. The program may read them
+/// (only read: to change one it asks with `PICK_FILE`).
+pub const WIN_DROPPED: u64 = 40;
 
 pub const PORT_MSG_MAX: u64 = 64 << 10;
 pub const PORT_QUEUE_MAX: usize = 64;
@@ -129,6 +133,8 @@ pub const FOREVER: u64 = u64::MAX;
 
 /// `WIN_CREATE` flag: the user may resize the window (`WIN_EV_RESIZE`).
 pub const WIN_RESIZABLE: u64 = 1;
+/// `WIN_CREATE` flag: files may be dropped on the window (`WIN_EV_DROP`).
+pub const WIN_DROPS: u64 = 2;
 
 // Window events: [kind, a, b, c].
 /// x, y, 1 for a double click (2: the right button)
@@ -146,6 +152,8 @@ pub const WIN_EV_CLOSE: u64 = 6;
 pub const WIN_EV_RESIZE: u64 = 7;
 /// The pointer left the window.
 pub const WIN_EV_LEAVE: u64 = 8;
+/// x, y, count: files were dropped there (`WIN_DROPPED` says which).
+pub const WIN_EV_DROP: u64 = 9;
 
 pub const TLS_FS: u64 = 0;
 pub const TLS_GS: u64 = 1;

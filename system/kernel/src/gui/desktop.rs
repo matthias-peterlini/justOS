@@ -8,6 +8,7 @@
 //! scaled and faded on every frame, so the app is not redrawn meanwhile.
 
 use super::apps::{self, Launch};
+use super::dnd;
 use super::gfx::{Canvas, Rect};
 use super::lock::{Lock, Outcome};
 use super::res;
@@ -265,6 +266,31 @@ enum Drag {
     Brightness,
 }
 
+/// Files carried with the pointer out of a window, until the button goes up.
+struct Carry {
+    paths: Vec<String>,
+    /// The icon drawn under the pointer.
+    icon: &'static str,
+    /// The window they came from.
+    from: u32,
+    /// The window under them that was told last.
+    over: Option<u32>,
+    /// The dock icon under them, when its app takes them.
+    dock: Option<usize>,
+    /// Ctrl or Alt held: they will be copied (a "+" on the icon).
+    copy: bool,
+}
+
+/// What a carried icon may cover around the pointer.
+fn carry_rect(x: i32, y: i32) -> Rect {
+    Rect::new(x - 100, y - 56, 200, 140)
+}
+
+/// Does a dock icon take files dropped on it?
+fn takes_files(item: &DockItem) -> bool {
+    matches!(item.kind.as_str(), "trash" | "files" | "textedit" | "photos" | "viewer" | "music" | "arcstudio")
+}
+
 struct Launcher {
     query: String,
     entries: Vec<apps::Entry>,
@@ -385,6 +411,8 @@ struct Desktop {
     overview: Option<Overview>,
     /// The desktop's name, shown for a moment after a switch.
     space_hud: Option<Anim>,
+    /// Files being dragged out of a window.
+    carry: Option<Carry>,
 }
 
 fn now() -> DateTime {
@@ -1741,7 +1769,12 @@ impl Desktop {
         if bar.contains(self.mouse.0, self.mouse.1) || bar.contains(x, y) {
             l.damage(ui::with_shadow(bar));
         }
+        let was = self.mouse;
         self.mouse = (x, y);
+        if held && self.carry.is_some() {
+            self.carry_move(l, was, x, y);
+            return;
+        }
         if let Some(o) = &mut self.overview {
             if let Some((_, px, py, dragging)) = &mut o.held {
                 if held && ((x - *px).abs() > 6 || (y - *py).abs() > 6) {
@@ -1805,11 +1838,22 @@ impl Desktop {
                     return;
                 }
                 Some(Drag::Body(id)) => {
+                    let mut out = None;
                     if let Some(win) = self.window_mut(id) {
                         let body = win.body();
                         if win.app.drag(x - body.x, y - body.y, body) {
                             l.damage(win.bounds());
                         }
+                        // Files dragged out: the desktop carries them now.
+                        out = win.app.drag_files().filter(|p| !p.is_empty());
+                        if out.is_some() {
+                            l.damage(win.bounds());
+                        }
+                    }
+                    if let Some(paths) = out {
+                        let icon = fs::abs(&paths[0]).map_or("file", |p| apps::icon_for(p.name(), fs::is_dir(&p)));
+                        self.carry = Some(Carry { paths, icon, from: id, over: None, dock: None, copy: false });
+                        self.carry_move(l, (x, y), x, y);
                     }
                     return;
                 }
@@ -1904,9 +1948,160 @@ impl Desktop {
         }
     }
 
+    // ------------------------------------------------------------------
+    // Files carried between windows
+
+    /// The pointer moved while carrying files: the icon follows it, and the
+    /// window or dock icon under it hears of them.
+    fn carry_move(&mut self, l: &mut Looper, was: (i32, i32), x: i32, y: i32) {
+        l.damage(carry_rect(was.0, was.1));
+        l.damage(carry_rect(x, y));
+        let Some(mut carry) = self.carry.take() else { return };
+        let (ctrl, alt, _) = input::mods();
+        carry.copy = ctrl || alt;
+        // The dock magnifies as usual; some of its icons take files.
+        let zone = self.dock();
+        let near = Rect::new(zone.x - 20, zone.y - MAGNIFY - 10, zone.w + 40, zone.h + MAGNIFY + 20);
+        let inside = near.contains(x, y) && self.popup.is_none() && self.dock_shown();
+        self.mag.target = if inside { 1000 } else { 0 };
+        let items = self.dock_items();
+        let hover = if inside {
+            let (rects, _) = self.dock_layout(&items);
+            rects.iter().position(|r| r.grow(DOCK_GAP / 2).contains(x, y) || (x >= r.x - DOCK_GAP / 2 && x < r.right() + DOCK_GAP / 2 && y > r.y - 4))
+        } else {
+            None
+        };
+        if inside || self.mag.moving() || hover != self.hover {
+            l.damage(self.dock_zone());
+        }
+        self.hover = hover;
+        carry.dock = hover.filter(|&i| takes_files(&items[i]));
+        // The window under the pointer, if not the dock.
+        let under = if inside {
+            None
+        } else {
+            self.windows.iter().rev().filter(|w| w.shown(self.space) && !self.moving(w.id)).find(|w| w.rect.contains(x, y)).map(|w| w.id)
+        };
+        if carry.over != under {
+            if let Some(old) = carry.over.and_then(|id| self.windows.iter_mut().find(|w| w.id == id)) {
+                let body = old.body();
+                if old.app.drop_over(None, &carry.paths, body) {
+                    l.damage(old.bounds());
+                }
+            }
+            carry.over = under;
+        }
+        if let Some(win) = under.and_then(|id| self.windows.iter_mut().find(|w| w.id == id)) {
+            let body = win.body();
+            let at = body.contains(x, y).then(|| (x - body.x, y - body.y));
+            if win.app.drop_over(at, &carry.paths, body) {
+                l.damage(win.bounds());
+            }
+        }
+        self.carry = Some(carry);
+    }
+
+    /// The button went up while carrying files: they go to the window or
+    /// the dock icon under the pointer, or back where they were.
+    fn carry_drop(&mut self, l: &mut Looper, carry: Carry) {
+        let (x, y) = self.mouse;
+        l.damage(carry_rect(x, y));
+        // The window they came from forgets the press.
+        if let Some(win) = self.window_mut(carry.from) {
+            let body = win.body();
+            let _ = win.app.release(body);
+            l.damage(win.bounds());
+        }
+        if let Some(i) = carry.dock {
+            let items = self.dock_items();
+            let Some(item) = items.get(i) else { return };
+            l.damage(self.dock_zone());
+            if item.kind == "trash" {
+                if let Err(e) = dnd::to_bin(&carry.paths) {
+                    self.notify(l, String::from("Cestino"), e, String::from("trash"));
+                }
+                self.refresh_all(l);
+                return;
+            }
+            let mut refused = Vec::new();
+            for p in carry.paths.iter().take(8) {
+                match apps::open_with(&item.kind, p) {
+                    Some(app) => {
+                        self.open(l, app, false);
+                    }
+                    None => refused.push(fs::abs(p).map(|p| String::from(p.name())).unwrap_or_default()),
+                }
+            }
+            if !refused.is_empty() {
+                let what = if refused.len() == 1 { refused.remove(0) } else { format!("{} elementi", refused.len()) };
+                self.notify(l, item.label.clone(), format!("Non apre {what}."), item.icon.clone());
+            }
+            return;
+        }
+        let Some(id) = carry.over else { return };
+        let Some(win) = self.window_mut(id) else { return };
+        let body = win.body();
+        let _ = win.app.drop_over(None, &carry.paths, body);
+        l.damage(win.bounds());
+        if !body.contains(x, y) {
+            return;
+        }
+        if let Some(action) = win.app.drop_files(&carry.paths, x - body.x, y - body.y, body) {
+            if id != carry.from && self.focused() != Some(id) {
+                self.raise(l, id);
+            }
+            self.act(l, Some(id), action);
+            self.refresh_all(l);
+        }
+    }
+
+    /// Files moved or copied: every window shows them again.
+    fn refresh_all(&mut self, l: &mut Looper) {
+        for w in self.windows.iter_mut() {
+            w.app.refresh();
+            if w.shown(self.space) {
+                l.damage(w.bounds());
+            }
+        }
+    }
+
+    fn draw_carry(&self, c: &mut Canvas, carry: &Carry) {
+        let (x, y) = self.mouse;
+        let (ix, iy) = (x - 26, y - 20);
+        c.shadow(Rect::new(ix + 6, iy + 8, 40, 40), 12, 12, 50);
+        res::draw_icon_faded(c, carry.icon, 52, ix, iy, 215);
+        if carry.paths.len() > 1 {
+            let n = format!("{}", carry.paths.len());
+            let w = (text::width(Font::Small, &n) + 12).max(22);
+            let b = Rect::new(ix + 52 - w / 2, iy - 6, w, 22);
+            c.fill_round(b, 11, 0xFFFF_453A);
+            let (sh, _) = text::metrics(Font::Small);
+            text::draw_centered(c, Font::Small, b.x + b.w / 2, b.y + (b.h - sh) / 2, &n, TEXT);
+        }
+        if carry.copy {
+            let (cx, cy) = (ix + 48, iy + 46);
+            c.fill_circle(cx, cy, 11, 0xFF30_D158);
+            c.fill(Rect::new(cx - 5, cy - 1, 10, 2), TEXT);
+            c.fill(Rect::new(cx - 1, cy - 5, 2, 10), TEXT);
+        }
+        let label = text::fit(Font::Small, &dnd::describe(&carry.paths), 170);
+        let w = text::width(Font::Small, &label) + 18;
+        // Under the icon, or over it at the bottom of the screen.
+        let below = iy + 58;
+        let pill = Rect::new(x - w / 2, if below + 22 > self.h - 2 { iy - 30 } else { below }, w, 22);
+        c.fill_round(pill, 11, 0xD91C_1C1E);
+        let (sh, _) = text::metrics(Font::Small);
+        text::draw_centered(c, Font::Small, x, pill.y + (pill.h - sh) / 2, &label, TEXT);
+    }
+
     fn released(&mut self, l: &mut Looper) {
         if self.overview.is_some() {
             self.overview_release(l);
+            return;
+        }
+        if let Some(carry) = self.carry.take() {
+            self.drag = None;
+            self.carry_drop(l, carry);
             return;
         }
         match self.drag {
@@ -2063,6 +2258,10 @@ impl Desktop {
                     let (phase, height) = if t < 600 { (t * 1000 / 600, 22) } else { ((t - 600) * 1000 / 400, 10) };
                     lift = (height * 4 * phase * (1000 - phase) / 1_000_000) as i32;
                 }
+            }
+            if self.carry.as_ref().is_some_and(|c| c.dock == Some(i)) {
+                // It takes the files carried over it.
+                c.fill_round(r.grow(6), 18, 0x59FF_FFFF);
             }
             res::draw_icon(c, &it.icon, r.w, r.x, r.y - lift);
             let open = self.windows.iter().any(|w| w.app.kind() == it.kind) && it.id != "trash";
@@ -2875,6 +3074,11 @@ impl Desktop {
                 self.draw_space_hud(c, a);
             }
         }
+        if let Some(carry) = &self.carry {
+            if r.overlaps(&carry_rect(self.mouse.0, self.mouse.1)) {
+                self.draw_carry(c, carry);
+            }
+        }
         if let Some(la) = &self.launcher {
             self.draw_launcher(c, la);
         }
@@ -2920,6 +3124,7 @@ pub fn run(d: &mut Display) {
         spaces: 1,
         overview: None,
         space_hud: None,
+        carry: None,
     };
     let mut l = Looper::new(d);
     l.damage_all(d);

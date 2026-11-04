@@ -21,6 +21,7 @@ pub mod text;
 mod apps;
 mod cursor;
 mod desktop;
+pub mod dnd;
 mod lock;
 pub(crate) mod res;
 mod settings;

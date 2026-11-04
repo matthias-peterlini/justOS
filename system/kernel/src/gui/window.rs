@@ -38,6 +38,9 @@ pub struct Shared {
     /// The user closed it, or the program ended.
     closed: bool,
     ended: bool,
+    /// Files may be dropped on it; the last ones dropped.
+    drops: bool,
+    dropped: Vec<String>,
 }
 
 type Handle = Arc<Mutex<Shared>>;
@@ -74,6 +77,8 @@ pub fn create(pid: u32, title: &str, w: i32, h: i32, flags: u64) -> Result<u64, 
         area: (w, h),
         closed: false,
         ended: false,
+        drops: flags & sys::WIN_DROPS != 0,
+        dropped: Vec::new(),
     };
     let handle = {
         let mut n = NEXT.lock();
@@ -126,6 +131,18 @@ pub fn next_event(pid: u32, handle: u64, ms: u64) -> Result<Option<[u64; 4]>, sy
     }
     let ms = ms.min(3_600_000);
     Ok(EVENTS.wait_for_timeout(ms, take).flatten())
+}
+
+/// `WIN_DROPPED`: the files of the last drop, one per line.
+pub fn dropped(pid: u32, handle: u64) -> Result<String, sys::Error> {
+    let win = get(handle, pid).ok_or(sys::Error::BadHandle)?;
+    let s = win.lock();
+    let mut text = String::new();
+    for p in &s.dropped {
+        text.push_str(p);
+        text.push('\n');
+    }
+    Ok(text)
 }
 
 pub fn set_title(pid: u32, handle: u64, title: &str) -> Result<(), sys::Error> {
@@ -299,6 +316,33 @@ impl App for UserWindow {
     fn scroll(&mut self, lines: i32) -> bool {
         self.push([sys::WIN_EV_SCROLL, lines as i64 as u64, 0, 0]);
         false
+    }
+
+    /// Files dropped on a program that takes them: it may now read them
+    /// (folders are left out), and hears of them with `WIN_EV_DROP`.
+    fn drop_files(&mut self, paths: &[String], x: i32, y: i32, _area: Rect) -> Option<Action> {
+        let pid = {
+            let s = self.shared.lock();
+            if !s.drops {
+                return None;
+            }
+            s.pid
+        };
+        let files: Vec<String> = paths
+            .iter()
+            .filter_map(|p| crate::fs::abs(p).ok().filter(|q| crate::fs::exists(q) && !crate::fs::is_dir(q)).map(|q| (alloc::format!("{q}"), q)))
+            .map(|(text, path)| {
+                crate::user::grant(pid, path, false);
+                text
+            })
+            .collect();
+        if files.is_empty() {
+            return None;
+        }
+        let n = files.len() as u64;
+        self.shared.lock().dropped = files;
+        self.push([sys::WIN_EV_DROP, x as u64, y as u64, n]);
+        Some(Action::None)
     }
 
     fn animating(&self) -> bool {

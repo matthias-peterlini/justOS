@@ -65,6 +65,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("ports", "", "named message ports and who owns them"),
     ("perms", "[allow|deny|ask <app> <perm>]", "what apps may use outside their sandbox"),
     ("updates", "[check|install <app>|all|auto on|off]", "updates of the installed apps"),
+    ("dnd", "test", "check moving and copying files the way a drop does"),
     ("run", "<program> [args]", "start a program (also just: <program>)"),
     ("irq", "", "interrupt lines and message interrupts"),
     ("net", "", "network interfaces and addresses"),
@@ -472,7 +473,7 @@ impl Shell {
                         if fs::is_dir(&b) {
                             b = b.join(a.name());
                         }
-                        let r = if a.volume == b.volume { fs::rename(&a, &b) } else { fs::copy_file(&a, &b).and_then(|_| fs::remove(&a)) };
+                        let r = if a.volume == b.volume { fs::rename(&a, &b) } else { fs::copy_all(&a, &b).and_then(|_| fs::remove_all(&a)) };
                         if let Err(e) = r {
                             println!("{ERR}{e}{RESET}");
                         }
@@ -485,7 +486,9 @@ impl Shell {
                         if fs::is_dir(&b) {
                             b = b.join(a.name());
                         }
-                        if let Err(e) = fs::copy_file(&a, &b) {
+                        if b.within(&a) {
+                            println!("{ERR}cannot copy a folder into itself{RESET}");
+                        } else if let Err(e) = fs::copy_all(&a, &b) {
                             println!("{ERR}{e}{RESET}");
                         }
                     }
@@ -839,6 +842,12 @@ impl Shell {
                     _ => println!("usage: updates | updates check | updates install <app>|all | updates auto on|off | updates test"),
                 }
             }
+            "dnd" => match rest.first().copied() {
+                Some("test") => {
+                    crate::gui::dnd::self_test();
+                }
+                _ => println!("usage: dnd test"),
+            },
             "uptime" => {
                 let s = time::uptime_ms() / 1000;
                 println!("up {}h {:02}m {:02}s", s / 3600, s / 60 % 60, s % 60);

@@ -251,6 +251,17 @@ impl App for TextEdit {
         self.area.scroll_by(lines)
     }
 
+    /// A file dropped on an empty, untitled editor opens in it; on one with
+    /// a text already, it opens in a window of its own.
+    fn drop_files(&mut self, paths: &[String], _x: i32, _y: i32, _area: Rect) -> Option<Action> {
+        let first = paths.iter().find(|p| fs::abs(p).is_ok_and(|p| fs::exists(&p) && !fs::is_dir(&p)))?;
+        if self.picker.is_none() && self.path.is_none() && !self.area.dirty && self.area.text().is_empty() {
+            self.load(first);
+            return Some(Action::Redraw);
+        }
+        Some(Action::OpenFile(first.clone()))
+    }
+
     fn tick(&mut self) -> bool {
         self.picker.is_none() && self.area.tick()
     }

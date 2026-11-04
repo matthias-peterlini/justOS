@@ -849,7 +849,9 @@ fn translate(hwnd: u64, ev: Event) {
             post(hwnd, WM_SIZE, 0, point(w, h));
         }
         Event::Close => post(hwnd, WM_CLOSE, 0, 0),
-        Event::Leave => {}
+        // Windows programs ask for files with DragAcceptFiles, which is not
+        // there: their windows are made without WIN_DROPS.
+        Event::Leave | Event::Drop { .. } => {}
     }
 }
 

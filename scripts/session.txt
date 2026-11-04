@@ -35,6 +35,8 @@ perms forget org.arcos.esempio
 # app updates: signed index, damaged download, an open app, a new permission
 updates test
 @sleep 3
+# files carried between windows: moved, copied, never into themselves
+dnd test
 updates
 mem
 # drivers

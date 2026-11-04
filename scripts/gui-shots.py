@@ -12,8 +12,12 @@ A script is a list of steps, one per line:
     right <x> <y>               right click
     move <x> <y>
     drag <x0> <y0> <x1> <y1>
+    press <x> <y>               left button down (a drag that goes on...)
+    glide <x> <y>               move there in small steps (button held or not)
+    release <x> <y>             ...and up again, there
     type <text>                 letters, digits, space and simple punctuation
     key <name>                  a QEMU key name: ret, esc, spc, tab, ctrl-spc...
+    hold <name> / unhold <name> keep a key down (ctrl, shift, alt) and let go
 
 Usage: scripts/gui-shots.py <image> <script> <out folder> [qemu options...]
 Environment: QEMU (default qemu-system-x86_64), UEFI=1 for OVMF, CDROM=1 to
@@ -74,6 +78,9 @@ class Qmp:
         keys = name.split("-")
         self.cmd("send-key", keys=[{"type": "qcode", "data": k} for k in keys])
 
+    def key_state(self, name, down):
+        self.cmd("input-send-event", events=[{"type": "key", "data": {"down": down, "key": {"type": "qcode", "data": name}}}])
+
 
 CHARS = {" ": "spc", ".": "dot", ",": "comma", "-": "minus", "/": "slash", ":": "shift-semicolon", "!": "shift-1", "+": "kp_add", "*": "kp_multiply", "=": "equal"}
 
@@ -101,6 +108,7 @@ def main():
     proc = subprocess.Popen(args + extra)
     try:
         q = Qmp(sock)
+        at = (W // 2, H // 2)
         for line in open(script):
             line = line.strip()
             if not line or line.startswith("#"):
@@ -137,6 +145,24 @@ def main():
                     q.pointer(x0 + (x1 - x0) * i // 8, y0 + (y1 - y0) * i // 8)
                     time.sleep(0.1)
                 q.pointer(x1, y1, False)
+            elif op == "press":
+                x, y = int(a[0]), int(a[1])
+                q.pointer(x, y)
+                time.sleep(0.15)
+                q.pointer(x, y, True)
+                time.sleep(0.1)
+            elif op == "glide":
+                x1, y1 = int(a[0]), int(a[1])
+                x0, y0 = at
+                for i in range(1, 9):
+                    q.pointer(x0 + (x1 - x0) * i // 8, y0 + (y1 - y0) * i // 8)
+                    time.sleep(0.1)
+            elif op == "release":
+                q.pointer(int(a[0]), int(a[1]), False)
+                time.sleep(0.1)
+            elif op in ("hold", "unhold"):
+                q.key_state(a[0], op == "hold")
+                time.sleep(0.05)
             elif op == "type":
                 for ch in rest:
                     if ch.isupper():
@@ -150,6 +176,10 @@ def main():
                 q.key(a[0])
             else:
                 raise SystemExit(f"unknown step: {line}")
+            if op in ("click", "double", "right", "move", "press", "glide", "release"):
+                at = (int(a[0]), int(a[1]))
+            elif op == "drag":
+                at = (int(a[2]), int(a[3]))
     finally:
         proc.kill()
         proc.wait()

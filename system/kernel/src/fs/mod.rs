@@ -258,6 +258,21 @@ impl Path {
     pub fn name(&self) -> &str {
         self.inner.rsplit('/').next().unwrap_or("")
     }
+
+    /// The folder this path is in (the root for a volume root).
+    pub fn parent(&self) -> Path {
+        let inner = match self.inner.trim_end_matches('/').rfind('/') {
+            Some(0) | None => String::from("/"),
+            Some(i) => String::from(&self.inner[..i]),
+        };
+        Path { volume: self.volume.clone(), inner }
+    }
+
+    /// True when `self` is `other` or something inside it.
+    pub fn within(&self, other: &Path) -> bool {
+        self.volume == other.volume
+            && (self.inner == other.inner || other.inner == "/" || self.inner.strip_prefix(other.inner.as_str()).is_some_and(|r| r.starts_with('/')))
+    }
 }
 
 impl core::fmt::Display for Path {
@@ -407,6 +422,18 @@ pub fn rename(from: &Path, to: &Path) -> Result<()> {
 pub fn copy_file(from: &Path, to: &Path) -> Result<()> {
     let data = read_file(from)?;
     write_file(to, &data)
+}
+
+/// Copies a file or a folder with everything in it (across volumes too).
+pub fn copy_all(from: &Path, to: &Path) -> Result<()> {
+    if !is_dir(from) {
+        return copy_file(from, to);
+    }
+    make_dir(to)?;
+    for (e, _) in list_dir(from)? {
+        copy_all(&from.join(&e.name), &to.join(&e.name))?;
+    }
+    Ok(())
 }
 
 /// Runs the consistency check of a volume; returns the problems found.

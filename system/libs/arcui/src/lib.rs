@@ -52,7 +52,15 @@ pub enum Event {
     Resize { w: i32, h: i32 },
     /// The user closed the window: the program should end.
     Close,
+    /// `count` files were dropped at x, y ([`Window::dropped`] says which).
+    /// Only for windows made with [`DROPS`].
+    Drop { x: i32, y: i32, count: usize },
 }
+
+/// [`Window::with_flags`]: the user may resize the window.
+pub const RESIZABLE: u64 = sys::WIN_RESIZABLE;
+/// [`Window::with_flags`]: files may be dropped on the window ([`Event::Drop`]).
+pub const DROPS: u64 = sys::WIN_DROPS;
 
 pub struct Window {
     handle: u64,
@@ -87,6 +95,28 @@ impl Window {
     /// A window the user may make bigger or smaller ([`Event::Resize`]).
     pub fn resizable(title: &str, w: i32, h: i32) -> arcrt::Result<Window> {
         Self::create(title, w, h, sys::WIN_RESIZABLE)
+    }
+
+    /// A window with some of [`RESIZABLE`] and [`DROPS`] (or-ed together).
+    pub fn with_flags(title: &str, w: i32, h: i32, flags: u64) -> arcrt::Result<Window> {
+        Self::create(title, w, h, flags & (RESIZABLE | DROPS))
+    }
+
+    /// The files of the last [`Event::Drop`], as absolute paths. The program
+    /// may read them even from its sandbox.
+    pub fn dropped(&self) -> alloc::vec::Vec<alloc::string::String> {
+        let mut buf = alloc::vec![0u8; 4096];
+        loop {
+            let n = call(sys::WIN_DROPPED, self.handle, buf.as_mut_ptr() as u64, buf.len() as u64, 0, 0);
+            let Ok(n) = check(n) else { return alloc::vec::Vec::new() };
+            let n = n as usize;
+            if n > buf.len() {
+                buf.resize(n, 0);
+                continue;
+            }
+            let text = core::str::from_utf8(&buf[..n]).unwrap_or("");
+            return text.lines().filter(|l| !l.is_empty()).map(alloc::string::String::from).collect();
+        }
     }
 
     fn create(title: &str, w: i32, h: i32, flags: u64) -> arcrt::Result<Window> {
@@ -137,6 +167,7 @@ impl Window {
                 }
                 Event::Resize { w, h }
             }
+            sys::WIN_EV_DROP => Event::Drop { x: raw[1] as i32, y: raw[2] as i32, count: raw[3] as usize },
             _ => return None,
         };
         Some(ev)

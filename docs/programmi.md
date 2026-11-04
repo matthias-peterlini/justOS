@@ -169,6 +169,7 @@ File e cartelle aperti sono **handle** numerici, non descrittori Unix.
 | 37 | `APP_ID` | l'`app_id` del programma (vuoto per i programmi di sistema) |
 | 38 | `APP_ENTER` | entra nella sandbox di un'app (una volta sola, senza ritorno) |
 | 39 | `PICK_FILE` | il selettore di file del sistema (`PICK_OPEN` o `PICK_SAVE`) |
+| 40 | `WIN_DROPPED` | i file dell'ultimo rilascio sulla finestra, uno per riga |
 
 Due errori riguardano la sandbox: `Denied` (permesso negato) e `Cancelled`
 (l'utente ha chiuso il selettore).
@@ -284,11 +285,13 @@ fn main(_args: &str) -> i32 {
 | `arcui` | |
 |---|---|
 | `Window::new`, `Window::resizable` | apre una finestra con l'area del contenuto di quella misura |
+| `Window::with_flags(…, RESIZABLE \| DROPS)` | con le opzioni scelte; `DROPS`: accetta i file trascinati |
+| `win.dropped()` | i percorsi dell'ultimo `Event::Drop` |
 | `win.canvas` | dove si disegna (`arcgfx::Canvas`: `fill`, `fill_round`, `line`, `arc`, `triangle`, `draw_image`, `blit`…) |
 | `win.text`, `win.text_centered`, `win.fonts` | testo nei caratteri di sistema |
 | `win.present()` | mostra il fotogramma |
 | `win.wait()`, `win.event(ms)` | il prossimo evento, con o senza limite di tempo |
-| `Event` | `Press`, `Menu` (tasto destro), `Release`, `Move`, `Leave`, `Key`, `Scroll`, `Resize`, `Close` |
+| `Event` | `Press`, `Menu` (tasto destro), `Release`, `Move`, `Leave`, `Key`, `Scroll`, `Resize`, `Close`, `Drop` |
 | `ui` | i colori e alcuni controlli delle app di sistema (`button`, `segmented`, `overlay`) |
 | `Rng`, `now_ms` | numeri casuali e tempo, per i giochi |
 
@@ -296,6 +299,21 @@ Quando l'utente chiude la finestra arriva `Event::Close`: il programma
 dovrebbe finire; se dopo due secondi è ancora lì, il kernel lo ferma. Se il
 programma si ferma per un errore, la finestra si chiude e una notifica lo
 dice.
+
+Una finestra aperta con `DROPS` riceve i file trascinati da File: arriva
+`Event::Drop { x, y, count }` e `win.dropped()` dà i percorsi. Un'app nella
+sandbox può leggere quei file (non scriverli: per salvare usa
+`pick_save`). Le cartelle non arrivano. Disegno apre così le immagini:
+
+```rust
+let mut win = Window::with_flags("Disegno", 640, 480, arcui::DROPS)?;
+// ...
+Event::Drop { .. } => {
+    if let Some(p) = win.dropped().into_iter().find(|p| p.ends_with(".qoi")) {
+        apri(&p);
+    }
+}
+```
 
 Le app del Negozio (`system/store/`: 2048, Campo minato, Serpente, Sudoku,
 Tris, Disegno) sono programmi di questo tipo e un buon punto di partenza.
