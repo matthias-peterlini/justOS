@@ -1,5 +1,5 @@
 #!/bin/sh
-# Boots an JustOS image on a classic PC (PIIX4) and on a modern one (Q35),
+# Boots a JustOS image on a classic PC (PIIX4) and on a modern one (Q35),
 # presses the power button through QMP and checks that JustOS turns itself
 # off cleanly. Then boots a "laptop": Q35 with the battery, adapter, lid
 # and thermal zone of scripts/acpi/laptop.aml, checks that JustOS reads

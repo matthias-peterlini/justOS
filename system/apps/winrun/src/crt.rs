@@ -185,7 +185,7 @@ extern "win64" fn ret1() -> u64 {
 // ----------------------------------------------------------------------------
 // Paths
 
-/// A Windows path as an JustOS one: `\` becomes `/` and a drive (`C:\x`) is
+/// A Windows path as a JustOS one: `\` becomes `/` and a drive (`C:\x`) is
 /// the system volume.
 pub fn path(p: &str) -> String {
     let p = p.replace('\\', "/");

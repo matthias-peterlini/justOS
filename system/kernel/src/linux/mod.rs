@@ -185,7 +185,7 @@ pub fn linux_path(text: &str) -> Result<Path, i64> {
     Path::parse(text, &base).map_err(|e| errno(user::fs_error(e)))
 }
 
-/// Turns an JustOS path back into the Linux path a program sees ("/a/b").
+/// Turns a JustOS path back into the Linux path a program sees ("/a/b").
 pub fn show_path(path: &Path) -> String {
     path.inner.clone()
 }

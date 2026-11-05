@@ -26,15 +26,17 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 - **Un avvio pulito**: niente righe di testo, solo il logo e una barra di
   caricamento. Al primo avvio una configurazione guidata (nome, tastiera,
   sfondo), poi direttamente la scrivania.
-- **Lo stile arc**: una barra flottante in vetro chiaro (logo, ora e data,
-  stato), finestre con il titolo integrato e tre pulsanti tondi, un dock
-  flottante, il centro di controllo (rete, suono, non disturbare, sfondo,
-  volume, luminosità, account) e il centro notifiche con il calendario. A
-  schermo intero (F11) la barra si aggancia in alto e porta con sé il nome
-  dell'app e i suoi pulsanti. Il carattere è Google Sans Flex; icone,
-  suoni e musica sono creati per JustOS; tra gli sfondi ci sono foto delle
-  Dolomiti da Unsplash (autori in
-  `rootfs/system/gui/wallpapers/CREDITS.txt`).
+- **Lo stile JustOS**: nessuna barra in alto, solo l'ora e la data che
+  fluttuano sullo sfondo. Il dock in vetro chiaro ha a sinistra il marchio
+  J▮ (il menu di sistema) e a destra lo stato (rete, suono, l'anello della
+  batteria) che apre il centro di controllo: account, rete, suono, non
+  disturbare, cursori verticali di volume e luminosità, spegni, blocca e
+  riavvia. Le finestre sono di vetro rosato, con il nome in alto a sinistra
+  e tre pulsanti tondi su una pillola chiara; a schermo intero (F11)
+  l'ora passa nella loro riga del titolo. Il carattere è Google Sans Flex;
+  icone, suoni e musica sono creati per JustOS; lo sfondo è un paesaggio a
+  pixel, e tra gli altri ci sono foto delle Dolomiti da Unsplash (autori
+  in `rootfs/system/gui/wallpapers/CREDITS.txt`).
 - **Al sicuro e aggiornato**: una password blocca lo schermo (all'avvio,
   con logo+L o dopo qualche minuto di pausa), Stamp salva una schermata in
   Immagini. JustOS si aggiorna da solo come un telefono: la versione nuova
@@ -84,11 +86,11 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 
 <table>
 <tr>
-<td width="50%"><img src="docs/screenshots/centro-controllo.jpg" alt="Centro di controllo"><br><b>Centro di controllo</b>: riquadri, volume, luminosità e account.</td>
+<td width="50%"><img src="docs/screenshots/centro-controllo.jpg" alt="Centro di controllo"><br><b>Centro di controllo</b>: account, rete, suono, volume e luminosità, spegni.</td>
 <td width="50%"><img src="docs/screenshots/notifiche.jpg" alt="Centro notifiche"><br><b>Centro notifiche</b>: il calendario e le notifiche ricevute.</td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/schermo-intero.jpg" alt="Schermo intero"><br><b>Schermo intero</b>: la barra si aggancia con il nome dell'app.</td>
+<td><img src="docs/screenshots/schermo-intero.jpg" alt="ArcStudio a schermo intero"><br><b>Schermo intero</b>: ArcStudio prende tutto lo schermo, con l'ora nel titolo.</td>
 <td><img src="docs/screenshots/browser.jpg" alt="ticly browser"><br><b>ticly browser</b>: Wikipedia con il motore web di JustOS.</td>
 </tr>
 <tr>
@@ -105,11 +107,11 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 </tr>
 <tr>
 <td><img src="docs/screenshots/giochi.jpg" alt="2048 e Campo minato"><br><b>Giochi</b>: 2048 e Campo minato, programmi del Negozio.</td>
-<td><img src="docs/screenshots/foto.jpg" alt="Foto"><br><b>Foto</b>: un disegno fatto con l'app Disegno.</td>
+<td><img src="docs/screenshots/foto.jpg" alt="Foto"><br><b>Foto</b>: la libreria delle immagini.</td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/calendario.jpg" alt="Calendario e Promemoria"><br><b>Calendario e Promemoria</b>: eventi, feste, cose da fare.</td>
-<td><img src="docs/screenshots/impostazioni.jpg" alt="Impostazioni"><br><b>Impostazioni e centro di controllo</b>: schermo, volume, sfondo.</td>
+<td><img src="docs/screenshots/impostazioni.jpg" alt="Impostazioni"><br><b>Impostazioni</b>: nome, tastiera, sfondo, schermo, password.</td>
 </tr>
 </table>
 

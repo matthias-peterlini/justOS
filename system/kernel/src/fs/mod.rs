@@ -10,7 +10,7 @@
 //! ```
 //!
 //! Names are case-insensitive. Volumes mount by themselves when a disk with
-//! an JustFS partition shows up: the first one labelled "System" becomes
+//! a JustFS partition shows up: the first one labelled "System" becomes
 //! `sys:`, the others use their label.
 
 use crate::dev::block::{Disk, DiskBlocks};
@@ -95,7 +95,7 @@ fn name_for(label: &str, fallback: &str) -> String {
     name
 }
 
-/// Mounts the boot pack (an JustFS image the loader put in memory).
+/// Mounts the boot pack (a JustFS image the loader put in memory).
 pub fn mount_boot_pack(phys: u64, size: u64) {
     if size == 0 {
         crate::warn!("fs", "the boot loader passed no boot pack");

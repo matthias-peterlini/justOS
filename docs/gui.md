@@ -26,20 +26,30 @@ conserva nulla, quindi mostra la configurazione ogni volta.
 
 Presa a modello da macOS:
 
-- **Barra in alto**: il logo (menu con *Info su JustOS*, *Impostazioni di
-  sistema*, *Negozio*, *Monitor attività*, *Schermata*, *Blocca schermo*,
-  *Sospendi* quando il computer può, *Riavvia*, *Spegni*), il nome
-  dell'app in primo piano, ora e data al centro, il **centro di controllo**
-  (volume con un cursore, stato della rete) e il pulsante di spegnimento.
-  Sui portatili la barra mostra anche la carica della batteria (con il
-  fulmine quando è in carica) e il centro di controllo quanto manca.
-- **Widget**: saluto con l'orologio, calendario del mese, stato del sistema.
-- **Dock**: File, Applicazioni, Editor di testo, Note, Calendario, Foto,
-  Musica, Calcolatrice, Negozio, Impostazioni e, dopo un separatore, le app
-  aperte che non ci sono già e il Cestino. Le icone **si ingrandiscono** sotto
-  il puntatore, quella di un'app che parte **rimbalza**, un puntino segna le
+- **Niente barra in alto**: l'ora e la data fluttuano al centro, in
+  bianco o in nero secondo lo sfondo. Un clic apre il **centro notifiche**
+  con il calendario del mese e le notifiche ricevute.
+- **Dock**: a sinistra il marchio **J▮**, che apre il menu di sistema
+  (*Info su JustOS*, *Impostazioni di sistema*, *Negozio*, *Monitor
+  attività*, *Desktop e finestre*, *Schermata*, *Blocca schermo*,
+  *Sospendi* quando il computer può, *Riavvia*, *Spegni*). Poi File,
+  Applicazioni, Editor di testo, Note, Calendario, Foto, Musica,
+  Calcolatrice, Negozio, Impostazioni e, dopo un separatore, le app aperte
+  che non ci sono già e il Cestino. Le icone **si ingrandiscono** sotto il
+  puntatore, quella di un'app che parte **rimbalza**, un puntino segna le
   app aperte; un clic su un'app aperta la porta davanti (o la riapre se è
-  ridotta).
+  ridotta). Con molte app aperte le icone si rimpiccioliscono perché il
+  dock stia nello schermo.
+- **Stato e centro di controllo**: a destra nel dock la rete, il suono e,
+  sui portatili, un anello verde con la carica della batteria (rosso
+  quando è quasi scarica, con il fulmine quando è in carica). Un clic apre
+  il **centro di controllo**, mentre lo sfondo si scurisce verso il basso:
+  l'account ticly (o il nome) e l'ingranaggio delle impostazioni, i
+  riquadri *Rete* (blu quando è collegata), *Suono* e *Non disturbare*,
+  due cursori verticali per volume e luminosità, *Spegni*, *Blocca*,
+  *Riavvia* e, sui portatili, la carica in percentuale.
+- **Widget** (tasto destro → *Mostra i widget*): saluto, calendario del
+  mese, stato del sistema.
 - **Applicazioni** (come Launchpad, dal dock o con Ctrl+Spazio): tutte le app,
   comprese quelle installate dal Negozio, con una ricerca; si scrive e Invio
   apre la prima. La ricerca è anche quella di **Spotlight**: sopra le app
@@ -50,11 +60,15 @@ Presa a modello da macOS:
 - **Notifiche** in alto a destra: un'app installata, un timer scaduto, un
   file salvato, un programma che si è chiuso per un errore. Spariscono da sole
   o con un clic.
-- **Tasto destro** sulla scrivania: cambiare sfondo, impostazioni dello
-  schermo, informazioni.
-- **Finestre**: barra del titolo separata dal corpo, con i pulsanti riduci,
-  ingrandisci e chiudi; si spostano trascinando la barra (doppio clic per
-  ingrandire), molte si ridimensionano dall'angolo in basso a destra.
+- **Tasto destro** sulla scrivania: cambiare sfondo, mostrare o
+  nascondere i widget, impostazioni dello schermo, informazioni.
+- **Finestre**: vetro rosato con il nome dell'app in alto a sinistra e, su
+  una pillola chiara a destra, i pulsanti riduci, schermo intero e chiudi
+  (arancione); il contenuto sta su pannelli scuri. Si spostano trascinando
+  la riga del titolo (doppio clic per lo schermo intero), molte si
+  ridimensionano dall'angolo in basso a destra. A schermo intero (anche
+  **F11**) la finestra prende tutto lo schermo, l'ora passa nella sua riga
+  del titolo e il dock compare portando il puntatore in basso.
   **Alt+Tab** passa alla finestra successiva, **Ctrl+Q** chiude quella in
   primo piano.
 - **Snap**, come in Windows: una finestra trascinata sul bordo sinistro o
@@ -65,14 +79,14 @@ Presa a modello da macOS:
   **Ctrl+Alt+↓** ripristina. Trascinata via, la finestra torna alla sua
   misura di prima.
 - **Desktop virtuali e vista d'insieme**: **F3** (o **logo+Tab**, o
-  *Desktop e finestre* nel menu del logo) mostra in alto i desktop e sotto
+  *Desktop e finestre* nel menu J▮) mostra in alto i desktop e sotto
   le finestre di quello attuale affiancate; un clic su una finestra la porta
   davanti, trascinata su un desktop ci si sposta, trascinata sul **+** ne
   crea uno nuovo (fino a sei); la × su un desktop lo toglie e le sue
   finestre passano a quello prima. **Ctrl+Alt+PagSu/PagGiù** (o
   **logo+Ctrl+←/→**) passano al desktop accanto, **Ctrl+Alt+Maiusc+←/→**
   ci portano la finestra in primo piano (oltre l'ultimo ne crea uno). Con
-  più desktop, dei pallini dopo il logo dicono dove si è; il dock e Alt+Tab
+  più desktop, dei pallini sotto l'ora dicono dove si è; il dock e Alt+Tab
   portano al desktop della finestra scelta.
 - **Trascinare i file**: da File si trascinano uno o più file (Ctrl+clic e
   Maiusc+clic selezionano, Ctrl+A tutto) su una cartella, su una risorsa a
@@ -83,10 +97,10 @@ Presa a modello da macOS:
   un'app (Editor, Foto, Musica, ArcStudio, File) si aprono lì; sul
   Terminale ne scrivono il percorso; nell'Editor si aprono. Le app del
   Negozio che lo chiedono (Disegno) ricevono i file, solo in lettura.
-- **Schermata**: il tasto **Stamp** (o *Schermata* nel menu del logo) salva
+- **Schermata**: il tasto **Stamp** (o *Schermata* nel menu J▮) salva
   lo schermo in `sys:/home/Immagini` come `Schermata <data> alle <ora>.qoi`,
   che Foto apre subito.
-- **Blocco**: **logo+L** o *Blocca schermo* nel menu del logo coprono tutto
+- **Blocco**: **logo+L** o *Blocca schermo* nel menu J▮ coprono tutto
   con l'ora sullo sfondo sfocato. Con una password (*Impostazioni →
   Password*) JustOS si avvia bloccato, si blocca da solo dopo 2, 5 o 15
   minuti senza usarlo e prima di ogni sospensione, così al risveglio chiede
@@ -116,7 +130,7 @@ si vedono meno fotogrammi ma l'animazione dura uguale.
 | ingrandisci / ripristina | la finestra si allarga fino allo schermo e torna |
 | Applicazioni | lo sfondo si sfoca e scurisce, le icone arrivano con uno zoom |
 | dock | ingrandimento morbido delle icone, rimbalzo all'avvio di un'app |
-| menu e centro di controllo | si aprono dall'alto in un attimo |
+| menu e centro di controllo | si aprono in un attimo, dal dock verso l'alto; con il centro di controllo lo sfondo si scurisce |
 | notifiche | scivolano dentro da destra e poi via |
 | vista d'insieme | le finestre scivolano dal loro posto alla griglia, i desktop scendono dall'alto |
 | cambio di desktop | il nome del desktop e i suoi pallini al centro, per un attimo |

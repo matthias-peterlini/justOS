@@ -7,23 +7,29 @@ use super::text::{self, Font};
 use super::Display;
 use crate::dev::input::{self, KeyEvent};
 
-// The JustOS palette: frosted glass in neutral greys over the wallpaper, light
-// panes for the bar and the frames, darker panes for content, white text on
-// the dark ones and ink on the light ones, light grey and white pills.
+// The JustOS palette: frosted glass over the wallpaper, light panes for the
+// dock and the widgets, warm pink ones for the window frames, darker panes
+// for content, white text on the dark ones and ink on the light ones, light
+// grey and white pills, and the orange of the JustOS cursor.
 pub const TEXT: u32 = 0xFFFF_FFFF;
 pub const TEXT_DIM: u32 = 0xFFC9_C6CE;
 pub const TEXT_FAINT: u32 = 0xFF94_919A;
-/// Text on light glass (the bar, window frames, light buttons).
+/// Text on light glass (the dock, window frames, light buttons).
 pub const INK: u32 = 0xFF1B_1A1F;
 pub const INK_DIM: u32 = 0xFF4A_4850;
 /// The tint of the dark glass panes (window content, menus).
 pub const GLASS: u32 = 0xC23A_383F;
 pub const GLASS_STRONG: u32 = 0xE02C_2B31;
-/// The tint of the light glass (bar, window frames, widgets).
+/// The tint of the light glass (dock, widgets).
 pub const GLASS_LIGHT: u32 = 0x66DA_D6E2;
-pub const GLASS_LIGHT_STRONG: u32 = 0x99E2_DEE8;
+/// The warm pink frosted glass of the window frames (the window in front,
+/// the others).
+pub const FRAME_STRONG: u32 = 0xB3F2_D6CE;
+pub const FRAME: u32 = 0x8CE8_D2CC;
 /// The round dark window buttons.
 pub const KNOB: u32 = 0xFF3B_3A3F;
+/// The close button, and the cursor of the JustOS mark (#ff5a1f).
+pub const CLOSE: u32 = 0xFFFF_5A1F;
 pub const BORDER: u32 = 0x29FF_FFFF;
 /// The glow in the corner of a card.
 pub const GLOW: u32 = 0xFF8A_3416;
@@ -58,8 +64,8 @@ pub fn card(c: &mut Canvas, blur: &Canvas, r: Rect, rad: i32, tint: u32) {
     c.stroke_round(r, rad, 1, BORDER);
 }
 
-/// Light frosted glass (the bar, window frames, widgets): the blurred
-/// wallpaper lightened, with a bright edge.
+/// Light frosted glass (the dock, widgets): the blurred wallpaper
+/// lightened, with a bright edge.
 pub fn light_glass(c: &mut Canvas, blur: &Canvas, r: Rect, rad: i32, shadow: bool) {
     if shadow {
         c.shadow(r, rad, 16, 55);
@@ -71,6 +77,12 @@ pub fn light_glass(c: &mut Canvas, blur: &Canvas, r: Rect, rad: i32, shadow: boo
 /// Does text on the blurred wallpaper inside `r` read better dark? (The
 /// glass is light over a bright sky and dark over the woods.)
 pub fn wants_ink(blur: &Canvas, r: Rect) -> bool {
+    // The light tint adds about a quarter of white.
+    luminance(blur, r) * 3 / 4 + 0x40 > 128
+}
+
+/// The mean brightness (0..=255) of `blur` inside `r`, from a few samples.
+pub fn luminance(blur: &Canvas, r: Rect) -> u32 {
     let mut sum = 0u64;
     let mut n = 0u64;
     let step_x = (r.w / 12).max(1);
@@ -87,8 +99,11 @@ pub fn wants_ink(blur: &Canvas, r: Rect) -> bool {
         }
         y += step_y;
     }
-    // The light tint adds about a quarter of white.
-    n == 0 || (sum / n) * 3 / 4 + 0x40 > 128
+    if n == 0 {
+        255
+    } else {
+        (sum / n) as u32
+    }
 }
 
 /// A glyph icon (white in the atlas) drawn in another colour.
@@ -96,19 +111,8 @@ pub fn glyph(c: &mut Canvas, name: &str, size: i32, x: i32, y: i32, color: u32) 
     super::res::draw_icon_tinted(c, name, size, x, y, color);
 }
 
-/// Simple status glyphs drawn with lines: the arc hexagon, the moon of "do
-/// not disturb" and the sun of brightness, `s` pixels square.
-pub fn draw_hexagon(c: &mut Canvas, x: i32, y: i32, s: i32, color: u32) {
-    let (cx, cy, r) = (x + s / 2, y + s / 2, s * 9 / 20);
-    // Pointy top; 0.866 ~ 13/15.
-    let dx = r * 13 / 15;
-    let pts = [(cx, cy - r), (cx + dx, cy - r / 2), (cx + dx, cy + r / 2), (cx, cy + r), (cx - dx, cy + r / 2), (cx - dx, cy - r / 2)];
-    for i in 0..6 {
-        let (a, b) = (pts[i], pts[(i + 1) % 6]);
-        c.line(a.0, a.1, b.0, b.1, 2, color);
-    }
-}
-
+/// Status glyphs drawn with lines: the moon of "do not disturb" and the
+/// sun of brightness, `s` pixels square.
 pub fn draw_moon(c: &mut Canvas, x: i32, y: i32, s: i32, color: u32, bg: u32) {
     let (cx, cy, r) = (x + s / 2, y + s / 2, s * 2 / 5);
     c.fill_circle(cx, cy, r, color);
@@ -127,38 +131,15 @@ pub fn draw_sun(c: &mut Canvas, x: i32, y: i32, s: i32, color: u32) {
     }
 }
 
-/// A battery lying down, `w` wide (and w/2 high), filled to `pct`: red when
-/// low and not charging, with a lightning bolt while on mains power.
-pub fn draw_battery(c: &mut Canvas, x: i32, y: i32, w: i32, pct: u8, charging: bool, color: u32) {
-    let h = w / 2;
-    let body = Rect::new(x, y, w - 3, h);
-    c.stroke_round(body, 4, 2, (color & 0xFF_FFFF) | 0x9900_0000);
-    c.fill_round(Rect::new(x + w - 3, y + h / 2 - 3, 3, 6), 1, (color & 0xFF_FFFF) | 0x9900_0000);
-    let inner = body.w - 6;
-    let fill = (inner * pct.min(100) as i32 / 100).max(2);
-    let level = if pct <= 10 && !charging { 0xFFFF_5A52 } else { color };
-    c.fill_round(Rect::new(x + 3, y + 3, fill, h - 6), 2, level);
-    if charging {
-        // A bolt across the middle, with a ring of the bar's colour taken
-        // out around it so it reads over the fill.
-        let (cx, cy) = (x + body.w / 2, y + h / 2);
-        let bolt = [(cx + 2, cy - h / 2 + 1), (cx - 3, cy + 1), (cx + 2, cy - 1), (cx - 2, cy + h / 2 - 1)];
-        for i in 0..3 {
-            c.line(bolt[i].0, bolt[i].1, bolt[i + 1].0, bolt[i + 1].1, 3, 0xFF00_0000 | (!color & 0xFF_FFFF));
-        }
-        for i in 0..3 {
-            c.line(bolt[i].0, bolt[i].1, bolt[i + 1].0, bolt[i + 1].1, 1, 0xFFFF_D84D);
-        }
-    }
-}
-
-/// Three round dark buttons on a light pill: minimise, maximise, close
-/// (`hover`: the one under the pointer). `r` is the pill.
+/// Three round buttons on a light pill: minimise and full screen in dark
+/// grey, close in orange (`hover`: the one under the pointer). `r` is the
+/// pill.
 pub fn window_knobs(c: &mut Canvas, r: Rect, buttons: &[Rect; 3], hover: Option<usize>) {
-    c.fill_round(r, r.h / 2, 0x33FF_FFFF);
+    c.fill_round(r, r.h / 2, 0x73FF_FFFF);
     for (i, (b, glyph_name)) in buttons.iter().zip(["g-down", "g-max", "g-close"]).enumerate() {
         let bg = match (i, hover == Some(i)) {
-            (2, true) => RED,
+            (2, true) => 0xFFFF_7840,
+            (2, false) => CLOSE,
             (_, true) => 0xFF5A_5860,
             _ => KNOB,
         };

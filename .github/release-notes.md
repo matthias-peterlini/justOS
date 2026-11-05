@@ -4,7 +4,8 @@ JustOS: un sistema operativo per PC x86-64 scritto da zero, con il linguaggio Ar
 
 ## Novità
 
-- **Il nuovo stile arc**: barra in alto flottante in vetro chiaro (logo, ora e data al centro, stato a destra), finestre con il titolo integrato e i tre pulsanti tondi, dock flottante, centro di controllo con riquadri, cursori di volume e luminosità e scheda dell'account, centro notifiche con il calendario; a schermo intero la barra si aggancia e mostra il nome dell'app e i pulsanti della finestra. Il carattere è Google Sans Flex.
+- **arcOS diventa JustOS**: nuovo nome, nuovo marchio J▮ e licenza GPL-3.0-or-later. ArcScript, ArcStudio e i pacchetti `.arc` restano.
+- **Il nuovo stile JustOS**: niente barra in alto, l'ora e la data fluttuano sullo sfondo; il dock in vetro chiaro ha il marchio J▮ (menu di sistema) a sinistra e lo stato (rete, suono, anello della batteria) a destra, che apre il nuovo centro di controllo con account, riquadri, cursori verticali di volume e luminosità, Spegni, Blocca e Riavvia. Finestre di vetro rosato con tre pulsanti tondi su una pillola chiara; a schermo intero l'ora passa nella riga del titolo. Nuovo sfondo a pixel. Il carattere è Google Sans Flex.
 - **Doppio clic per installare**: pacchetti Debian `.deb`, archivi `.tar.gz`, `.tgz`, `.tar`, `.zip` e `.gz` con un programma Linux statico o Windows x64 si installano da soli; i pacchetti macOS `.pkg` vengono scompattati (i programmi macOS non possono girare su JustOS). Ogni altro programma (ELF o `.exe`) parte con un doppio clic.
 
 ## Novità della 0.6

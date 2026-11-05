@@ -29,6 +29,8 @@ pub struct Settings {
     /// Pixels per unit: 0 chooses by the screen, 1 or 2 as the user wants
     /// (the size of the interface).
     pub scale: u32,
+    /// The widgets (greeting, month, system) on the desktop.
+    pub widgets: bool,
 }
 
 impl Default for Settings {
@@ -44,6 +46,7 @@ impl Default for Settings {
             password: String::new(),
             lock_after: 5,
             scale: 0,
+            widgets: false,
         }
     }
 }
@@ -69,6 +72,7 @@ fn load() -> Settings {
             "password" => s.password = String::from(v),
             "lock-after" => s.lock_after = v.parse().unwrap_or(5),
             "scale" => s.scale = v.parse::<u32>().unwrap_or(0).min(2),
+            "widgets" => s.widgets = v == "on",
             _ => {}
         }
     }
@@ -113,6 +117,9 @@ pub fn update(f: impl FnOnce(&mut Settings)) {
     }
     if s.scale != 0 {
         text.push_str(&format!("scale={}\n", s.scale));
+    }
+    if s.widgets {
+        text.push_str("widgets=on\n");
     }
     if let Ok(p) = fs::abs(FILE) {
         if let Err(e) = fs::write_file(&p, text.as_bytes()) {

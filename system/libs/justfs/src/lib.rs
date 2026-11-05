@@ -400,7 +400,7 @@ impl<D: BlockDevice> Fs<D> {
         Ok(Fs { dev, sb, bitmap, alloc_hint, clock })
     }
 
-    /// Does the block hold an JustFS superblock?
+    /// Does the block hold a JustFS superblock?
     pub fn probe(block0: &Block) -> bool {
         Superblock::decode(block0).is_ok()
     }

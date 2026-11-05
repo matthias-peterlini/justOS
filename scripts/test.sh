@@ -1,5 +1,5 @@
 #!/bin/sh
-# Boots an JustOS image headless and types a list of commands on the serial
+# Boots a JustOS image headless and types a list of commands on the serial
 # console. Usage: scripts/test.sh <image> [commands-file] [qemu options...]
 #
 # Lines starting with @sleep N pause; @raw TEXT sends TEXT as a printf

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Boots an JustOS image once for every kind of hardware QEMU can emulate
+# Boots a JustOS image once for every kind of hardware QEMU can emulate
 # and checks that the matching driver installs and works: disks (a file is
 # written and the file system checked), network cards (DHCP and ping) and
 # USB controllers (a keyboard and a USB stick behind each one) and SD card

@@ -283,7 +283,7 @@ unsafe extern "C" fn user_start(arg: *mut c_void) {
     unsafe { enter_user(entry, rsp, rdi, rsi) }
 }
 
-/// Loads an JustOS program; returns its entry, stack and the two arguments
+/// Loads a JustOS program; returns its entry, stack and the two arguments
 /// of its entry function (the argument text and its length).
 fn native_image(start: &Start) -> (u64, u64, u64, u64) {
     let loaded = crate::driver::elf::load_with(&start.image, |pages| map_user(sys::USER_BASE, pages).map(|_| sys::USER_BASE), |_| {});

@@ -1,11 +1,12 @@
-//! Windows, as in the JustOS design: a frame of light frosted glass with the
-//! app's name at the top left and three round dark buttons (minimise,
-//! maximise, close) on a pill at the top right; the content sits on a darker
-//! pane inside the frame. Their content is an [`App`].
+//! Windows, as in the JustOS design: a frame of warm pink frosted glass
+//! with the app's name at the top left and three round buttons (minimise
+//! and full screen in dark grey, close in orange) on a light pill at the top
+//! right; the content sits on a darker pane inside the frame. Their content
+//! is an [`App`].
 //!
 //! An app with a sidebar gets two panes side by side, with a gap of frame
-//! between them. A maximised window fills the screen under the bar, which
-//! then carries the app's name and the window's buttons.
+//! between them. A maximised window fills the whole screen, frame and all,
+//! with square corners.
 
 use super::gfx::{Canvas, Rect};
 use super::text::{self, Font};
@@ -145,9 +146,6 @@ pub struct Window {
     pub space: usize,
     /// The title button under the pointer.
     pub hover: Option<usize>,
-    /// Maximised: the part of the desktop's bar where its buttons go (they
-    /// end at its right edge).
-    pub bar: Rect,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -164,7 +162,7 @@ impl Window {
     pub fn new(id: u32, app: Box<dyn App>, x: i32, y: i32) -> Window {
         let (w, h) = app.size();
         let rect = Rect::new(x, y, w + 2 * GAP, h + TITLE_H + GAP);
-        Window { id, app, rect, minimized: false, restore: None, snapped: None, space: 0, hover: None, bar: Rect::EMPTY }
+        Window { id, app, rect, minimized: false, restore: None, snapped: None, space: 0, hover: None }
     }
 
     /// On the screen when desktop `space` is shown.
@@ -177,23 +175,17 @@ impl Window {
         (w + 2 * GAP, h + TITLE_H + GAP)
     }
 
-    /// Filling the screen under the bar, without a frame.
+    /// Maximised: filling the whole screen.
     pub fn full(&self) -> bool {
         self.restore.is_some()
     }
 
-    /// The title row; when maximised, the desktop's bar.
+    /// The title row.
     pub fn title_rect(&self) -> Rect {
-        if self.full() {
-            return self.bar;
-        }
         Rect::new(self.rect.x, self.rect.y, self.rect.w, TITLE_H)
     }
 
     pub fn body(&self) -> Rect {
-        if self.full() {
-            return self.rect;
-        }
         Rect::new(self.rect.x + GAP, self.rect.y + TITLE_H, self.rect.w - 2 * GAP, self.rect.h - TITLE_H - GAP)
     }
 
@@ -246,12 +238,17 @@ impl Window {
     pub fn draw(&mut self, c: &mut Canvas, blur: &Canvas, focused: bool, clip: Rect) {
         let body = self.body();
         let full = self.full();
-        if !full && clip.overlaps(&ui::with_shadow(self.rect)) {
-            // The frame, with the title row.
+        if clip.overlaps(&ui::with_shadow(self.rect)) {
+            // The frame, with the title row (square on a full screen).
             let frame = self.rect;
-            c.shadow(frame, 24, 22, if focused { 95 } else { 60 });
-            c.blit_round(blur, frame, 24, if focused { ui::GLASS_LIGHT_STRONG } else { ui::GLASS_LIGHT });
-            c.stroke_round(frame, 24, 1, 0x59FF_FFFF);
+            let rad = if full { 0 } else { 26 };
+            if !full {
+                c.shadow(frame, rad, 22, if focused { 95 } else { 60 });
+            }
+            c.blit_round(blur, frame, rad, if focused { ui::FRAME_STRONG } else { ui::FRAME });
+            if !full {
+                c.stroke_round(frame, rad, 1, 0x66FF_FFFF);
+            }
             let t = self.title_rect();
             let ink = ui::wants_ink(blur, t);
             let (fg, dim) = if ink { (ui::INK, ui::INK_DIM) } else { (TEXT, ui::TEXT_DIM) };
@@ -263,23 +260,20 @@ impl Window {
         }
         if clip.overlaps(&ui::with_shadow(body)) {
             let tint = if focused { ui::GLASS } else { 0xA83A_383F };
-            let rad = if full { 0 } else { 18 };
+            let rad = 18;
             let side = self.app.sidebar();
             if side > 0 {
                 let sb = Rect::new(body.x, body.y, side, body.h);
                 let main = Rect::new(body.x + side + GAP, body.y, body.w - side - GAP, body.h);
-                if full {
-                    c.blit_round(blur, body, 0, ui::GLASS_LIGHT_STRONG);
-                }
-                c.blit_round(blur, sb, rad.max(14), tint);
-                c.blit_round(blur, main, rad.max(14), tint);
+                c.blit_round(blur, sb, rad, tint);
+                c.blit_round(blur, main, rad, tint);
             } else {
                 c.blit_round(blur, body, rad, tint);
             }
             let saved = c.clip();
             c.set_clip(saved.intersect(&body));
             self.app.draw(c, body, blur, focused);
-            if self.app.resizable() && !self.full() {
+            if self.app.resizable() && !full {
                 // Three short diagonal strokes in the corner.
                 let (gx, gy) = (body.right() - 8, body.bottom() - 8);
                 for k in [4, 8, 12] {
@@ -304,14 +298,13 @@ impl Window {
         (layer, b)
     }
 
-    /// Maximises into `screen` (the buttons go into `bar`), or goes back.
-    pub fn toggle_maximize(&mut self, screen: Rect, bar: Rect) {
+    /// Maximises into `screen`, or goes back.
+    pub fn toggle_maximize(&mut self, screen: Rect) {
         match self.restore.take() {
             Some(r) => self.rect = r,
             None => {
                 self.restore = Some(self.rect);
                 self.rect = screen;
-                self.bar = bar;
             }
         }
     }

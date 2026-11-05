@@ -76,7 +76,7 @@ pub struct PackageInfo {
     /// More about it, for its page in the store.
     pub details: String,
     pub platform: Platform,
-    /// An JustOS program (else Linux or Windows).
+    /// A JustOS program (else Linux or Windows).
     pub native: bool,
     /// Has a window (else it runs in the terminal).
     pub gui: bool,

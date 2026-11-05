@@ -36,11 +36,6 @@ fn cell(c: &Canvas, h: i32) -> i32 {
     (h * c.scale() / ROWS).max(1)
 }
 
-/// Width of the mark ("J" and the cursor) drawn `h` units tall, in units.
-pub fn mark_width(c: &Canvas, h: i32) -> i32 {
-    cell(c, h) * MARK_COLS / c.scale()
-}
-
 /// Draws a grid of `cols` x 7 pixels centred on (`cx`, `cy`), each `h / 7`
 /// units square; `at(col, row)` gives a pixel's colour, if any.
 fn draw_grid(c: &mut Canvas, cx: i32, cy: i32, h: i32, cols: i32, at: impl Fn(i32, i32) -> Option<u32>) {

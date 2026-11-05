@@ -327,7 +327,7 @@ fn load_kernel(vol: &Volume) -> (u64, u64, u64) {
     let word = |i: usize| u64::from_le_bytes(header[i * 8..i * 8 + 8].try_into().unwrap());
     let (entry, memsz, filesz) = (word(1), word(2), word(3));
     if &header[..8] != KERNEL_FILE_MAGIC || filesz > memsz || filesz + 32 > file_size(file) {
-        fail("KERNEL.BIN is not an JustOS kernel", 0);
+        fail("KERNEL.BIN is not a JustOS kernel", 0);
     }
     // SAFETY: back to the image after the size check.
     unsafe { ((*file).set_position)(file, 32) };

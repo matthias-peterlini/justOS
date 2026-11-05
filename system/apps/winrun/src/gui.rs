@@ -1,7 +1,7 @@
 //! Windows with a message loop: a part of `user32` and `gdi32` on top of the
 //! JustOS windows of [`justui`].
 //!
-//! Each Win32 window is an JustOS window whose canvas keeps what the program
+//! Each Win32 window is a JustOS window whose canvas keeps what the program
 //! drew, as a Windows window does. Mouse, keyboard, resizing and closing come
 //! back from JustOS as events and become `WM_*` messages; `GetMessage` merges
 //! them with posted messages, timers and `WM_PAINT`. A device context draws

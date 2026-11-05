@@ -53,7 +53,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("cp", "<from> <to>", "copy a file"),
     ("vol", "", "list mounted volumes"),
     ("disks", "", "list disks and partitions"),
-    ("format", "<disk> <label>", "create an JustFS volume on a disk"),
+    ("format", "<disk> <label>", "create a JustFS volume on a disk"),
     ("check", "<volume>", "check a volume for errors"),
     ("unmount", "<volume>", "detach a volume (before removing its disk)"),
     ("dev", "[id | scan]", "list devices and their drivers"),
