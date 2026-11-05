@@ -62,7 +62,7 @@ impl Monitor {
                 continue;
             }
             busy += used;
-            let e = groups.entry(t.pid).or_insert_with(|| (if t.pid == 0 { String::from("arcOS (sistema)") } else { t.name.clone() }, 0, 0));
+            let e = groups.entry(t.pid).or_insert_with(|| (if t.pid == 0 { String::from("JustOS (sistema)") } else { t.name.clone() }, 0, 0));
             e.1 += used;
             e.2 += 1;
         }

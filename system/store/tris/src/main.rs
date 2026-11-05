@@ -7,9 +7,9 @@
 extern crate alloc;
 
 use alloc::format;
-use arcui::{ui, Event, Font, Key, Rect, Rng, Window};
+use justui::{ui, Event, Font, Key, Rect, Rng, Window};
 
-arcrt::main!(main);
+justrt::main!(main);
 
 const W: i32 = 420;
 const H: i32 = 560;
@@ -98,12 +98,12 @@ impl Game {
         self.over = None;
         self.games += 1;
         self.turn_player = self.games % 2 == 0;
-        self.think_until = arcui::now_ms() + 400;
+        self.think_until = justui::now_ms() + 400;
     }
 
     fn play(&mut self, i: usize, c: Cell) {
         self.board[i] = c;
-        self.placed[i] = arcui::now_ms();
+        self.placed[i] = justui::now_ms();
         if let Some((w, line)) = winner(&self.board) {
             self.over = Some((w, Some(line)));
             if w == Cell::X {
@@ -116,7 +116,7 @@ impl Game {
             self.wins.1 += 1;
         }
         self.turn_player = c == Cell::O;
-        self.think_until = arcui::now_ms() + 350;
+        self.think_until = justui::now_ms() + 350;
     }
 
     fn computer(&mut self) {
@@ -146,11 +146,11 @@ impl Game {
     fn draw(&self, win: &mut Window) {
         win.clear();
         win.text_centered(Font::Title, W / 2, 16, "Tris", ui::TEXT);
-        let score = format!("Tu {}  ·  Pari {}  ·  arcOS {}", self.wins.0, self.wins.1, self.wins.2);
+        let score = format!("Tu {}  ·  Pari {}  ·  JustOS {}", self.wins.0, self.wins.1, self.wins.2);
         win.text_centered(Font::Body, W / 2, 62, &score, ui::TEXT_DIM);
         let f = win.fonts;
         ui::segmented(&mut win.canvas, f, level_rect(), &["Facile", "Difficile"], self.hard as usize);
-        let now = arcui::now_ms();
+        let now = justui::now_ms();
         for k in 1..3 {
             let x = GRID_X + k * CELL;
             win.canvas.fill_round(Rect::new(x - 2, GRID_Y + 8, 4, 3 * CELL - 16), 2, 0x55FF_FFFF);
@@ -186,14 +186,14 @@ impl Game {
                 }
                 let msg = match w {
                     Cell::X => "Hai vinto!",
-                    Cell::O => "Vince arcOS",
+                    Cell::O => "Vince JustOS",
                     Cell::Empty => "Pareggio",
                 };
                 win.text_centered(Font::Heading, W / 2, GRID_Y + 3 * CELL - 4, msg, ui::TEXT);
                 ui::button(&mut win.canvas, f, again_rect(), "Ancora", true, false);
             }
             None => {
-                let msg = if self.turn_player { "Tocca a te (X)" } else { "arcOS ci pensa…" };
+                let msg = if self.turn_player { "Tocca a te (X)" } else { "JustOS ci pensa…" };
                 win.text_centered(Font::Body, W / 2, GRID_Y + 3 * CELL + 14, msg, ui::TEXT_FAINT);
             }
         }
@@ -206,7 +206,7 @@ fn main(_args: &str) -> i32 {
     loop {
         g.draw(&mut win);
         win.present();
-        let now = arcui::now_ms();
+        let now = justui::now_ms();
         let growing = (0..9).any(|i| g.board[i] != Cell::Empty && now - g.placed[i] < 200);
         let thinking = !g.turn_player && g.over.is_none();
         let ev = if thinking {

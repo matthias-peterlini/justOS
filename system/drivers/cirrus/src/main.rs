@@ -14,12 +14,12 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use arcdrv::port::{inb, outb};
-use arcdrv::{DeviceInfo, DisplayDesc, DisplayMode, Framebuffer, Pci, Status, E_INVAL, E_IO, E_NODEV, OK, RES_MEMORY};
+use justdrv::port::{inb, outb};
+use justdrv::{DeviceInfo, DisplayDesc, DisplayMode, Framebuffer, Pci, Status, E_INVAL, E_IO, E_NODEV, OK, RES_MEMORY};
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "cirrus",
     version: "1.1.0",
     probe: probe,
@@ -251,25 +251,25 @@ fn probe(dev: &DeviceInfo) -> Status {
     seq(0x06, 0x12);
     let id = crt_read(0x27);
     if id & 0xFC != 0xB8 {
-        arcdrv::info!("not a GD5446 (id {id:#x})");
+        justdrv::info!("not a GD5446 (id {id:#x})");
         return E_NODEV;
     }
     // SR0F bit 7: 4 MiB of video memory, else 2 MiB.
     let vram: u64 = if seq_read(0x0F) & 0x80 != 0 { 4 << 20 } else { 2 << 20 };
     let c = Cirrus { fb_phys: bar0.base, vram: vram.min(bar0.size), mode: (AtomicU32::new(0), AtomicU32::new(0)) };
-    arcdrv::info!("Cirrus GD5446: {} MiB of video memory", c.vram >> 20);
+    justdrv::info!("Cirrus GD5446: {} MiB of video memory", c.vram >> 20);
     let c: &'static Cirrus = Box::leak(Box::new(c));
     let desc: &'static DisplayDesc = Box::leak(Box::new(DisplayDesc {
         ctx: c as *const Cirrus as *mut c_void,
         modes,
         set_mode,
         flush: None,
-        name: arcdrv::model_name("Cirrus Logic GD5446"),
+        name: justdrv::model_name("Cirrus Logic GD5446"),
     }));
-    let n = arcdrv::display_register(dev.id, desc);
+    let n = justdrv::display_register(dev.id, desc);
     if n < 0 {
         return n;
     }
-    arcdrv::power_hooks(dev.id, c as *const Cirrus as *mut c_void, None, resume);
+    justdrv::power_hooks(dev.id, c as *const Cirrus as *mut c_void, None, resume);
     OK
 }

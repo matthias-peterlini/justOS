@@ -4,7 +4,7 @@
 //! ```text
 //! ipc serve <name>          answer calls on a named port (in capitals)
 //! ipc call <name> <text>    send a request and print the answer
-//! ipc notify <title> <text> show a notification through arc.notify
+//! ipc notify <title> <text> show a notification through just.notify
 //! ipc test                  start a service, talk to it, check everything
 //! ```
 
@@ -15,14 +15,14 @@ extern crate alloc;
 
 use alloc::format;
 use alloc::string::String;
-use arcrt::console::color::*;
-use arcrt::ipc::{self, Port};
-use arcrt::{eprintln, println, Error};
+use justrt::console::color::*;
+use justrt::ipc::{self, Port};
+use justrt::{eprintln, println, Error};
 
-arcrt::main!(main);
+justrt::main!(main);
 
 fn main(args: &str) -> i32 {
-    let words = arcrt::split_args(args);
+    let words = justrt::split_args(args);
     let w = |i: usize| words.get(i).map(String::as_str).unwrap_or("");
     let rest = |from: usize| words.get(from..).map(|r| r.join(" ")).unwrap_or_default();
     let r = match w(0) {
@@ -46,7 +46,7 @@ fn main(args: &str) -> i32 {
 
 /// Answers calls in capitals, saying who asked; counts plain messages.
 /// `stop` ends it.
-fn serve(name: &str) -> arcrt::Result<()> {
+fn serve(name: &str) -> justrt::Result<()> {
     let port = Port::create(name)?;
     let mut count = 0;
     loop {
@@ -81,15 +81,15 @@ fn json_string(s: &str) -> String {
     out
 }
 
-fn notify(title: &str, text: &str) -> arcrt::Result<String> {
+fn notify(title: &str, text: &str) -> justrt::Result<String> {
     let msg = format!("{{\"title\":{},\"text\":{}}}", json_string(title), json_string(text));
-    let answer = Port::lookup("arc.notify")?.call(msg.as_bytes())?;
+    let answer = Port::lookup("just.notify")?.call(msg.as_bytes())?;
     Ok(String::from_utf8_lossy(&answer).into_owned())
 }
 
 /// Starts `ipc serve` in another process and checks what ports promise.
 fn test() -> i32 {
-    const NAME: &str = "arc.test.echo";
+    const NAME: &str = "just.test.echo";
     let mut failed = 0;
     let mut check = |what: &str, ok: bool, detail: String| {
         if ok {
@@ -99,7 +99,7 @@ fn test() -> i32 {
             failed += 1;
         }
     };
-    let pid = match arcrt::process::spawn("ipc", &format!("serve {NAME}")) {
+    let pid = match justrt::process::spawn("ipc", &format!("serve {NAME}")) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("ipc: cannot start the service: {}", e.as_str());
@@ -113,7 +113,7 @@ fn test() -> i32 {
         if port.is_ok() {
             break;
         }
-        arcrt::time::sleep_ms(20);
+        justrt::time::sleep_ms(20);
     }
     let port = match port {
         Ok(p) => p,
@@ -132,11 +132,11 @@ fn test() -> i32 {
     check("send, in order", count.as_deref() == Ok("3"), format!("{count:?}"));
     check("name taken", Port::create(NAME).err() == Some(Error::Exists), String::new());
     check("bad name", Port::create("Not A Name").err() == Some(Error::InvalidName), String::new());
-    let big = alloc::vec![0u8; arcrt::sys::PORT_MSG_MAX as usize + 1];
+    let big = alloc::vec![0u8; justrt::sys::PORT_MSG_MAX as usize + 1];
     check("too large", port.send(&big).err() == Some(Error::TooLarge), String::new());
     let bye = port.call(b"stop").map(|a| String::from_utf8_lossy(&a).into_owned());
     check("stop", bye.as_deref() == Ok("bye"), format!("{bye:?}"));
-    let code = arcrt::process::wait(pid);
+    let code = justrt::process::wait(pid);
     check("service ended", code == Ok(0), format!("{code:?}"));
     check("gone after its owner", port.call(b"hello?").err() == Some(Error::Closed), String::new());
     check("unlisted after its owner", Port::lookup(NAME).err() == Some(Error::NotFound), String::new());
@@ -146,7 +146,7 @@ fn test() -> i32 {
         Err(e) => check("private port", false, String::from(e.as_str())),
     }
     let n = notify("ipc", "Messaggio di prova dalle porte");
-    check("arc.notify", n.as_deref() == Ok("{\"ok\":true}"), format!("{n:?}"));
+    check("just.notify", n.as_deref() == Ok("{\"ok\":true}"), format!("{n:?}"));
     if failed == 0 {
         println!("{ACCENT}ipc: all checks passed{RESET}");
         0

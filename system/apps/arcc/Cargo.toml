@@ -1,6 +1,6 @@
 [package]
 name = "arcc"
-description = "arcOS program: the ArcScript compiler and runtime"
+description = "JustOS program: the ArcScript compiler and runtime"
 version = "0.5.0"
 edition.workspace = true
 publish.workspace = true
@@ -13,7 +13,7 @@ test = false
 bench = false
 
 [dependencies]
-arcrt.workspace = true
+justrt.workspace = true
 arcc-core.workspace = true
 arc-vm.workspace = true
 

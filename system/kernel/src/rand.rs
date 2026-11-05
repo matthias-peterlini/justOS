@@ -1,4 +1,4 @@
-//! Random numbers for keys and nonces: a ChaCha20 generator (arctls'
+//! Random numbers for keys and nonces: a ChaCha20 generator (justtls'
 //! [`Drbg`]) seeded with SHA-256 of what entropy the machine offers — the
 //! RDSEED and RDRAND instructions when the processor has them, the jitter
 //! of the time-stamp counter, the clock — and stirred again by the timing
@@ -6,8 +6,8 @@
 
 use crate::arch::cpu;
 use crate::sync::IrqLock;
-use arctls::sha2::Sha256;
-use arctls::Drbg;
+use justtls::sha2::Sha256;
+use justtls::Drbg;
 
 static GEN: IrqLock<Option<Drbg>> = IrqLock::new(None);
 

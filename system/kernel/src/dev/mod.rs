@@ -23,7 +23,7 @@ pub mod pm;
 use crate::sync::IrqLock;
 use alloc::string::String;
 use alloc::vec::Vec;
-use arcdk::{DeviceInfo, BUS_PCI, BUS_USB};
+use justdk::{DeviceInfo, BUS_PCI, BUS_USB};
 
 #[derive(Clone)]
 pub struct Device {
@@ -69,7 +69,7 @@ impl Device {
                 alloc::format!("pci {:02x}:{:02x}.{}", l >> 8, (l >> 3) & 0x1F, l & 7)
             }
             BUS_USB => alloc::format!("usb {}", self.info.name()),
-            arcdk::BUS_SD => alloc::format!("sd {}", self.info.name()),
+            justdk::BUS_SD => alloc::format!("sd {}", self.info.name()),
             _ => alloc::format!("platform {}", self.info.name()),
         }
     }

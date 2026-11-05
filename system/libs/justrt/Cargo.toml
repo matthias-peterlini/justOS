@@ -1,0 +1,13 @@
+[package]
+name = "justrt"
+description = "Run-time library for JustOS programs: entry point, heap, console, files, time, processes"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[dependencies]
+justdk.workspace = true
+
+[lints]
+workspace = true

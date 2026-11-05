@@ -11,13 +11,13 @@
 # UEFI  1. install, 2. start on trial and confirm, roll back, 3. the old
 #          version starts again
 #
-# KERNEL, DRIVERS and ARCTOOL default to the build's. Exits non-zero if a
+# KERNEL, DRIVERS and JUSTTOOL default to the build's. Exits non-zero if a
 # check failed; the sessions are kept in $KEEP if set.
 set -eu
 IMAGE=${1:?usage: test-update.sh <image>}
 QEMU=${QEMU:-qemu-system-x86_64}
-ARCTOOL=${ARCTOOL:-tools/target/release/arctool}
-KERNEL=${KERNEL:-system/target/x86_64-unknown-none/release/arc-kernel}
+JUSTTOOL=${JUSTTOOL:-tools/target/release/justtool}
+KERNEL=${KERNEL:-system/target/x86_64-unknown-none/release/just-kernel}
 DRIVERS=${DRIVERS:-build/drivers}
 OVMF_CODE=${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}
 OVMF_VARS=${OVMF_VARS:-/usr/share/OVMF/OVMF_VARS_4M.fd}
@@ -27,7 +27,7 @@ trap 'rm -rf "$T"' EXIT
 FAILED=0
 
 # The update, and a broken one.
-"$ARCTOOL" slot "$T/new.slot" --kernel "$KERNEL" --drivers "$DRIVERS" --version 9.9.9 > /dev/null
+"$JUSTTOOL" slot "$T/new.slot" --kernel "$KERNEL" --drivers "$DRIVERS" --version 9.9.9 > /dev/null
 python3 - "$T/new.slot" "$T/broken.slot" 6.6.6 <<'EOF'
 import hashlib, struct, sys
 src, dst, version = sys.argv[1:4]
@@ -46,8 +46,8 @@ EOF
 # A fresh disk with both files on its system volume.
 fresh() {
     cp --sparse=always "$IMAGE" "$T/disk.img"
-    "$ARCTOOL" fs "$T/disk.img" put "$T/new.slot" /new.slot > /dev/null
-    "$ARCTOOL" fs "$T/disk.img" put "$T/broken.slot" /broken.slot > /dev/null
+    "$JUSTTOOL" fs "$T/disk.img" put "$T/new.slot" /new.slot > /dev/null
+    "$JUSTTOOL" fs "$T/disk.img" put "$T/broken.slot" /broken.slot > /dev/null
     cp "$OVMF_VARS" "$T/vars.fd"
 }
 
@@ -100,11 +100,11 @@ expect bios-1 "system slot A$" "started from slot A"
 expect bios-1 "slot A: $VERSION · works · running" "slot A runs"
 expect bios-1 "slot B: $VERSION · works" "slot B holds the same system"
 expect bios-1 "new.slot.sig is missing" "a signature is asked for"
-expect bios-1 "arcOS 9.9.9 is installed in the other slot" "installed into slot B"
+expect bios-1 "JustOS 9.9.9 is installed in the other slot" "installed into slot B"
 expect bios-1 "this version starts again" "cancelled"
 expect bios-1 "non c'è una versione che ha funzionato" "no rollback to a slot being replaced"
 expect bios-1 "slot B: 9.9.9 · not confirmed · starts next · 2 tries left" "slot B starts next, on trial"
-refuse bios-1 "arcOS stopped" "no panic"
+refuse bios-1 "JustOS stopped" "no panic"
 
 run bios-2 bios 5 \
     "sysupdate" "@sleep 22" \
@@ -116,9 +116,9 @@ expect bios-2 "system slot B, on trial" "started from slot B, on trial"
 expect bios-2 "slot B: 9.9.9 · not confirmed · running · 1 try left" "the loader used up a try"
 expect bios-2 "works: slot B confirmed" "confirmed"
 expect bios-2 "slot B: 9.9.9 · works · running" "slot B works"
-expect bios-2 "arcOS 6.6.6 is installed in the other slot" "the broken update installed into slot A"
+expect bios-2 "JustOS 6.6.6 is installed in the other slot" "the broken update installed into slot A"
 expect bios-2 "slot A: 6.6.6 · not confirmed · starts next · 2 tries left" "slot A starts next"
-refuse bios-2 "arcOS stopped" "no panic"
+refuse bios-2 "JustOS stopped" "no panic"
 
 # Slot A resets the CPU twice; then the loader goes back to B.
 run bios-3 bios 14 \
@@ -126,10 +126,10 @@ run bios-3 bios 14 \
     "sysupdate" \
     "shutdown"
 expect bios-3 "system slot B, the other one did not start" "back to slot B"
-expect bios-3 "did not start: back to arcOS" "it says so"
+expect bios-3 "did not start: back to JustOS" "it says so"
 expect bios-3 "slot A: 6.6.6 · not confirmed$" "slot A is left alone"
 expect bios-3 "slot B: 9.9.9 · works · running" "slot B runs"
-refuse bios-3 "arcOS stopped" "no panic"
+refuse bios-3 "JustOS stopped" "no panic"
 
 echo "== UEFI"
 fresh
@@ -137,7 +137,7 @@ run uefi-1 uefi 12 \
     "sysupdate install --unsigned sys:/new.slot" "@sleep 12" \
     "shutdown"
 expect uefi-1 "system slot A$" "started from slot A"
-expect uefi-1 "arcOS 9.9.9 is installed in the other slot" "installed into slot B"
+expect uefi-1 "JustOS 9.9.9 is installed in the other slot" "installed into slot B"
 
 run uefi-2 uefi 12 \
     "sysupdate" "@sleep 22" \
@@ -147,8 +147,8 @@ run uefi-2 uefi 12 \
 expect uefi-2 "system slot B, on trial" "started from slot B, on trial"
 expect uefi-2 "slot B: 9.9.9 · not confirmed · running · 1 try left" "the loader used up a try"
 expect uefi-2 "slot B: 9.9.9 · works · running" "slot B works"
-expect uefi-2 "arcOS $VERSION starts at the next restart" "rolled back"
-refuse uefi-2 "arcOS stopped" "no panic"
+expect uefi-2 "JustOS $VERSION starts at the next restart" "rolled back"
+refuse uefi-2 "JustOS stopped" "no panic"
 
 run uefi-3 uefi 12 \
     "sysupdate" \

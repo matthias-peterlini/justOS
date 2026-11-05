@@ -1,4 +1,4 @@
-//! Negozio: arcOS apps that come with the system, and real Linux and Windows
+//! Negozio: JustOS apps that come with the system, and real Linux and Windows
 //! programs from the internet (the catalog, or any GitHub project found by
 //! searching). Each has a page; one click downloads, installs, opens or
 //! removes it, with a ring that fills as the download goes. Aggiornamenti
@@ -549,7 +549,7 @@ impl Store {
                 text::draw(c, Font::Body, ct.x + 14, ct.y + 62, &text::fit(Font::Body, &repo.description, ct.w - 30), TEXT_DIM);
                 ui::caps(c, ct.x + 14, ct.y + 98, &format!("Ultima versione {tag}"), TEXT_FAINT);
                 if assets.is_empty() {
-                    text::draw(c, Font::Body, ct.x + 14, ct.y + 130, "Nessuna versione per arcOS (Linux statico o Windows x64) in questa release.", TEXT_DIM);
+                    text::draw(c, Font::Body, ct.x + 14, ct.y + 130, "Nessuna versione per JustOS (Linux statico o Windows x64) in questa release.", TEXT_DIM);
                 }
                 for (r, a) in Self::repo_rows(area, assets.len(), 0).into_iter().map(|r| r.offset(0, 64)).zip(assets.iter()) {
                     if r.y > ct.bottom() {
@@ -562,7 +562,7 @@ impl Store {
                     let it = Item::Remote(self.asset_app(&repo, a));
                     self.draw_button(c, Self::get_btn(r), &it);
                 }
-                text::draw(c, Font::Small, ct.x + 14, ct.bottom() - 26, "Le app di GitHub non sono verificate da arcOS: installa solo progetti di cui ti fidi.", TEXT_FAINT);
+                text::draw(c, Font::Small, ct.x + 14, ct.bottom() - 26, "Le app di GitHub non sono verificate da JustOS: installa solo progetti di cui ti fidi.", TEXT_FAINT);
             }
         }
     }
@@ -652,7 +652,7 @@ impl Store {
         if let Item::Remote(a) = it {
             body.push_str(&format!("\n\nSi usa nel Terminale con il comando «{}».", a.command));
             if a.platform == Platform::Windows {
-                body.push_str(" È un programma per Windows: arcOS lo avvia con winrun, che conosce una parte delle funzioni di Windows.");
+                body.push_str(" È un programma per Windows: JustOS lo avvia con winrun, che conosce una parte delle funzioni di Windows.");
             }
         }
         let mut y = ct.y + 326;
@@ -718,7 +718,7 @@ fn platform_chip(c: &mut Canvas, x: i32, y: i32, p: Platform) {
     let bg = match p {
         Platform::Linux => 0x33F5_A623,
         Platform::Windows => 0x333B_82F6,
-        Platform::Arcos => 0x33E0_662E,
+        Platform::Justos => 0x33E0_662E,
     };
     c.fill_round(r, 11, bg);
     ui::caps(c, x + 9, y + 6, label, TEXT);

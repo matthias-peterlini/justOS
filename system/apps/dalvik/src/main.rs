@@ -1,7 +1,7 @@
-//! Runs Android apps and Java programs on arcOS.
+//! Runs Android apps and Java programs on JustOS.
 //!
 //! `dalvik` reads the DEX code of an `.apk`, a `.jar` built with `d8`/`dx`
-//! or a bare `.dex` file and runs it with the [`arcdex`] interpreter. A
+//! or a bare `.dex` file and runs it with the [`justdex`] interpreter. A
 //! program with `public static void main(String[])` runs in the terminal;
 //! an app with an `Activity` gets a window that looks like a phone screen,
 //! where its views are drawn and clicks and typing reach its listeners.
@@ -16,34 +16,34 @@ mod screen;
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
-use arcdex::{Host, Vm};
-use arcrt::{eprintln, println};
+use justdex::{Host, Vm};
+use justrt::{eprintln, println};
 
-arcrt::main!(main);
+justrt::main!(main);
 
-/// The interpreter's way out to arcOS.
-struct ArcHost;
+/// The interpreter's way out to JustOS.
+struct JustHost;
 
-impl Host for ArcHost {
+impl Host for JustHost {
     fn write(&mut self, s: &str, _err: bool) {
-        arcrt::console::write(s);
+        justrt::console::write(s);
     }
     fn read_line(&mut self) -> Option<String> {
-        arcrt::console::read_line()
+        justrt::console::read_line()
     }
     fn time_ms(&mut self) -> u64 {
-        arcrt::time::now() * 1000 + arcrt::time::uptime_ms() % 1000
+        justrt::time::now() * 1000 + justrt::time::uptime_ms() % 1000
     }
     fn uptime_ms(&mut self) -> u64 {
-        arcrt::time::uptime_ms()
+        justrt::time::uptime_ms()
     }
     fn sleep(&mut self, ms: u64) {
-        arcrt::time::sleep_ms(ms);
+        justrt::time::sleep_ms(ms);
     }
 }
 
 fn main(args: &str) -> i32 {
-    let mut parts = arcrt::split_args(args.trim());
+    let mut parts = justrt::split_args(args.trim());
     let mut mode = None;
     while let Some(first) = parts.first() {
         match first.as_str() {
@@ -59,14 +59,14 @@ fn main(args: &str) -> i32 {
         return if parts.is_empty() { 2 } else { 0 };
     }
     let path = parts.remove(0);
-    let data = match arcrt::fs::read(&path) {
+    let data = match justrt::fs::read(&path) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("dalvik: {path}: {}", e.as_str());
             return 1;
         }
     };
-    let dexes = match arcdex::load(&data) {
+    let dexes = match justdex::load(&data) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("dalvik: {path}: {e}");
@@ -74,7 +74,7 @@ fn main(args: &str) -> i32 {
         }
     };
     drop(data);
-    let mut vm = Vm::new(dexes, Box::new(ArcHost));
+    let mut vm = Vm::new(dexes, Box::new(JustHost));
     let apk = path.to_ascii_lowercase().ends_with(".apk");
     let main_class = vm.main_class();
     let activity = vm.activity_class();

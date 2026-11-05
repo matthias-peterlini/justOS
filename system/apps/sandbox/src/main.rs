@@ -14,17 +14,17 @@ extern crate alloc;
 
 use alloc::format;
 use alloc::string::String;
-use arcrt::console::color::*;
-use arcrt::ipc::Port;
-use arcrt::{app, eprintln, fs, println, process, Error};
+use justrt::console::color::*;
+use justrt::ipc::Port;
+use justrt::{app, eprintln, fs, println, process, Error};
 
-arcrt::main!(main);
+justrt::main!(main);
 
 /// The app the test runs as.
-const TEST_ID: &str = "org.arcos.prova";
+const TEST_ID: &str = "dev.justos.prova";
 
 fn main(args: &str) -> i32 {
-    let words = arcrt::split_args(args);
+    let words = justrt::split_args(args);
     let w = |i: usize| words.get(i).map(String::as_str).unwrap_or("");
     match w(0) {
         "" | "whoami" => {
@@ -54,7 +54,7 @@ fn main(args: &str) -> i32 {
         "is" => i32::from(app::id().as_deref() != Some(w(1))),
         // For `updates test`: an app that stays open for a while.
         "wait" => {
-            arcrt::time::sleep_ms(w(1).parse().unwrap_or(1000));
+            justrt::time::sleep_ms(w(1).parse().unwrap_or(1000));
             0
         }
         _ => {
@@ -65,7 +65,7 @@ fn main(args: &str) -> i32 {
 }
 
 fn permissions(request: &str) -> Result<String, Error> {
-    let answer = Port::lookup("arc.permissions")?.call(request.as_bytes())?;
+    let answer = Port::lookup("just.permissions")?.call(request.as_bytes())?;
     Ok(String::from_utf8_lossy(&answer).into_owned())
 }
 
@@ -76,7 +76,7 @@ fn test() -> i32 {
     for (perm, allow) in [("files:Musica", true), ("files:Scaricati", false), ("files:ram:", false), ("camera", false)] {
         let req = format!("{{\"set\":\"{perm}\",\"app\":\"{TEST_ID}\",\"name\":\"Prova\",\"allow\":{allow}}}");
         if !permissions(&req).is_ok_and(|a| a.contains("\"ok\":true")) {
-            eprintln!("sandbox: arc.permissions did not take {perm}");
+            eprintln!("sandbox: just.permissions did not take {perm}");
             return 1;
         }
     }
@@ -145,7 +145,7 @@ fn probe() -> i32 {
     check("not list the home", denied(fs::list_dir("sys:/home").map(|_| ())), String::new());
     check("not read a file in the home", denied(fs::read("sys:/home/welcome.txt").map(|_| ())), String::new());
     check("not climb out", denied(fs::read("../../welcome.txt").map(|_| ())), String::new());
-    check("not another app's folder", denied(fs::write("sys:/home/.apps/org.arcos.altra/x", b"x")), String::new());
+    check("not another app's folder", denied(fs::write("sys:/home/.apps/dev.justos.altra/x", b"x")), String::new());
     check("not other disks", denied(fs::list_dir("ram:/").map(|_| ())), String::new());
 
     // Folders of the home, as the user said.
@@ -158,7 +158,7 @@ fn probe() -> i32 {
 
     // Ports carry the app's name, and the table is the system's.
     check("own port", Port::create(&format!("{TEST_ID}.eco")).is_ok(), String::new());
-    check("not a system port", Port::create("arc.finto").err() == Some(Error::Denied), String::new());
+    check("not a system port", Port::create("just.finto").err() == Some(Error::Denied), String::new());
     check("not another app's port", Port::create("org.altra.app").err() == Some(Error::Denied), String::new());
     check("not the whole table", permissions("{\"list\":true}").is_ok_and(|a| a.contains("error")), String::new());
 

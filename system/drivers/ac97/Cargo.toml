@@ -1,6 +1,6 @@
 [package]
 name = "ac97"
-description = "arcOS driver: AC97 audio"
+description = "JustOS driver: AC97 audio"
 version = "1.1.0"
 edition.workspace = true
 publish.workspace = true
@@ -13,7 +13,7 @@ test = false
 bench = false
 
 [dependencies]
-arcdrv.workspace = true
+justdrv.workspace = true
 
 [lints]
 workspace = true

@@ -1,4 +1,4 @@
-# Roadmap: un arcOS che si usa come Windows e macOS
+# Roadmap: un JustOS che si usa come Windows e macOS
 
 L'obiettivo è «zero attrito»: chi arriva da Windows o da macOS deve trovare
 le cose dove se le aspetta, senza terminale e senza configurare niente. Questo
@@ -18,11 +18,11 @@ sono minime. Vanno fatte per prime.
 
 I programmi e i servizi del kernel si parlano con **porte** (sul modello
 delle porte Mach di macOS e di Fuchsia, ma piccole): `kernel/src/ipc.rs`,
-chiamate 31–36 in `arcdk::syscall`, libreria `arcrt::ipc`.
+chiamate 31–36 in `justdk::syscall`, libreria `justrt::ipc`.
 
 | Chiamata | Cosa fa |
 |---|---|
-| `PORT_CREATE(name) -> handle` | crea una porta; un nome (`arc.notify`) la rende trovabile, senza nome è privata |
+| `PORT_CREATE(name) -> handle` | crea una porta; un nome (`just.notify`) la rende trovabile, senza nome è privata |
 | `PORT_LOOKUP(name) -> handle` | un handle per inviare a una porta con nome |
 | `PORT_SEND(handle, buf, len)` | mette in coda un messaggio (fino a 64 KiB, 64 in coda) |
 | `PORT_RECV(handle, buf, cap, timeout, info)` | riceve da una porta propria; `info`: lunghezza, pid del mittente (garantito dal kernel), handle per la risposta |
@@ -33,24 +33,24 @@ Riceve solo chi ha creato la porta; inviare può chiunque ne abbia un
 handle. Le porte si contano: quando il proprietario termina la porta sparisce
 e chi invia riceve `Closed`; se un servizio termina senza rispondere, chi
 aspettava la risposta riceve `Closed` invece di restare bloccato. Le attese
-si accorgono di un Ctrl+C. Il primo servizio è `arc.notify` nel kernel
+si accorgono di un Ctrl+C. Il primo servizio è `just.notify` nel kernel
 (`{"title": …, "text": …}` mostra una notifica); `ports` nella shell elenca
 le porte con nome, `ipc test` le prova (anche in `make test`).
 
 Con l'identità delle app, un'app nella sandbox può creare solo porte con il
-proprio nome (`<app_id>` o `<app_id>.*`); i nomi `arc.*` restano al
+proprio nome (`<app_id>` o `<app_id>.*`); i nomi `just.*` restano al
 sistema. Ancora da fare: allegare handle qualsiasi ai messaggi (oggi viaggia
 solo quello della risposta).
 
 ### 2. Identità delle app e sandbox ✅
 
 Ogni app installata ha un `app_id` (`kernel/src/sandbox.rs`, chiamate 37–39
-in `arcdk::syscall`, libreria `arcrt::app`):
+in `justdk::syscall`, libreria `justrt::app`):
 
 - le app native in `sys:/apps` lo prendono dalla chiave `app_id=` del loro
-  `<nome>.info` (altrimenti `org.arcos.<nome>`), i pacchetti `.arc` da
+  `<nome>.info` (altrimenti `dev.justos.<nome>`), i pacchetti `.arc` da
   `arcc`, che chiama `APP_ENTER` prima di eseguirli; i processi figli
-  ereditano l'app del padre. Gli id sono minuscoli e `arc.` è riservato.
+  ereditano l'app del padre. Gli id sono minuscoli e `just.` è riservato.
 - file: la propria cartella `sys:/home/.apps/<app_id>` (anche la cartella di
   partenza), in sola lettura i caratteri, i certificati, i suoni e le app;
   le cartelle della home (Documenti, Immagini, Musica…) e gli altri dischi
@@ -61,7 +61,7 @@ in `arcdk::syscall`, libreria `arcrt::app`):
   diventa accessibile all'app per il resto della sua vita, senza altri
   permessi.
 - dispositivi (fotocamera, microfono, posizione) e rete: si chiedono al
-  servizio `arc.permissions` (`{"request": "camera"}` → `{"granted": …}`).
+  servizio `just.permissions` (`{"request": "camera"}` → `{"granted": …}`).
 
 La prima volta il sistema chiede con una finestra «Privacy» (Consenti / Non
 consentire); la risposta resta in `sys:/system/permissions.json`. *Impostazioni
@@ -79,7 +79,7 @@ finché l'app resta aperta.
 
 ### 3. Grafica accelerata
 
-Oggi il desktop disegna tutto con il processore (`arcgfx`), con
+Oggi il desktop disegna tutto con il processore (`justgfx`), con
 aggiornamenti per rettangoli sporchi e animazioni a tempo: fluido a
 1024×768 e 1080p su una macchina moderna, ma il processore lavora per ogni
 pixel. Driver video: `bochsvga`, `virtiogpu`, `vmsvga`, `cirrus` e il
@@ -101,7 +101,7 @@ framebuffer UEFI, tutti senza accelerazione 3D.
 | Desktop virtuali e vista d'insieme (F3) | ✅ fino a sei, con trascinamento delle finestre |
 | Gesti del touchpad | ⬜ (manca un driver touchpad multi-touch) |
 
-**Librerie e interfacce.** `arcgfx` (disegno), `gui/wm.rs` (`App`,
+**Librerie e interfacce.** `justgfx` (disegno), `gui/wm.rs` (`App`,
 `Window`), `gui/desktop.rs` (compositore e shell); per i programmi le
 chiamate `WIN_CREATE`/`WIN_PRESENT`/`WIN_EVENT`.
 
@@ -121,7 +121,7 @@ chiamate `WIN_CREATE`/`WIN_PRESENT`/`WIN_EVENT`.
    tramite l'host, buona per le macchine virtuali), poi un driver nativo.
    Su hardware vero l'unica strada realistica è portare i driver DRM di
    Linux (i915/amdgpu: milioni di righe) dietro uno strato di compatibilità,
-   oppure Mesa con un backend per arcOS. È il lavoro più grande della lista.
+   oppure Mesa con un backend per JustOS. È il lavoro più grande della lista.
 5. **Gesti** (3–4 settimane dopo un driver I²C-HID/PS/2 multi-touch): tre
    dita per Mission Control e per cambiare desktop, due per scorrere.
 
@@ -129,11 +129,11 @@ chiamate `WIN_CREATE`/`WIN_PRESENT`/`WIN_EVENT`.
 
 | Cosa | Stato |
 |---|---|
-| Browser | 🟡 ticly browser con `arcweb`: HTML, CSS, immagini, moduli, cookie, HTTPS (`arctls`), JavaScript (`arcjs`, interprete senza JIT) |
+| Browser | 🟡 ticly browser con `justweb`: HTML, CSS, immagini, moduli, cookie, HTTPS (`justtls`), JavaScript (`justjs`, interprete senza JIT) |
 | WebGL, DRM (Widevine) | ⬜ / ⛔ |
 | Negozio grafico con installazione in un clic | ✅ (`sys:/store`, pacchetti `.app`) |
-| Aggiornamenti delle app in background | ✅ indice firmato Ed25519, servizio `arc.updates`, sezione Aggiornamenti del Negozio |
-| Permessi in stile mobile | ✅ cartelle, dischi, fotocamera, microfono, posizione, rete (`arc.permissions`) |
+| Aggiornamenti delle app in background | ✅ indice firmato Ed25519, servizio `just.updates`, sezione Aggiornamenti del Negozio |
+| Permessi in stile mobile | ✅ cartelle, dischi, fotocamera, microfono, posizione, rete (`just.permissions`) |
 | Programmi Linux (ELF) | 🟡 solo collegati staticamente (musl), senza `ld.so` (`kernel/src/linux`, `make test-linux`) |
 | Programmi Windows (PE) | 🟡 console e finestre semplici (`winrun`) |
 | Android (DEX/APK) | 🟡 `dalvik`, programmi semplici |
@@ -149,8 +149,8 @@ FreeType/HarfBuzz, una GPU per il compositing. La strada praticabile:
    permessi, `epoll`, socket);
 2. portare **WebKitGTK** o **Servo** sopra quello strato, disegnando in una
    finestra `WIN_*` (Servo è Rust e più piccolo: è la scommessa migliore);
-3. ✅ JavaScript intanto: `arcjs`, un interprete scritto da zero in Rust,
-   con il DOM di `arcweb` (eventi, timer, `fetch`); basta per i siti
+3. ✅ JavaScript intanto: `justjs`, un interprete scritto da zero in Rust,
+   con il DOM di `justweb` (eventi, timer, `fetch`); basta per i siti
    semplici, non per le applicazioni web pesanti.
 
 **Widevine non si può avere**: Google lo concede solo ai produttori di
@@ -163,10 +163,10 @@ dichiarare, come per ogni sistema non commerciale.
 
 1. ✅ un indice remoto firmato: `make updates` scrive `index.json` (numero
    di serie, versione, URL, SHA-256 e dimensione di ogni app) e la sua
-   firma Ed25519 (`arctls::ed25519`); `scripts/publish-updates.sh` lo
-   pubblica sul ramo `updates` del repository. arcOS rifiuta un indice con
+   firma Ed25519 (`justtls::ed25519`); `scripts/publish-updates.sh` lo
+   pubblica sul ramo `updates` del repository. JustOS rifiuta un indice con
    una firma sbagliata o un numero di serie più vecchio dell'ultimo visto;
-2. ✅ il servizio `arc.updates` (`kernel/src/appupdate.rs`) controlla una
+2. ✅ il servizio `just.updates` (`kernel/src/appupdate.rs`) controlla una
    volta al giorno, scarica in background e sostituisce un'app quando è
    chiusa; le app installate da GitHub si confrontano con l'ultima release;
 3. ✅ i permessi dichiarati nel manifest (`permissions=camera,files:Immagini`
@@ -187,14 +187,14 @@ il ritorno alla versione precedente.
 | Wi-Fi | ⬜ |
 | Bluetooth | ⬜ |
 | Sospensione in RAM | ✅ S3, con tutti i driver inclusi; s2idle ⬜ |
-| Batteria e temperatura | ✅ interprete AML `arcaml`, embedded controller, GPE |
+| Batteria e temperatura | ✅ interprete AML `justaml`, embedded controller, GPE |
 
 **Wi-Fi.** Ogni famiglia di schede (Intel iwlwifi, Realtek, MediaTek,
 Broadcom) ha un driver da decine di migliaia di righe e un firmware binario
 da caricare; poi servono WPA2/WPA3 (il supplicant: handshake a 4 vie, SAE).
 Piano: un solo chip, **Intel AX200/AX210** (il più diffuso nei portatili),
 con il firmware ufficiale ridistribuibile; il supplicant in Rust sopra
-`arctls`; un servizio `arc.net` con porte IPC `scan`, `connect`, `status`
+`justtls`; un servizio `just.net` con porte IPC `scan`, `connect`, `status`
 e il menu nella barra (che c'è già per lo stato della rete). Stima: 4–6
 mesi per un chip.
 
@@ -203,8 +203,8 @@ standard: un driver vale per quasi tutti i dongle), più complicato sopra:
 L2CAP, profili HID (tastiere, mouse) e A2DP (audio, con il codec SBC).
 Stima: 2–3 mesi per HID, altrettanti per l'audio.
 
-**Batteria e temperatura.** Fatto: arcOS esegue l'AML del firmware con il
-suo interprete, `arcaml` (scritto da zero, provato con le tabelle di sette
+**Batteria e temperatura.** Fatto: JustOS esegue l'AML del firmware con il
+suo interprete, `justaml` (scritto da zero, provato con le tabelle di sette
 portatili veri e di QEMU), e da lì legge batteria, alimentatore, coperchio
 e temperature; gli eventi arrivano dai GPE e dall'embedded controller.
 Vedi [architettura](architettura.md#acpi-e-aml).
@@ -251,7 +251,7 @@ PCI che il firmware non ripristina da sé (`_PS0`/`_PS3`, D3cold).
    rilasciati. Prova automatica: `dnd test`. Manca: trascinare *verso* File
    da un programma, e il rettangolo di selezione.
 4. **Indice** (1 mese): un servizio che tiene un indice dei nomi e delle
-   parole dei file di testo, aggiornato dal file system (ArcFS segnala le
+   parole dei file di testo, aggiornato dal file system (JustFS segnala le
    scritture a un osservatore: nuova chiamata `WATCH(path)`); la ricerca di
    Ctrl+Spazio lo interroga invece di leggere la home.
 
@@ -267,16 +267,16 @@ PCI che il firmware non ripristina da sé (`_PS0`/`_PS3`, D3cold).
 **Aggiornamenti atomici A/B.** Fatto (vedi
 [architettura](architettura.md#aggiornamenti-del-sistema-ab)): il kernel e
 il pacchetto di avvio con tutti i driver del sistema stanno in due slot
-nella partizione EFI (`ARCOS/SLOTA.BIN`, `SLOTB.BIN`), `ARCOS/BOOT.CTL`
+nella partizione EFI (`JUSTOS/SLOTA.BIN`, `SLOTB.BIN`), `JUSTOS/BOOT.CTL`
 dice quale avviare.
 
 1. L'aggiornamento arriva dall'indice firmato (`make updates` vi mette
    l'immagine di slot) e si scrive nello slot inattivo. Il sistema lo
    rilegge e ne verifica lo SHA-256.
-2. Lo slot nuovo diventa attivo con due tentativi, che ArcBoot (BIOS e
+2. Lo slot nuovo diventa attivo con due tentativi, che JustBoot (BIOS e
    UEFI) consuma uno per avvio.
 3. Il sistema nuovo, se gira per 15 secondi, si dichiara buono. Un panic
-   durante la prova riavvia la macchina; con i tentativi finiti ArcBoot
+   durante la prova riavvia la macchina; con i tentativi finiti JustBoot
    torna all'altro slot, che lo segnala.
 
 Info sistema installa, chiede il riavvio, annulla e torna alla versione
@@ -285,13 +285,13 @@ precedente; dal terminale c'è `sysupdate`. Restano da fare:
 - l'immagine delta, per scaricare solo le differenze;
 - i file di sistema di `sys:` (`rootfs`) dentro lo slot (oggi si aggiornano
   le app e il kernel con i driver, non i file come sfondi e font);
-- gli snapshot del file system, che richiedono il copy-on-write in ArcFS.
+- gli snapshot del file system, che richiedono il copy-on-write in JustFS.
 
 **Permessi.** Fatto (vedi «Identità delle app e sandbox»): quando un'app
 apre una cartella fuori dalla sua, il kernel sospende la chiamata e mostra
 «*Disegno* vuole usare la cartella Immagini — Consenti / Non consentire»;
 la risposta resta in `sys:/system/permissions.json`, il servizio
-`arc.permissions` risponde per fotocamera, microfono, posizione e rete,
+`just.permissions` risponde per fotocamera, microfono, posizione e rete,
 *Impostazioni → Privacy delle app* elenca, cambia e revoca; il Negozio
 mostra i permessi dichiarati nel manifest di ogni app.
 
@@ -303,7 +303,7 @@ mostra i permessi dichiarati nel manifest di ogni app.
 | 2 | ✅ sandbox, permessi, aggiornamenti delle app, trascinamento | fatto |
 | 3 | ✅ interprete AML, batteria, temperatura, sospensione | fatto |
 | 4 | ✅ aggiornamenti A/B, HiDPI; indice dei file | 2–3 mesi |
-| 5 | strato Linux completo (JavaScript in `arcweb`: fatto), poi Servo | 6–12 mesi |
+| 5 | strato Linux completo (JavaScript in `justweb`: fatto), poi Servo | 6–12 mesi |
 | 6 | Wi-Fi (un chip), Bluetooth HID e audio | 6–9 mesi |
 | 7 | accelerazione grafica (virgl, poi hardware vero) | 12 mesi e oltre |
 

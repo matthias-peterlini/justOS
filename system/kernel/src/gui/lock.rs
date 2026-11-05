@@ -1,6 +1,6 @@
 //! The lock screen: the time over the blurred wallpaper and, when a
 //! password is set, a field to type it. Shown at start, with the logo key
-//! and L, from the arc menu and after some minutes without input.
+//! and L, from the system menu and after some minutes without input.
 
 use super::gfx::{Canvas, Rect};
 use super::settings;
@@ -122,7 +122,7 @@ impl Lock {
 
         // The account: a round badge with the initial, and the name.
         let s = settings::get();
-        let name = if s.name.is_empty() { String::from("arcOS") } else { s.name.clone() };
+        let name = if s.name.is_empty() { String::from("JustOS") } else { s.name.clone() };
         let ay = h / 2 - 10;
         c.fill_circle(cx, ay, 44, ui::ACCENT);
         let initial: String = name.chars().next().map(|ch| ch.to_uppercase().collect()).unwrap_or_default();

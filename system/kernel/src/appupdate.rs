@@ -2,20 +2,20 @@
 //!
 //! Two sources:
 //!
-//! - **arcOS apps** (`type=native`): a signed index, `index.json` with its
+//! - **JustOS apps** (`type=native`): a signed index, `index.json` with its
 //!   Ed25519 signature next to it (`index.json.sig`, in hex). The key is
-//!   [`KEY`]; its private half stays with whoever publishes arcOS, so a
+//!   [`KEY`]; its private half stays with whoever publishes JustOS, so a
 //!   changed index or a changed download is refused. Each entry names the
 //!   new program's address, size and SHA-256, carries the new `info`, and
-//!   may name the oldest arcOS it runs on (`system`).
+//!   may name the oldest JustOS it runs on (`system`).
 //!   The index has a serial number that never goes back, so an old index
 //!   (with old, known bugs) cannot be passed off as new. It may also offer
-//!   a newer arcOS (`system`: its version and system image), which
+//!   a newer JustOS (`system`: its version and system image), which
 //!   [`crate::update`] installs.
 //! - **Linux and Windows programs** from GitHub: their latest release,
 //!   downloaded over HTTPS as the store installs them.
 //!
-//! The service `arc.updates` looks once a day while the desktop runs.
+//! The service `just.updates` looks once a day while the desktop runs.
 //! Updates download into `sys:/system/updates/<id>/` and replace the app
 //! once it is not running (at once if it is closed, else when it closes, or
 //! at the next start). An update that asks for a permission the installed
@@ -29,18 +29,18 @@ use crate::sync::IrqLock;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use arcjson::Value;
-use arctls::ed25519;
+use justjson::Value;
+use justtls::ed25519;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-/// The public key that signs the index of arcOS apps.
+/// The public key that signs the index of JustOS apps.
 pub const KEY: [u8; 32] = [
     0x83, 0x7a, 0x8d, 0x8d, 0x11, 0xc6, 0x5f, 0x04, 0xfb, 0xb9, 0x28, 0x3d, 0xd4, 0x23, 0x63, 0xe1, 0x10, 0x39, 0xa7, 0xf3, 0x6b, 0x00, 0x52,
     0x78, 0xfc, 0x57, 0x20, 0x8f, 0xa7, 0x07, 0xa1, 0xdb,
 ];
 
 /// Where the index is published (the `updates` branch of the repository).
-pub const INDEX_URL: &str = "https://raw.githubusercontent.com/matthias-peterlini/ArcOs/updates/index.json";
+pub const INDEX_URL: &str = "https://raw.githubusercontent.com/matthias-peterlini/justos/updates/index.json";
 
 const DIR: &str = "sys:/system/updates";
 const APPS: &str = "sys:/apps";
@@ -81,7 +81,7 @@ struct Remote {
     size: u64,
 }
 
-/// A newer arcOS in the index: its version and its system image (see
+/// A newer JustOS in the index: its version and its system image (see
 /// [`crate::sysupdate`]).
 #[derive(Clone)]
 pub struct SystemOffer {
@@ -161,7 +161,7 @@ struct Settings {
 }
 
 fn load_settings(src: &Source) -> Settings {
-    let v = fs::abs(&format!("{}/state.json", src.dir)).and_then(|p| fs::read_file(&p)).ok().and_then(|b| arcjson::parse_bytes(&b)).unwrap_or(Value::Null);
+    let v = fs::abs(&format!("{}/state.json", src.dir)).and_then(|p| fs::read_file(&p)).ok().and_then(|b| justjson::parse_bytes(&b)).unwrap_or(Value::Null);
     Settings {
         auto: v.get("auto").as_bool().unwrap_or(true),
         last_check: v.get("last_check").as_f64().unwrap_or(0.0) as u64,
@@ -236,7 +236,7 @@ struct Index {
 }
 
 /// Reads and checks the signed index: its serial, the updates it has for
-/// the installed arcOS apps and a newer arcOS, if any.
+/// the installed JustOS apps and a newer JustOS, if any.
 fn read_index(src: &Source, min_serial: u64) -> Result<Index, String> {
     let index = fetch(&src.index, &mut |_, _| true)?;
     let sig = fetch(&format!("{}.sig", src.index), &mut |_, _| true)?;
@@ -244,7 +244,7 @@ fn read_index(src: &Source, min_serial: u64) -> Result<Index, String> {
     if !ed25519::verify(&src.key, &index, &sig) {
         return Err("la firma dell'indice non è valida".to_string());
     }
-    let v = arcjson::parse_bytes(&index).ok_or("l'indice è illeggibile")?;
+    let v = justjson::parse_bytes(&index).ok_or("l'indice è illeggibile")?;
     let serial = v.get("serial").as_f64().unwrap_or(0.0) as u64;
     if serial < min_serial {
         return Err(format!("l'indice ({serial}) è più vecchio di uno già visto ({min_serial})"));
@@ -252,7 +252,7 @@ fn read_index(src: &Source, min_serial: u64) -> Result<Index, String> {
     let mut out = Vec::new();
     for a in v.get("apps").as_array() {
         let (Some(id), Some(app), Some(info)) = (a.get("id").as_str(), remote(a.get("app")), a.get("info").as_str()) else { continue };
-        // Built for a newer arcOS: it waits for the system update.
+        // Built for a newer JustOS: it waits for the system update.
         if a.get("system").as_str().is_some_and(|min| crate::update::newer(min, crate::VERSION)) {
             continue;
         }
@@ -313,7 +313,7 @@ pub fn check_with(src: &Source, github: bool) -> (Vec<Update>, Option<String>) {
     (found, error)
 }
 
-/// [`check_with`], and the newer arcOS the index offers.
+/// [`check_with`], and the newer JustOS the index offers.
 fn check_index(src: &Source, github: bool) -> (Vec<Update>, Option<SystemOffer>, Option<String>) {
     let mut s = load_settings(src);
     let (mut found, system, error) = match read_index(src, s.serial) {
@@ -331,7 +331,7 @@ fn check_index(src: &Source, github: bool) -> (Vec<Update>, Option<SystemOffer>,
     (found, system, error)
 }
 
-/// The newer arcOS the published index offers, if any (reads the index now;
+/// The newer JustOS the published index offers, if any (reads the index now;
 /// the app updates it has wait for the daily check).
 pub fn system_offer() -> Result<Option<SystemOffer>, String> {
     let src = Source::system();
@@ -352,7 +352,7 @@ fn write(file: &str, data: &[u8]) -> Result<(), String> {
 
 fn fetch_checked(r: &Remote, progress: http::Progress<'_>) -> Result<Vec<u8>, String> {
     let data = fetch(&r.url, progress)?;
-    if (r.size != 0 && data.len() as u64 != r.size) || arctls::sha2::Sha256::digest(&data) != r.sha256 {
+    if (r.size != 0 && data.len() as u64 != r.size) || justtls::sha2::Sha256::digest(&data) != r.sha256 {
         return Err("il file scaricato non corrisponde all'indice".to_string());
     }
     Ok(data)
@@ -431,7 +431,7 @@ fn waiting(src: &Source) -> Vec<Update> {
     fs::list_dir(&dir)
         .unwrap_or_default()
         .into_iter()
-        .filter(|(_, st)| st.kind == arcfs::Kind::Dir)
+        .filter(|(_, st)| st.kind == justfs::Kind::Dir)
         .filter_map(|(e, _)| {
             let id = e.name;
             let pending = src.pending(&id);
@@ -525,7 +525,7 @@ pub fn check() -> Result<usize, String> {
     if let Some(e) = &error {
         crate::warn!("updates", "{e}");
     }
-    // A newer arcOS: in a thread of its own, it is big.
+    // A newer JustOS: in a thread of its own, it is big.
     if let Some(o) = system {
         crate::task::spawn("update-system", move || crate::update::offered(o, true));
     }
@@ -655,15 +655,15 @@ pub fn install_in_background(id: &str) {
     });
 }
 
-/// Starts `arc.updates`: installs what waited from the last time, answers
+/// Starts `just.updates`: installs what waited from the last time, answers
 /// programs and, while the desktop runs, checks once a day.
 pub fn start() {
-    if crate::task::spawn("arc.updates", service).is_none() {
-        crate::warn!("updates", "could not start arc.updates");
+    if crate::task::spawn("just.updates", service).is_none() {
+        crate::warn!("updates", "could not start just.updates");
     }
 }
 
-/// `arc.updates` answers:
+/// `just.updates` answers:
 ///
 /// - `{"list": true}`: `{"updates": [{"id", "name", "current", "version",
 ///   "state", "permissions", "new_permissions"}], "auto": bool}`;
@@ -674,10 +674,10 @@ fn service() {
     let src = Source::system();
     *UPDATES.lock() = waiting(&src);
     install_ready(&src, false);
-    let port = match crate::ipc::create(0, Some("arc.updates")) {
+    let port = match crate::ipc::create(0, Some("just.updates")) {
         Ok(p) => p,
         Err(e) => {
-            crate::warn!("updates", "arc.updates: {}", e.as_str());
+            crate::warn!("updates", "just.updates: {}", e.as_str());
             return;
         }
     };
@@ -703,7 +703,7 @@ fn service() {
 }
 
 fn answer(data: &[u8], system: bool) -> Value {
-    let v = arcjson::parse_bytes(data).unwrap_or(Value::Null);
+    let v = justjson::parse_bytes(data).unwrap_or(Value::Null);
     let strings = |l: &[String]| Value::Arr(l.iter().map(|s| Value::string(s)).collect());
     let error = |e: &str| Value::object(alloc::vec![("error", Value::string(e))]);
     if v.get("list").as_bool() == Some(true) {
@@ -781,7 +781,7 @@ pub fn self_test() -> bool {
         let _ = write(&format!("{APPS}/{id}.info"), format!("name={id}\nversion=1.0\ntype=native\n").as_bytes());
     }
     let mut newer = program.clone();
-    newer.extend_from_slice(b"\0arcos-update-1.1");
+    newer.extend_from_slice(b"\0justos-update-1.1");
     let _ = write(&format!("{base}/new.app"), &newer);
     let entry = |id: &str, version: &str, sha: &[u8], extra: &str| {
         let app = Value::object(alloc::vec![
@@ -792,9 +792,9 @@ pub fn self_test() -> bool {
         let info = format!("name={id}\nversion={version}\ntype=native\n{extra}");
         Value::object(alloc::vec![("id", Value::string(id)), ("app", app), ("info", Value::string(&info))])
     };
-    let sha = arctls::sha2::Sha256::digest(&newer);
+    let sha = justtls::sha2::Sha256::digest(&newer);
     let publish = |serial: u64, seed: &[u8; 32]| {
-        // provanone is not installed; provanext needs a newer arcOS.
+        // provanone is not installed; provanext needs a newer JustOS.
         let mut next = entry("provanext", "1.1", &sha, "");
         if let Value::Obj(members) = &mut next {
             members.push((String::from("system"), Value::string("99.0")));
@@ -860,7 +860,7 @@ pub fn self_test() -> bool {
         let installed = store::installed("provaagg").map(|p| p.version);
         check(installed.as_deref() == Some("1.1"), &format!("installed version {installed:?}"));
         let bytes = fs::abs(&format!("{APPS}/provaagg.app")).and_then(|p| fs::read_file(&p)).unwrap_or_default();
-        check(bytes.ends_with(b"arcos-update-1.1"), "the program was not replaced");
+        check(bytes.ends_with(b"justos-update-1.1"), "the program was not replaced");
         check(!fs::abs(&src.pending("provaagg")).is_ok_and(|p| fs::exists(&p)), "the download was left behind");
         // The new version runs.
         let code = fs::abs(&format!("{APPS}/provaagg.app")).ok().and_then(|p| crate::user::spawn(&p, "wait 1", fs::abs("sys:/").ok()?).ok()).and_then(crate::user::wait);
@@ -884,7 +884,7 @@ pub fn self_test() -> bool {
 
     for id in fake {
         let _ = store::remove(id);
-        remove_dir(&format!("sys:/home/.apps/org.arcos.{id}"));
+        remove_dir(&format!("sys:/home/.apps/dev.justos.{id}"));
     }
     remove_dir(base);
     if failed == 0 {

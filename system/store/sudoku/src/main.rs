@@ -8,9 +8,9 @@ extern crate alloc;
 
 use alloc::format;
 use alloc::vec::Vec;
-use arcui::{ui, Event, Font, Key, Rect, Rng, Window};
+use justui::{ui, Event, Font, Key, Rect, Rng, Window};
 
-arcrt::main!(main);
+justrt::main!(main);
 
 const CELL: i32 = 52;
 const GRID: i32 = CELL * 9;
@@ -143,7 +143,7 @@ impl Game {
             selected: None,
             pencil: false,
             mistakes: 0,
-            started: arcui::now_ms(),
+            started: justui::now_ms(),
             done: None,
             rng,
         }
@@ -174,7 +174,7 @@ impl Game {
             }
         }
         if self.board == self.solution {
-            self.done = Some(arcui::now_ms());
+            self.done = Some(justui::now_ms());
         }
     }
 
@@ -259,7 +259,7 @@ impl Game {
         }
         // The side: time, mistakes, digits, buttons.
         let s = self.side();
-        let secs = (self.done.unwrap_or(arcui::now_ms()) - self.started) / 1000;
+        let secs = (self.done.unwrap_or(justui::now_ms()) - self.started) / 1000;
         win.canvas.fill_round(Rect::new(s.x, s.y, s.w, 100), 14, ui::PANEL);
         win.text(Font::Small, s.x + 14, s.y + 12, "TEMPO", ui::TEXT_FAINT);
         win.text(Font::Heading, s.x + 14, s.y + 28, &format!("{}:{:02}", secs / 60, secs % 60), ui::TEXT);
@@ -292,7 +292,7 @@ fn main(_args: &str) -> i32 {
     loop {
         g.draw(&mut win);
         win.present();
-        let ev = if g.done.is_none() { win.event(1000 - (arcui::now_ms() - g.started) % 1000) } else { Some(win.wait()) };
+        let ev = if g.done.is_none() { win.event(1000 - (justui::now_ms() - g.started) % 1000) } else { Some(win.wait()) };
         let Some(ev) = ev else { continue };
         match ev {
             Event::Close => return 0,

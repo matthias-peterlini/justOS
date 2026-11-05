@@ -13,10 +13,10 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
-use arcdrv::{port, BlockDesc, DeviceInfo, Mutex, Status, E_INVAL, E_IO, E_NODEV, E_TIMEOUT, OK, RES_IO};
+use justdrv::{port, BlockDesc, DeviceInfo, Mutex, Status, E_INVAL, E_IO, E_NODEV, E_TIMEOUT, OK, RES_IO};
 use core::ffi::c_void;
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "ata",
     version: "1.1.0",
     probe: probe,
@@ -73,7 +73,7 @@ impl Channel {
 
     fn wait_not_busy(&self, timeout_ms: u64) -> Result<u8, Status> {
         let mut status = 0;
-        if arcdrv::wait_until(timeout_ms, || {
+        if justdrv::wait_until(timeout_ms, || {
             status = self.status();
             status & BSY == 0
         }) {
@@ -91,7 +91,7 @@ impl Channel {
         }
         if status & DRQ == 0 {
             let mut s = 0;
-            if !arcdrv::wait_until(1000, || {
+            if !justdrv::wait_until(1000, || {
                 s = self.status();
                 s & (DRQ | ERR | DF) != 0
             }) {
@@ -176,7 +176,7 @@ impl Disk {
             port::outb(ch.base + COMMAND, cmd);
             for i in 0..n {
                 if let Err(e) = ch.wait_drq() {
-                    arcdrv::warn!(
+                    justdrv::warn!(
                         "{} sector {}: error {:#x}",
                         if write { "write" } else { "read" },
                         lba + (done + i) as u64,
@@ -251,9 +251,9 @@ unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
     for ch in &c.channels {
         let ch = ch.lock();
         port::outb(ch.ctrl, 0x06); // software reset, interrupts off
-        arcdrv::sleep_ms(1);
+        justdrv::sleep_ms(1);
         port::outb(ch.ctrl, 0x02);
-        arcdrv::sleep_ms(2);
+        justdrv::sleep_ms(2);
         if ch.status() != 0xFF && ch.wait_not_busy(31_000).is_err() {
             status = E_TIMEOUT;
         }
@@ -296,7 +296,7 @@ fn probe(dev: &DeviceInfo) -> Status {
     // prog-if bit 0/2: channel in native mode, ports in the BARs.
     let primary = if dev.prog_if & 1 != 0 { (io(0), io(1).map(|p| p + 2)) } else { (Some(0x1F0), Some(0x3F6)) };
     let secondary = if dev.prog_if & 4 != 0 { (io(2), io(3).map(|p| p + 2)) } else { (Some(0x170), Some(0x376)) };
-    arcdrv::Pci(dev.id).enable(true, false, false);
+    justdrv::Pci(dev.id).enable(true, false, false);
 
     let mut found = 0;
     let mut ctl = Controller { channels: Vec::new(), disks: Vec::new() };
@@ -329,9 +329,9 @@ fn probe(dev: &DeviceInfo) -> Status {
                 read,
                 write,
                 flush: Some(flush),
-                model: arcdrv::model_name(&model(&id)),
+                model: justdrv::model_name(&model(&id)),
             }));
-            if arcdrv::block_register(dev.id, desc) >= 0 {
+            if justdrv::block_register(dev.id, desc) >= 0 {
                 found += 1;
                 ctl.disks.push(disk);
             }
@@ -339,9 +339,9 @@ fn probe(dev: &DeviceInfo) -> Status {
     }
     if found == 0 {
         // A controller with only CD drives or nothing: still ours.
-        arcdrv::info!("no ATA disks on this controller");
+        justdrv::info!("no ATA disks on this controller");
     }
     let ctl: &'static Controller = Box::leak(Box::new(ctl));
-    arcdrv::power_hooks(dev.id, ctl as *const Controller as *mut c_void, Some(suspend), resume);
+    justdrv::power_hooks(dev.id, ctl as *const Controller as *mut c_void, Some(suspend), resume);
     OK
 }

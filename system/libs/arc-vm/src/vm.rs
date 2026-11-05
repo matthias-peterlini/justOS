@@ -286,7 +286,7 @@ impl Vm {
         self.args = args;
     }
 
-    /// The app's display name and app id (`org.arcos.<name>`), which
+    /// The app's display name and app id (`dev.justos.<name>`), which
     /// notifications carry so the desktop groups them per app.
     pub fn set_app(&mut self, title: &str, app_id: &str) {
         self.app_title = title.to_owned();

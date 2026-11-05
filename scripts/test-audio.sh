@@ -1,5 +1,5 @@
 #!/bin/sh
-# Boots an arcOS image once per sound card QEMU emulates, plays a 440 Hz
+# Boots an JustOS image once per sound card QEMU emulates, plays a 440 Hz
 # tone and a WAV file from the shell and checks what QEMU recorded: the
 # tone must be there, at the right pitch and for its whole length.
 #

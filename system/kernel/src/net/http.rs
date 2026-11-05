@@ -1,4 +1,4 @@
-//! An HTTP/1.1 client over TCP, with TLS for `https:` ([`arctls`]):
+//! An HTTP/1.1 client over TCP, with TLS for `https:` ([`justtls`]):
 //! redirects, chunked and sized bodies, gzip, progress reports and an
 //! optional proxy (`sys:/system/proxy`, "host:port", reached with CONNECT).
 //!
@@ -13,12 +13,12 @@ use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use arctls::tls::Client;
-use arctls::x509::{self, Root};
+use justtls::tls::Client;
+use justtls::x509::{self, Root};
 
 const CONNECT_MS: u64 = 15_000;
 const READ_MS: u64 = 30_000;
-pub const USER_AGENT: &str = "Mozilla/5.0 (arcOS; x86_64) ticly/1.0";
+pub const USER_AGENT: &str = "Mozilla/5.0 (JustOS; x86_64) ticly/1.0";
 
 static ROOTS: IrqLock<Option<&'static [Root]>> = IrqLock::new(None);
 
@@ -355,8 +355,8 @@ pub fn fetch(req: &Request<'_>, progress: Progress<'_>) -> Result<Response, Stri
             }
         }
         let data = match headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("content-encoding")).map(|(_, v)| v.to_ascii_lowercase()) {
-            Some(e) if e.contains("gzip") => arczip::gunzip(&data).ok_or("bad gzip data")?,
-            Some(e) if e.contains("deflate") => arczip::zlib(&data).ok_or("bad deflate data")?,
+            Some(e) if e.contains("gzip") => justzip::gunzip(&data).ok_or("bad gzip data")?,
+            Some(e) if e.contains("deflate") => justzip::zlib(&data).ok_or("bad deflate data")?,
             _ => data,
         };
         return Ok(Response { status, headers, body: data, url });

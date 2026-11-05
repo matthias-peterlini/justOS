@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Paints the arcOS wallpapers.
+"""Paints the JustOS wallpapers.
 
 Every wallpaper is generated here from noise and gradients: a sky, a far
 range in the haze, a massif of Dolomite towers whose rock is lit from the
-heightfield of its gullies, a sea of fog and rows of firs in front. Three
-moods share the same landscape: "dolomiti" (alpenglow at sunset), "alba"
-(dawn) and "notte" (moonlight).
+heightfield of its gullies, a sea of fog and rows of firs in front. Two
+moods share the same landscape: "dolomiti" (alpenglow at sunset) and
+"notte" (moonlight). The default wallpaper, "pixel", is painted by
+gen_pixel.py.
 
 Output: rootfs/system/gui/wallpapers/<name>.qoi (1440x900).
 
@@ -72,11 +73,6 @@ MOODS = {
         clouds="#f0c0b0", far="#9a7f8e", dark="#3a2427", rock="#b4532c", glow="#f08a46",
         shadow="#2c2028", haze="#7d6070", fog="#d8c8cc", mist=(200, 180, 186),
         trees=["#5e5560", "#3c3a40", "#1d2224", "#111517"], stars=False),
-    "alba": dict(
-        sky=[(0, "#6a7fa8"), (0.28, "#a7a3c4"), (0.47, "#e6bcb6"), (0.6, "#f4d2bd")],
-        clouds="#fff1ea", far="#a7a2bb", dark="#4a4458", rock="#c98a7e", glow="#ffc9a8",
-        shadow="#3a3648", haze="#9a92aa", fog="#eef0f4", mist=(226, 228, 236),
-        trees=["#7d8392", "#4f5664", "#253036", "#141b1f"], stars=False),
     "notte": dict(
         sky=[(0, "#060a1c"), (0.3, "#121b40"), (0.5, "#24305e"), (0.6, "#2f3a68")],
         clouds="#3a4677", far="#2a3360", dark="#121731", rock="#4c5886", glow="#9fb0de",

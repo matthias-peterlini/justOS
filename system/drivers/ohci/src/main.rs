@@ -18,16 +18,16 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use arcdrv::usb::*;
-use arcdrv::{
+use justdrv::usb::*;
+use justdrv::{
     DeviceInfo, Dma, Event, IrqLock, Mmio, Mutex, Pci, Status, E_BUSY, E_GONE, E_INVAL, E_IO, E_NODEV, E_NOMEM, E_STALL, E_TIMEOUT, OK,
     RES_MEMORY,
 };
-use arcusb::{Attach, Handle, Host, HubInfo, PortStatus, Table};
+use justusb::{Attach, Handle, Host, HubInfo, PortStatus, Table};
 use core::ffi::c_void;
 use core::sync::atomic::{fence, AtomicBool, AtomicU16, AtomicU32, AtomicU8, Ordering};
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "ohci",
     version: "1.1.0",
     probe: probe,
@@ -324,7 +324,7 @@ impl Ohci {
             }
         }
         // The controller may still be on one of them in this frame.
-        arcdrv::sleep_ms(2);
+        justdrv::sleep_ms(2);
     }
 
     fn kick(&self, pipe: &Pipe) {
@@ -343,7 +343,7 @@ impl Ohci {
 
     /// Waits until the queue is empty or halted. Returns whether it halted.
     fn wait_queue(&self, pipe: &Pipe, timeout_ms: u32) -> Result<bool, Status> {
-        let deadline = arcdrv::time_ms() + timeout_ms as u64;
+        let deadline = justdrv::time_ms() + timeout_ms as u64;
         loop {
             if pipe.halted() {
                 return Ok(true);
@@ -354,10 +354,10 @@ impl Ohci {
             if pipe.gone.load(Ordering::Acquire) {
                 return Err(E_GONE);
             }
-            if arcdrv::time_ms() >= deadline {
+            if justdrv::time_ms() >= deadline {
                 return Err(E_TIMEOUT);
             }
-            arcdrv::sleep_ms(1);
+            justdrv::sleep_ms(1);
         }
     }
 
@@ -365,7 +365,7 @@ impl Ohci {
     /// skip the ED, wait for the frame to end, empty it.
     fn abort(&self, pipe: &Pipe, dev: &Dev) {
         pipe.write_ed0(dev.address.load(Ordering::Relaxed), dev.low_speed, true);
-        arcdrv::sleep_ms(2);
+        justdrv::sleep_ms(2);
         pipe.reset_queue(false);
         pipe.write_ed0(dev.address.load(Ordering::Relaxed), dev.low_speed, false);
     }
@@ -517,7 +517,7 @@ impl Ohci {
             let Some(p) = poll else { continue };
             let code = pipe.td_code(0);
             if pipe.halted() || (code != CC_OK && code != CC_UNDERRUN) {
-                arcdrv::debug!("endpoint {:#x}: polling stopped (code {code})", pipe.endpoint);
+                justdrv::debug!("endpoint {:#x}: polling stopped (code {code})", pipe.endpoint);
                 *pipe.poll.lock() = None;
                 pipe.in_callback.store(false, Ordering::Release);
                 self.polls.lock().retain(|q| !Arc::ptr_eq(q, &pipe));
@@ -567,13 +567,13 @@ impl Host for Ohci {
     fn port_reset(&self, port: u8) -> Result<u8, Status> {
         let r = self.port_reg(port);
         self.regs.write32(r, PORT_PRS);
-        let ok = arcdrv::wait_until(200, || self.regs.read32(r) & PORT_PRSC != 0);
+        let ok = justdrv::wait_until(200, || self.regs.read32(r) & PORT_PRSC != 0);
         self.regs.write32(r, PORT_PRSC);
         let v = self.regs.read32(r);
         if !ok || v & PORT_PES == 0 {
             return Err(E_IO);
         }
-        arcdrv::sleep_ms(10); // reset recovery
+        justdrv::sleep_ms(10); // reset recovery
         Ok(if v & PORT_LSDA != 0 { SPEED_LOW } else { SPEED_FULL })
     }
 
@@ -608,7 +608,7 @@ impl Host for Ohci {
     fn configure(&self, dev: Handle, config: &[u8], _hub: Option<HubInfo>) -> Result<(), Status> {
         let d = self.dev(dev)?;
         let address = d.address.load(Ordering::Relaxed);
-        for e in arcusb::config_endpoints(config) {
+        for e in justusb::config_endpoints(config) {
             if d.pipe(e.address).is_some() {
                 continue;
             }
@@ -661,7 +661,7 @@ impl Host for Ohci {
         let Some(pipe) = d.pipe(endpoint) else { return E_INVAL };
         let _one = pipe.busy.lock();
         pipe.write_ed0(d.address.load(Ordering::Relaxed), d.low_speed, true);
-        arcdrv::sleep_ms(2);
+        justdrv::sleep_ms(2);
         pipe.reset_queue(true);
         pipe.write_ed0(d.address.load(Ordering::Relaxed), d.low_speed, false);
         OK
@@ -706,7 +706,7 @@ impl Ohci {
         for p in 1..=self.ports {
             self.regs.write32(self.port_reg(p), PORT_PPS);
         }
-        arcdrv::sleep_ms(((self.regs.read32(HC_RH_DESC_A) >> 24) as u64 * 2).max(20));
+        justdrv::sleep_ms(((self.regs.read32(HC_RH_DESC_A) >> 24) as u64 * 2).max(20));
     }
 }
 
@@ -716,7 +716,7 @@ impl Ohci {
 fn init(regs: &Mmio, hcca: &Dma, fi: u32) -> Status {
     regs.write32(HC_INT_DISABLE, 0xFFFF_FFFF);
     regs.write32(HC_CONTROL, 0);
-    arcdrv::sleep_ms(50);
+    justdrv::sleep_ms(50);
     for anchor in [ANCHOR_CONTROL, ANCHOR_BULK, ANCHOR_PERIODIC] {
         hcca.write::<u32>(anchor, ED_SKIP);
     }
@@ -725,8 +725,8 @@ fn init(regs: &Mmio, hcca: &Dma, fi: u32) -> Status {
         hcca.write::<u32>(i * 4, periodic);
     }
     regs.write32(HC_COMMAND, CMD_HCR);
-    if !arcdrv::wait_until(10, || regs.read32(HC_COMMAND) & CMD_HCR == 0) {
-        arcdrv::warn!("controller reset timed out");
+    if !justdrv::wait_until(10, || regs.read32(HC_COMMAND) & CMD_HCR == 0) {
+        justdrv::warn!("controller reset timed out");
         return E_TIMEOUT;
     }
     regs.write32(HC_HCCA, hcca.phys() as u32);
@@ -746,7 +746,7 @@ fn init(regs: &Mmio, hcca: &Dma, fi: u32) -> Status {
 fn stop_poll(o: &Ohci, dev: &Dev, pipe: &Arc<Pipe>) {
     let stopped = pipe.poll.lock().take().is_some();
     while pipe.in_callback.load(Ordering::Acquire) {
-        arcdrv::sleep_ms(1);
+        justdrv::sleep_ms(1);
     }
     if stopped {
         o.polls.lock().retain(|q| !Arc::ptr_eq(q, pipe));
@@ -778,7 +778,7 @@ unsafe extern "C" fn poll_thread(ctx: *mut c_void) {
         // Let the controller report its next done queue.
         o.regs.write32(HC_INT_STATUS, sts & INT_WDH);
         if sts & INT_UE != 0 && !reported && !o.asleep.load(Ordering::Acquire) {
-            arcdrv::error!("controller stopped (unrecoverable error)");
+            justdrv::error!("controller stopped (unrecoverable error)");
             reported = true;
         }
         o.service_polls();
@@ -790,13 +790,13 @@ fn take_ownership(regs: &Mmio) {
     let ctl = regs.read32(HC_CONTROL);
     if ctl & CTL_IR != 0 {
         regs.write32(HC_COMMAND, CMD_OCR);
-        if !arcdrv::wait_until(500, || regs.read32(HC_CONTROL) & CTL_IR == 0) {
-            arcdrv::warn!("the firmware did not release the controller; taking it anyway");
+        if !justdrv::wait_until(500, || regs.read32(HC_CONTROL) & CTL_IR == 0) {
+            justdrv::warn!("the firmware did not release the controller; taking it anyway");
             regs.write32(HC_CONTROL, regs.read32(HC_CONTROL) & !CTL_IR);
         }
     } else if ctl & CTL_HCFS != 0 && ctl & CTL_HCFS != CTL_OPERATIONAL {
         regs.write32(HC_CONTROL, (ctl & !CTL_HCFS) | CTL_RESUME);
-        arcdrv::sleep_ms(20);
+        justdrv::sleep_ms(20);
     }
 }
 
@@ -842,11 +842,11 @@ fn probe(dev: &DeviceInfo) -> Status {
         asleep: AtomicBool::new(false),
     }));
     let ctx = o as *const Ohci as *mut c_void;
-    o.has_irq.store(arcdrv::irq_attach_any(dev, irq, ctx), Ordering::Relaxed);
-    arcdrv::spawn("ohci-poll", poll_thread, ctx);
+    o.has_irq.store(justdrv::irq_attach_any(dev, irq, ctx), Ordering::Relaxed);
+    justdrv::spawn("ohci-poll", poll_thread, ctx);
     o.regs.write32(HC_INT_ENABLE, INT_MIE | INT_WDH | INT_UE);
     o.power_ports();
-    arcdrv::info!("{} ports, {}", ports, if o.has_irq.load(Ordering::Relaxed) { "interrupts" } else { "polling" });
-    arcusb::start(o, dev.id, "ohci-ports");
+    justdrv::info!("{} ports, {}", ports, if o.has_irq.load(Ordering::Relaxed) { "interrupts" } else { "polling" });
+    justusb::start(o, dev.id, "ohci-ports");
     OK
 }

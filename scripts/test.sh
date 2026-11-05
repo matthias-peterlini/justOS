@@ -1,5 +1,5 @@
 #!/bin/sh
-# Boots an arcOS image headless and types a list of commands on the serial
+# Boots an JustOS image headless and types a list of commands on the serial
 # console. Usage: scripts/test.sh <image> [commands-file] [qemu options...]
 #
 # Lines starting with @sleep N pause; @raw TEXT sends TEXT as a printf
@@ -61,6 +61,6 @@ fi
 # Strip colours for readability.
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g; s/\r//g' "$OUT"
 STATUS=0
-grep -q "arcOS stopped" "$OUT" && STATUS=1
+grep -q "JustOS stopped" "$OUT" && STATUS=1
 rm -f "$OUT" "$WORK" $VARS
 exit $STATUS

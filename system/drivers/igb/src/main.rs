@@ -12,11 +12,11 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
-use arcdrv::{DeviceInfo, Dma, IrqLock, Mmio, NetDesc, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, OK, RES_MEMORY};
+use justdrv::{DeviceInfo, Dma, IrqLock, Mmio, NetDesc, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, OK, RES_MEMORY};
 use core::ffi::c_void;
 use core::sync::atomic::{fence, AtomicBool, AtomicI32, Ordering};
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "igb",
     version: "1.1.0",
     probe: probe,
@@ -127,8 +127,8 @@ impl Nic {
         regs.write32(RDH, 0);
         regs.write32(RDT, 0);
         regs.write32(RXDCTL, regs.read32(RXDCTL) | QUEUE_ENABLE);
-        if !arcdrv::wait_until(50, || regs.read32(RXDCTL) & QUEUE_ENABLE != 0) {
-            arcdrv::warn!("the receive queue does not start");
+        if !justdrv::wait_until(50, || regs.read32(RXDCTL) & QUEUE_ENABLE != 0) {
+            justdrv::warn!("the receive queue does not start");
         }
         regs.write32(RDT, (RX_COUNT - 1) as u32);
         // Enable, broadcast, strip the CRC.
@@ -140,8 +140,8 @@ impl Nic {
         regs.write32(TDH, 0);
         regs.write32(TDT, 0);
         regs.write32(TXDCTL, regs.read32(TXDCTL) | QUEUE_ENABLE);
-        if !arcdrv::wait_until(50, || regs.read32(TXDCTL) & QUEUE_ENABLE != 0) {
-            arcdrv::warn!("the transmit queue does not start");
+        if !justdrv::wait_until(50, || regs.read32(TXDCTL) & QUEUE_ENABLE != 0) {
+            justdrv::warn!("the transmit queue does not start");
         }
         // Enable, pad short frames, collision settings.
         regs.write32(TCTL, 1 << 1 | 1 << 3 | 0x0F << 4 | 0x3F << 12);
@@ -181,7 +181,7 @@ impl Nic {
             fence(Ordering::SeqCst);
             let len = self.rx_ring.read::<u16>(i * 16 + 12) as usize;
             if status & RX_EOP != 0 && len <= BUF && iface >= 0 {
-                arcdrv::net_receive(iface as u32, &self.rx_bufs.as_slice()[i * BUF..i * BUF + len]);
+                justdrv::net_receive(iface as u32, &self.rx_bufs.as_slice()[i * BUF..i * BUF + len]);
             }
             self.give_rx(i);
             fence(Ordering::SeqCst);
@@ -199,7 +199,7 @@ impl Nic {
         }
         // Wait for the slot without holding the lock (time stands still
         // while it is held).
-        let start = arcdrv::time_ms();
+        let start = justdrv::time_ms();
         let mut r = loop {
             let r = self.rings.lock();
             let at = r.tx_next * 16;
@@ -209,10 +209,10 @@ impl Nic {
                 break r;
             }
             drop(r);
-            if arcdrv::time_ms() - start > 100 {
+            if justdrv::time_ms() - start > 100 {
                 return E_IO;
             }
-            arcdrv::yield_now();
+            justdrv::yield_now();
         };
         let i = r.tx_next;
         let at = i * 16;
@@ -258,7 +258,7 @@ unsafe extern "C" fn poller(ctx: *mut c_void) {
     let nic = unsafe { &*(ctx as *const Nic) };
     loop {
         nic.receive();
-        arcdrv::sleep_ms(if nic.has_irq.load(Ordering::Relaxed) { 50 } else { 5 });
+        justdrv::sleep_ms(if nic.has_irq.load(Ordering::Relaxed) { 50 } else { 5 });
     }
 }
 
@@ -293,7 +293,7 @@ unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
 fn phy_read(regs: &Mmio, reg: u32) -> Option<u16> {
     regs.write32(MDIC, reg << 16 | 1 << 21 | 2 << 26);
     let mut v = 0;
-    arcdrv::wait_until(10, || {
+    justdrv::wait_until(10, || {
         v = regs.read32(MDIC);
         v & (1 << 28) != 0
     })
@@ -303,7 +303,7 @@ fn phy_read(regs: &Mmio, reg: u32) -> Option<u16> {
 
 fn phy_write(regs: &Mmio, reg: u32, data: u16) {
     regs.write32(MDIC, data as u32 | reg << 16 | 1 << 21 | 1 << 26);
-    arcdrv::wait_until(10, || regs.read32(MDIC) & (1 << 28) != 0);
+    justdrv::wait_until(10, || regs.read32(MDIC) & (1 << 28) != 0);
 }
 
 fn read_mac(regs: &Mmio) -> Option<[u8; 6]> {
@@ -317,7 +317,7 @@ fn read_mac(regs: &Mmio) -> Option<[u8; 6]> {
     for word in 0..3u32 {
         regs.write32(EERD, 1 | word << 2);
         let mut v = 0;
-        if !arcdrv::wait_until(10, || {
+        if !justdrv::wait_until(10, || {
             v = regs.read32(EERD);
             v & 2 != 0
         }) {
@@ -333,13 +333,13 @@ fn reset(regs: &Mmio) -> Status {
     regs.write32(IMC, u32::MAX);
     regs.write32(EIMC, u32::MAX);
     regs.write32(CTRL, regs.read32(CTRL) | CTRL_RST);
-    arcdrv::sleep_ms(20);
-    if !arcdrv::wait_until(200, || regs.read32(CTRL) & CTRL_RST == 0) {
-        arcdrv::warn!("the card does not come out of reset");
+    justdrv::sleep_ms(20);
+    if !justdrv::wait_until(200, || regs.read32(CTRL) & CTRL_RST == 0) {
+        justdrv::warn!("the card does not come out of reset");
         return E_IO;
     }
     // The NVM is read again after a reset.
-    arcdrv::sleep_ms(20);
+    justdrv::sleep_ms(20);
     regs.write32(IMC, u32::MAX);
     regs.write32(EIMC, u32::MAX);
     regs.write32(GPIE, 0); // interrupts by cause register, not per queue
@@ -358,7 +358,7 @@ fn probe(dev: &DeviceInfo) -> Status {
     if dev.vendor != 0x8086 || bar.kind != RES_MEMORY || bar.base == 0 {
         return E_NODEV;
     }
-    arcdrv::Pci(dev.id).enable(false, true, true);
+    justdrv::Pci(dev.id).enable(false, true, true);
     let Some(regs) = Mmio::map(bar.base, 0x20000) else { return E_NOMEM };
     let st = reset(&regs);
     if st != OK {
@@ -367,7 +367,7 @@ fn probe(dev: &DeviceInfo) -> Status {
     let mac = match read_mac(&regs) {
         Some(m) => m,
         None => {
-            arcdrv::warn!("no MAC address in the NVM");
+            justdrv::warn!("no MAC address in the NVM");
             return E_IO;
         }
     };
@@ -394,7 +394,7 @@ fn probe(dev: &DeviceInfo) -> Status {
 
     let ctx = nic as *const Nic as *mut c_void;
     let desc: &'static NetDesc = Box::leak(Box::new(NetDesc { ctx, mac, _pad: [0; 2], mtu: 1500, send }));
-    let iface = arcdrv::net_register(dev.id, desc);
+    let iface = justdrv::net_register(dev.id, desc);
     if iface < 0 {
         regs.write32(RCTL, 0);
         regs.write32(TCTL, 0);
@@ -403,23 +403,23 @@ fn probe(dev: &DeviceInfo) -> Status {
     nic.iface.store(iface, Ordering::Relaxed);
     // The 82575 maps MSI-X vectors another way: it uses its line.
     let is_82575 = matches!(dev.device, 0x10A7 | 0x10A9 | 0x10D6);
-    let message = !is_82575 && arcdrv::irq_attach_msi(dev.id, irq, ctx) >= 0;
-    let attached = message || (dev.irq != arcdrv::IRQ_NONE && arcdrv::irq_attach(dev.id, dev.irq, irq, ctx) == OK);
+    let message = !is_82575 && justdrv::irq_attach_msi(dev.id, irq, ctx) >= 0;
+    let attached = message || (dev.irq != justdrv::IRQ_NONE && justdrv::irq_attach(dev.id, dev.irq, irq, ctx) == OK);
     if attached {
         nic.has_irq.store(true, Ordering::Relaxed);
-        let msix = message && arcdrv::Pci(dev.id).find_capability(0x11, 0).is_some();
+        let msix = message && justdrv::Pci(dev.id).find_capability(0x11, 0).is_some();
         nic.msix.store(msix, Ordering::Relaxed);
         nic.unmask();
     }
-    arcdrv::spawn("igb-rx", poller, ctx);
-    arcdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
+    justdrv::spawn("igb-rx", poller, ctx);
+    justdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
     let status = regs.read32(STATUS);
     let speed = match (status >> 6) & 3 {
         0 => "10 Mbit",
         1 => "100 Mbit",
         _ => "1 Gbit or faster",
     };
-    arcdrv::info!(
+    justdrv::info!(
         "link {}, {}",
         if status & 2 != 0 { speed } else { "down" },
         if nic.has_irq.load(Ordering::Relaxed) { "interrupts" } else { "polling" }

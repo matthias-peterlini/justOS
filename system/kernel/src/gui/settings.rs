@@ -131,12 +131,12 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn stretch(salt: &str, password: &str) -> String {
-    let mut h = arctls::sha2::Sha256::new();
+    let mut h = justtls::sha2::Sha256::new();
     h.update(salt.as_bytes());
     h.update(password.as_bytes());
     let mut d = h.finish();
     for _ in 0..ROUNDS {
-        let mut h = arctls::sha2::Sha256::new();
+        let mut h = justtls::sha2::Sha256::new();
         h.update(&d);
         h.update(password.as_bytes());
         d = h.finish();

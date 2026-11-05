@@ -5,7 +5,7 @@
 use crate::arch::{apic, pic};
 use crate::sync::IrqLock;
 use alloc::vec::Vec;
-use arcdk::IrqHandler;
+use justdk::IrqHandler;
 use core::ffi::c_void;
 
 #[derive(Clone, Copy)]
@@ -59,33 +59,33 @@ const CAP_MSIX: u8 = 0x11;
 
 /// Points a device's MSI-X (preferred) or MSI at a free vector that runs
 /// `handler`. Returns the vector.
-pub fn attach_msi(device: u32, handler: IrqHandler, ctx: *mut c_void) -> Result<u8, arcdk::Status> {
-    let info = super::info(device).ok_or(arcdk::E_INVAL)?;
-    if info.bus != arcdk::BUS_PCI {
-        return Err(arcdk::E_UNSUPPORTED);
+pub fn attach_msi(device: u32, handler: IrqHandler, ctx: *mut c_void) -> Result<u8, justdk::Status> {
+    let info = super::info(device).ok_or(justdk::E_INVAL)?;
+    if info.bus != justdk::BUS_PCI {
+        return Err(justdk::E_UNSUPPORTED);
     }
     let loc = info.location;
     if super::pci::find_capability(loc, CAP_MSIX).is_none() && super::pci::find_capability(loc, CAP_MSI).is_none() {
-        return Err(arcdk::E_UNSUPPORTED);
+        return Err(justdk::E_UNSUPPORTED);
     }
-    apic::enable().ok_or(arcdk::E_UNSUPPORTED)?;
+    apic::enable().ok_or(justdk::E_UNSUPPORTED)?;
     let vector = {
         let mut table = MSI.lock();
-        let free = table.iter().position(|e| e.is_none()).ok_or(arcdk::E_BUSY)?;
+        let free = table.iter().position(|e| e.is_none()).ok_or(justdk::E_BUSY)?;
         table[free] = Some(Entry { owner: device, handler: Handler::Driver(handler, ctx) });
         MSI_COUNTS.lock()[free] = 0;
         MSI_FIRST + free as u8
     };
     if !program(&info, vector) {
         MSI.lock()[(vector - MSI_FIRST) as usize] = None;
-        return Err(arcdk::E_IO);
+        return Err(justdk::E_IO);
     }
     Ok(vector)
 }
 
 /// Points the device's MSI-X (preferred) or MSI at `vector` on the first
 /// processor, and turns its legacy line off.
-fn program(info: &arcdk::DeviceInfo, vector: u8) -> bool {
+fn program(info: &justdk::DeviceInfo, vector: u8) -> bool {
     let loc = info.location;
     let Some(apic_id) = apic::enable() else { return false };
     let address = 0xFEE0_0000u32 | (apic_id & 0xFF) << 12;
@@ -133,13 +133,13 @@ fn program_msi(loc: u32, cap: u16, address: u32, vector: u32) {
     write(loc, cap + 2, 2, (control & !(7 << 4)) | 1);
 }
 
-fn program_msix(info: &arcdk::DeviceInfo, cap: u16, address: u32, vector: u32) -> bool {
+fn program_msix(info: &justdk::DeviceInfo, cap: u16, address: u32, vector: u32) -> bool {
     use super::pci::{read, write};
     let loc = info.location;
     let control = read(loc, cap + 2, 2);
     let table = read(loc, cap + 4, 4);
     let bar = info.resources[(table & 7) as usize];
-    if bar.kind != arcdk::RES_MEMORY || bar.base == 0 {
+    if bar.kind != justdk::RES_MEMORY || bar.base == 0 {
         return false;
     }
     let entries = (control & 0x7FF) as u64 + 1;
@@ -167,7 +167,7 @@ fn program_msix(info: &arcdk::DeviceInfo, cap: u16, address: u32, vector: u32) -
 /// Turns off a device's message interrupts (its driver is going away).
 fn disable_msi(device: u32) {
     let Some(info) = super::info(device) else { return };
-    if info.bus != arcdk::BUS_PCI {
+    if info.bus != justdk::BUS_PCI {
         return;
     }
     let loc = info.location;

@@ -1,4 +1,4 @@
-//! The AML task: it owns the interpreter of the firmware's AML (arcaml),
+//! The AML task: it owns the interpreter of the firmware's AML (justaml),
 //! loads the DSDT and SSDTs, readies the devices, and then answers the
 //! events of the chipset (GPEs, the embedded controller) and the requests
 //! of the rest of the kernel. AML runs only here, on a big stack: methods
@@ -14,7 +14,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use arcaml::{space, Error, Handler, Interpreter, NodeId, ObjectType, PciAddress, Value};
+use justaml::{space, Error, Handler, Interpreter, NodeId, ObjectType, PciAddress, Value};
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 pub type Aml = Interpreter<Host>;
@@ -524,7 +524,7 @@ fn setup_ec(aml: &mut Aml, ev: &mut Events, early: Option<(u16, String)>) {
     if let Some(n) = node {
         if !ec::present() {
             if let Ok(Some(Value::Buffer(crs))) = aml.evaluate_child(n, "_CRS", &[]) {
-                let ports = arcaml::resource::io_ports(&arcaml::resource::parse(&crs));
+                let ports = justaml::resource::io_ports(&justaml::resource::parse(&crs));
                 if ports.len() >= 2 {
                     ec::set_ports(ports[0], ports[1]);
                 }

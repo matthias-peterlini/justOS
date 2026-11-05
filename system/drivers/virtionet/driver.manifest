@@ -4,6 +4,6 @@ name        = virtionet
 version     = 1.1.0
 class       = network
 description = virtio network card
-author      = arcOS
+author      = JustOS
 match       = pci 1af4:1000     # transitional (legacy + modern)
 match       = pci 1af4:1041     # modern only

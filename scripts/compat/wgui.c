@@ -64,13 +64,13 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     WNDCLASSA wc = {0};
     wc.lpfnWndProc = proc;
     wc.hInstance = inst;
-    wc.lpszClassName = "arcwin";
+    wc.lpszClassName = "justwin";
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     RegisterClassA(&wc);
     RECT r = {0, 0, 320, 240};
     AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-    HWND h = CreateWindowExA(0, "arcwin", "Win32 su arcOS", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+    HWND h = CreateWindowExA(0, "justwin", "Win32 su JustOS", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
                              r.right - r.left, r.bottom - r.top, NULL, NULL, inst, NULL);
     if (!h) {
         printf("wgui: no window\n");

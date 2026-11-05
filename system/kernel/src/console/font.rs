@@ -1,4 +1,4 @@
-//! arcOS's own 8x16 font, used when the firmware offers none (UEFI).
+//! JustOS's own 8x16 font, used when the firmware offers none (UEFI).
 //!
 //! Glyphs are drawn on a 5x7 grid below and scaled into the 8x16 cell at
 //! compile time; box-drawing and block characters are generated to fill

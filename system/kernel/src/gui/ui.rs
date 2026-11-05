@@ -7,7 +7,7 @@ use super::text::{self, Font};
 use super::Display;
 use crate::dev::input::{self, KeyEvent};
 
-// The arc palette: frosted glass in neutral greys over the wallpaper, light
+// The JustOS palette: frosted glass in neutral greys over the wallpaper, light
 // panes for the bar and the frames, darker panes for content, white text on
 // the dark ones and ink on the light ones, light grey and white pills.
 pub const TEXT: u32 = 0xFFFF_FFFF;
@@ -194,7 +194,7 @@ pub fn button(c: &mut Canvas, r: Rect, label: &str, primary: bool, hover: bool) 
         c.shadow(r, r.h / 2, 8, if hover { 70 } else { 45 });
         c.fill_round(r, r.h / 2, if hover { 0xFFFF_FFFF } else { 0xF5FF_FFFF });
     } else {
-        // The translucent grey pill of the arc design.
+        // The translucent grey pill of the JustOS design.
         c.fill_round(r, r.h / 2, if hover { 0x40FF_FFFF } else { 0x29FF_FFFF });
         c.stroke_round(r, r.h / 2, 1, 0x1FFF_FFFF);
     }

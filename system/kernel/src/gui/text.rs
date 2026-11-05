@@ -1,12 +1,12 @@
 //! Text, drawn from the anti-aliased glyph atlas in `assets/fonts.bin`
 //! (rendered at build time by `tools/assets/gen_fonts.py`), through
-//! [`arcgfx::Fonts`].
+//! [`justgfx::Fonts`].
 
 use super::gfx::Canvas;
 use alloc::string::String;
 use alloc::vec::Vec;
-pub use arcgfx::Font;
-use arcgfx::Fonts;
+pub use justgfx::Font;
+use justgfx::Fonts;
 
 static ATLAS: &[u8] = include_bytes!("../../assets/fonts.bin");
 /// The same faces at twice the size, for two pixels per unit (gzipped:
@@ -28,7 +28,7 @@ pub fn load_sharp() {
         return;
     }
     // Unpacked outside the lock: it takes a few milliseconds.
-    let Some(atlas) = arczip::gunzip(SHARP).and_then(|raw| Fonts::parse(alloc::boxed::Box::leak(raw.into_boxed_slice()))) else {
+    let Some(atlas) = justzip::gunzip(SHARP).and_then(|raw| Fonts::parse(alloc::boxed::Box::leak(raw.into_boxed_slice()))) else {
         crate::warn!("gui", "bad sharp font atlas");
         return;
     };

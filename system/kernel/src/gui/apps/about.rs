@@ -3,7 +3,7 @@
 
 use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::res;
-use crate::gui::splash::draw_logo;
+use crate::gui::splash::draw_mark;
 use crate::gui::text::{self, Font};
 use crate::gui::ui::{self, TEXT, TEXT_DIM, TEXT_FAINT};
 use crate::gui::wm::{Action, App};
@@ -69,8 +69,8 @@ fn percent(done: u64, total: u64) -> u64 {
 fn device_icon(d: &crate::dev::Device) -> &'static str {
     let i = &d.info;
     match (i.bus, i.class) {
-        (arcdk::BUS_USB, 0x08) | (arcdk::BUS_SD, _) => "usb",
-        (arcdk::BUS_USB, 0x03) => "keyboard",
+        (justdk::BUS_USB, 0x08) | (justdk::BUS_SD, _) => "usb",
+        (justdk::BUS_USB, 0x03) => "keyboard",
         (_, 0x01) => "archive",
         (_, 0x02) => "wifi",
         (_, 0x03) => "screenshot",
@@ -102,10 +102,10 @@ impl App for About {
         match self.tab {
             0 => {
                 let cx = area.x + 130;
-                c.fill_circle(cx, area.y + 170, 74, 0x1FFF_FFFF);
-                draw_logo(c, cx, area.y + 160, 40, 0xFFFF_FFFF);
+                c.fill_circle(cx, area.y + 170, 74, 0xFF14_1414);
+                draw_mark(c, cx, area.y + 170, 56, 0xFFF2_EFE6);
                 let x = area.x + 250;
-                text::draw(c, Font::Title, x, area.y + 76, "arcOS", TEXT);
+                text::draw(c, Font::Title, x, area.y + 76, "JustOS", TEXT);
                 text::draw(c, Font::Body, x, area.y + 116, &format!("Versione {}", crate::VERSION), TEXT_DIM);
                 let mut brand = [0u8; 48];
                 let cpu = match crate::arch::smp::count() {
@@ -164,12 +164,12 @@ impl App for About {
                 }
                 let (line, color) = match &state {
                     State::NotChecked | State::Checking => (String::new(), TEXT_FAINT),
-                    State::UpToDate => (String::from("arcOS è aggiornato."), ui::GREEN),
-                    State::Available(v) => (format!("È disponibile arcOS {v}."), ui::ORANGE),
-                    State::Released(v) => (format!("arcOS {v} è nelle release su GitHub."), ui::ORANGE),
-                    State::Downloading { version, done, total } => (format!("Scarico arcOS {version}: {} di {}", Size(*done), Size(*total)), TEXT_DIM),
-                    State::Installing { version, .. } => (format!("Scrivo arcOS {version} accanto a questo sistema…"), TEXT_DIM),
-                    State::Staged(v) => (format!("arcOS {v} parte al prossimo riavvio."), ui::GREEN),
+                    State::UpToDate => (String::from("JustOS è aggiornato."), ui::GREEN),
+                    State::Available(v) => (format!("È disponibile JustOS {v}."), ui::ORANGE),
+                    State::Released(v) => (format!("JustOS {v} è nelle release su GitHub."), ui::ORANGE),
+                    State::Downloading { version, done, total } => (format!("Scarico JustOS {version}: {} di {}", Size(*done), Size(*total)), TEXT_DIM),
+                    State::Installing { version, .. } => (format!("Scrivo JustOS {version} accanto a questo sistema…"), TEXT_DIM),
+                    State::Staged(v) => (format!("JustOS {v} parte al prossimo riavvio."), ui::GREEN),
                     State::Failed(e) => (format!("Non riuscito: {e}"), TEXT_FAINT),
                 };
                 text::draw(c, Font::Small, b.x + 4, b.bottom() + 10, &text::fit(Font::Small, &line, area.right() - b.x - 20), color);

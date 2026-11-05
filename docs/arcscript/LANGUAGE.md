@@ -1,6 +1,6 @@
 # ArcScript — Language Reference
 
-ArcScript is a small, strict, indentation-based language for arcOS applications.
+ArcScript is a small, strict, indentation-based language for JustOS applications.
 Source files use the `.as` extension (the legacy `.arcs` is still accepted)
 and compile to ArcVM bytecode.
 

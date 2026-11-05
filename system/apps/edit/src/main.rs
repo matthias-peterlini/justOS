@@ -11,9 +11,9 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use arcrt::console::{self, color::*, Key};
+use justrt::console::{self, color::*, Key};
 
-arcrt::main!(main);
+justrt::main!(main);
 
 struct Editor {
     path: String,
@@ -35,7 +35,7 @@ impl Editor {
     }
 
     fn load(&mut self) {
-        match arcrt::fs::read_to_string(&self.path) {
+        match justrt::fs::read_to_string(&self.path) {
             Ok(text) => {
                 self.lines = text.split('\n').map(|l| l.trim_end_matches('\r').chars().collect()).collect();
                 if self.lines.len() > 1 && self.lines.last().is_some_and(|l| l.is_empty()) {
@@ -43,7 +43,7 @@ impl Editor {
                 }
                 self.message = alloc::format!("{} lines", self.lines.len());
             }
-            Err(arcrt::Error::NotFound) => self.message = String::from("new file"),
+            Err(justrt::Error::NotFound) => self.message = String::from("new file"),
             Err(e) => self.message = alloc::format!("cannot read: {}", e.as_str()),
         }
         if self.lines.is_empty() {
@@ -57,7 +57,7 @@ impl Editor {
             text.extend(l.iter());
             text.push('\n');
         }
-        match arcrt::fs::write(&self.path, text.as_bytes()) {
+        match justrt::fs::write(&self.path, text.as_bytes()) {
             Ok(()) => {
                 self.dirty = false;
                 self.message = alloc::format!("saved, {} bytes", text.len());
@@ -239,12 +239,12 @@ impl Editor {
 fn main(args: &str) -> i32 {
     let path = args.trim();
     if path.is_empty() {
-        arcrt::eprintln!("usage: edit <file>");
+        justrt::eprintln!("usage: edit <file>");
         return 2;
     }
     let (cols, rows) = console::size();
     if cols < 20 || rows < 5 {
-        arcrt::eprintln!("edit needs a screen of at least 20x5");
+        justrt::eprintln!("edit needs a screen of at least 20x5");
         return 1;
     }
     let mut ed = Editor {

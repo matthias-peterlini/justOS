@@ -12,12 +12,12 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
-use arcdrv::pcm::{Hardware, PcmRing};
-use arcdrv::port::{inb, inw, outb, outl, outw};
-use arcdrv::{AudioDesc, DeviceInfo, Dma, Pci, Status, E_IO, E_NODEV, E_NOMEM, OK};
+use justdrv::pcm::{Hardware, PcmRing};
+use justdrv::port::{inb, inw, outb, outl, outw};
+use justdrv::{AudioDesc, DeviceInfo, Dma, Pci, Status, E_IO, E_NODEV, E_NOMEM, OK};
 use core::ffi::c_void;
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "ac97",
     version: "1.1.0",
     probe: probe,
@@ -67,7 +67,7 @@ impl Box97 {
     fn reset_box(&self) {
         outb(self.bm + PO + CR, 0);
         outb(self.bm + PO + CR, CR_RESET);
-        arcdrv::wait_until(10, || inb(self.bm + PO + CR) & CR_RESET == 0);
+        justdrv::wait_until(10, || inb(self.bm + PO + CR) & CR_RESET == 0);
     }
 }
 
@@ -99,14 +99,14 @@ struct Device {
 
 /// The codec out of cold reset, its outputs at full volume and 48 kHz.
 fn init_codec(mixer: u16, bm: u16) -> Status {
-    let glob = arcdrv::port::inl(bm + GLOB_CNT);
+    let glob = justdrv::port::inl(bm + GLOB_CNT);
     outl(bm + GLOB_CNT, (glob | 2) & !(1 << 2));
-    if !arcdrv::wait_until(1000, || arcdrv::port::inl(bm + GLOB_STA) & (1 << 8) != 0) {
-        arcdrv::warn!("the codec is not ready");
+    if !justdrv::wait_until(1000, || justdrv::port::inl(bm + GLOB_STA) & (1 << 8) != 0) {
+        justdrv::warn!("the codec is not ready");
         return E_IO;
     }
     outw(mixer + MIX_RESET, 1);
-    arcdrv::sleep_ms(10);
+    justdrv::sleep_ms(10);
     outw(mixer + MIX_MASTER, 0x0000); // 0 dB, unmuted
     outw(mixer + MIX_HEADPHONE, 0x0000);
     outw(mixer + MIX_PCM_OUT, 0x0808); // 0 dB
@@ -182,13 +182,13 @@ fn probe(dev: &DeviceInfo) -> Status {
     hw.reset_box();
     let d: &'static Device = Box::leak(Box::new(Device { ring: PcmRing::new(hw, buf), mixer }));
     let ctx = d as *const Device as *mut c_void;
-    arcdrv::irq_attach_any(dev, irq, ctx);
+    justdrv::irq_attach_any(dev, irq, ctx);
     let desc: &'static AudioDesc =
-        Box::leak(Box::new(AudioDesc { ctx, rate: RATE, channels: 2, write, drain, name: arcdrv::model_name("AC'97 audio") }));
-    let n = arcdrv::audio_register(dev.id, desc);
+        Box::leak(Box::new(AudioDesc { ctx, rate: RATE, channels: 2, write, drain, name: justdrv::model_name("AC'97 audio") }));
+    let n = justdrv::audio_register(dev.id, desc);
     if n < 0 {
         return n;
     }
-    arcdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
+    justdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
     OK
 }

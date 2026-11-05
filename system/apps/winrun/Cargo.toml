@@ -1,6 +1,6 @@
 [package]
 name = "winrun"
-description = "arcOS program: run a Windows x64 program"
+description = "JustOS program: run a Windows x64 program"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true
@@ -13,8 +13,8 @@ test = false
 bench = false
 
 [dependencies]
-arcrt.workspace = true
-arcui.workspace = true
+justrt.workspace = true
+justui.workspace = true
 arcc-core.workspace = true
 
 [lints]

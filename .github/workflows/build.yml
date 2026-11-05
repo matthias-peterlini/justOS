@@ -1,4 +1,4 @@
-# Builds and tests arcOS on every push and pull request; the live CD and the
+# Builds and tests JustOS on every push and pull request; the live CD and the
 # disk image are kept as the run's artifacts for a week.
 name: Build
 
@@ -34,8 +34,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: arcos
+          name: justos
           path: |
-            build/arcos.iso
-            build/arcos.img
+            build/justos.iso
+            build/justos.img
           retention-days: 7

@@ -156,7 +156,7 @@ data.tar.gz       ./usr/bin/<package>                               0755
                   ./usr/share/icons/hicolor/<n>x<n>/apps/<app id>.png    n = 128, 256, 512, if an icon is set
 ```
 
-The app id is `org.arcos.<name>` (or `app_id` from `Arc.toml`, see
+The app id is `dev.justos.<name>` (or `app_id` from `Arc.toml`, see
 [ARC_DESKTOP.md](ARC_DESKTOP.md)); the `.desktop` entry sets
 `StartupWMClass` and `Icon` to it. The manifest of the package records it
 as `app_id`, with the display `title`.

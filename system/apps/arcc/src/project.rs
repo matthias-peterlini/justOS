@@ -8,7 +8,7 @@
 //! entry = "src/main.as"
 //! assets = "assets"
 //! title = "Counter"                    # optional display name
-//! app_id = "org.arcos.counter"         # optional, defaults to org.arcos.<name>
+//! app_id = "dev.justos.counter"         # optional, defaults to dev.justos.<name>
 //! ```
 
 use alloc::borrow::ToOwned;
@@ -17,7 +17,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use arcc_core::package::{ArcPackage, Asset};
 use arcc_core::{compile_with_modules, CompileFailure, CompileOptions, Diagnostic, SourceFile};
-use arcrt::fs;
+use justrt::fs;
 
 pub const MANIFEST_FILE: &str = "Arc.toml";
 
@@ -191,7 +191,7 @@ impl Input {
         pkg.manifest.set("entry", &self.source_name);
         pkg.manifest.set("profile", if opts.debug_info { "debug" } else { "release" });
         pkg.manifest.set("target", "arc");
-        pkg.manifest.set("compiler", format!("arcc {} (arcOS)", arcc_core::VERSION));
+        pkg.manifest.set("compiler", format!("arcc {} (JustOS)", arcc_core::VERSION));
         pkg.assets = self.assets.clone();
         Ok((pkg, out.warnings, out.source))
     }
@@ -247,13 +247,13 @@ fn collect_assets(dir: &str, prefix: &str, out: &mut Vec<Asset>) -> Result<(), S
 
 /// A new project in `dir`, as `arcc new` makes it everywhere.
 pub fn scaffold(dir: &str, name: &str) -> Result<(), String> {
-    let io = |path: &str, e: arcrt::Error| format!("{path}: {}", e.as_str());
+    let io = |path: &str, e: justrt::Error| format!("{path}: {}", e.as_str());
     if fs::File::open(&join(dir, MANIFEST_FILE)).is_ok() {
         return Err(format!("{dir} already contains a project"));
     }
     for d in [String::from(dir), join(dir, "src"), join(dir, "assets")] {
         match fs::make_dir(&d) {
-            Ok(()) | Err(arcrt::Error::Exists) => {}
+            Ok(()) | Err(justrt::Error::Exists) => {}
             Err(e) => return Err(io(&d, e)),
         }
     }

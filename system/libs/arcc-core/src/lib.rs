@@ -10,7 +10,7 @@
 //! are error-tolerant and report [`Diagnostic`]s instead of panicking, which
 //! makes the same code usable by the CLI (`arcc`) and by the IDE.
 //!
-//! In arcOS the crate is `no_std` + `alloc` (it comes from the ArcScript
+//! In JustOS the crate is `no_std` + `alloc` (it comes from the ArcScript
 //! repository, where it uses `std`): `deflate` replaces the `miniz_oxide`
 //! crate, `float` the `f64` functions of `std`; executable bundles are
 //! left out.

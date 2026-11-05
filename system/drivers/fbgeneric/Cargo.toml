@@ -1,6 +1,6 @@
 [package]
 name = "fbgeneric"
-description = "arcOS driver: any graphics card, through the firmware framebuffer"
+description = "JustOS driver: any graphics card, through the firmware framebuffer"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true
@@ -13,7 +13,7 @@ test = false
 bench = false
 
 [dependencies]
-arcdrv.workspace = true
+justdrv.workspace = true
 
 [lints]
 workspace = true

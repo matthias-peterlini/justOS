@@ -1,7 +1,7 @@
 //! virtio GPU display driver (2D).
 //!
 //! The screen is a resource on the host backed by a framebuffer in guest
-//! memory: arcOS draws into that memory, and every change is copied to the
+//! memory: JustOS draws into that memory, and every change is copied to the
 //! host and shown with two commands (transfer, flush). Commands go one at a
 //! time through the control queue and are polled.
 
@@ -12,11 +12,11 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use arcdrv::{DeviceInfo, DisplayDesc, DisplayMode, Dma, Framebuffer, Mutex, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, OK};
-use arcvirtio::{Queue, Virtio, DESC_NEXT, DESC_WRITE};
+use justdrv::{DeviceInfo, DisplayDesc, DisplayMode, Dma, Framebuffer, Mutex, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, OK};
+use justvirtio::{Queue, Virtio, DESC_NEXT, DESC_WRITE};
 use core::ffi::c_void;
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "virtiogpu",
     version: "1.1.0",
     probe: probe,
@@ -161,7 +161,7 @@ impl Gpu {
         q.desc(1, page.phys() + 2048, 2048, DESC_WRITE, 0);
         q.publish(0);
         self.vio.notify(q);
-        if !arcdrv::wait_until(1000, || q.take_used().is_some()) {
+        if !justdrv::wait_until(1000, || q.take_used().is_some()) {
             return 0;
         }
         page.read::<u32>(2048)
@@ -247,14 +247,14 @@ unsafe extern "C" fn flush(ctx: *mut c_void, x: u32, y: u32, w: u32, h: u32) {
 
 fn probe(dev: &DeviceInfo) -> Status {
     let Some(vio) = Virtio::open(dev) else {
-        arcdrv::warn!("no usable virtio registers");
+        justdrv::warn!("no usable virtio registers");
         return E_NODEV;
     };
     let Some(features) = vio.negotiate(0) else {
         return E_IO;
     };
     let (Some(q), Some(page)) = (vio.queue(0, 16), Dma::new(4096)) else {
-        vio.set_status(arcvirtio::STATUS_FAILED);
+        vio.set_status(justvirtio::STATUS_FAILED);
         return E_IO;
     };
     q.quiet();
@@ -277,19 +277,19 @@ fn probe(dev: &DeviceInfo) -> Status {
         }
     };
     g.preferred = preferred;
-    arcdrv::info!("output 0: {}x{} preferred", g.preferred.0, g.preferred.1);
+    justdrv::info!("output 0: {}x{} preferred", g.preferred.0, g.preferred.1);
     let g: &'static Gpu = Box::leak(Box::new(g));
     let desc: &'static DisplayDesc = Box::leak(Box::new(DisplayDesc {
         ctx: g as *const Gpu as *mut c_void,
         modes,
         set_mode,
         flush: Some(flush),
-        name: arcdrv::model_name("virtio GPU"),
+        name: justdrv::model_name("virtio GPU"),
     }));
-    let n = arcdrv::display_register(dev.id, desc);
+    let n = justdrv::display_register(dev.id, desc);
     if n < 0 {
         return n;
     }
-    arcdrv::power_hooks(dev.id, g as *const Gpu as *mut c_void, Some(suspend), resume);
+    justdrv::power_hooks(dev.id, g as *const Gpu as *mut c_void, Some(suspend), resume);
     OK
 }

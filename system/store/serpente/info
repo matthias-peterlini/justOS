@@ -3,6 +3,6 @@ category=Giochi
 about=Mangia le mele e cresci, senza morderti la coda.
 details=Il classico gioco del serpente: si guida con le frecce, la barra spaziatrice mette in pausa. Più mele mangi, più il serpente diventa lungo e veloce.
 version=1.1
-developer=arcOS
+developer=JustOS
 type=native
 gui=yes

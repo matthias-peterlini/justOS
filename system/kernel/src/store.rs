@@ -2,18 +2,18 @@
 //!
 //! Two sources:
 //!
-//! - **On this computer**, `sys:/store/<id>`: the arcOS apps and games that
+//! - **On this computer**, `sys:/store/<id>`: the JustOS apps and games that
 //!   come with the system (`info`, `app`, `icon.qoi`).
 //! - **From the internet**: the catalog (`sys:/system/store-catalog.json`,
-//!   refreshed from the arcOS repository) lists real Linux and Windows
+//!   refreshed from the JustOS repository) lists real Linux and Windows
 //!   programs by their GitHub project; installing one asks GitHub for its
 //!   latest release, downloads the right file over HTTPS, unpacks it (tar.gz,
-//!   zip, gz) and checks that arcOS can run it (a static x86-64 Linux ELF,
+//!   zip, gz) and checks that JustOS can run it (a static x86-64 Linux ELF,
 //!   or a 64-bit Windows PE). Any GitHub project can also be searched and
 //!   installed the same way.
 //!
 //! An installed program is `sys:/apps/<command>` (Linux), `<command>.exe`
-//! (Windows) or `<id>.app` (arcOS), with `<id>.info` (`key=value` lines) and
+//! (Windows) or `<id>.app` (JustOS), with `<id>.info` (`key=value` lines) and
 //! `<id>.qoi` (its icon) next to it.
 
 use crate::fs::{self, Error, Path};
@@ -23,17 +23,17 @@ use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use arcjson::Value;
+use justjson::Value;
 
 const STORE: &str = "sys:/store";
 const APPS: &str = "sys:/apps";
 const CATALOG_FILE: &str = "sys:/system/store-catalog.json";
-pub const CATALOG_URL: &str = "https://raw.githubusercontent.com/matthias-peterlini/ArcOs/main/rootfs/system/store-catalog.json";
+pub const CATALOG_URL: &str = "https://raw.githubusercontent.com/matthias-peterlini/justos/main/rootfs/system/store-catalog.json";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Platform {
     #[default]
-    Arcos,
+    Justos,
     Linux,
     Windows,
 }
@@ -41,7 +41,7 @@ pub enum Platform {
 impl Platform {
     pub fn name(self) -> &'static str {
         match self {
-            Platform::Arcos => "arcOS",
+            Platform::Justos => "JustOS",
             Platform::Linux => "Linux",
             Platform::Windows => "Windows",
         }
@@ -49,7 +49,7 @@ impl Platform {
 
     fn key(self) -> &'static str {
         match self {
-            Platform::Arcos => "native",
+            Platform::Justos => "native",
             Platform::Linux => "linux",
             Platform::Windows => "windows",
         }
@@ -59,7 +59,7 @@ impl Platform {
         match s {
             "linux" => Platform::Linux,
             "windows" => Platform::Windows,
-            _ => Platform::Arcos,
+            _ => Platform::Justos,
         }
     }
 }
@@ -76,7 +76,7 @@ pub struct PackageInfo {
     /// More about it, for its page in the store.
     pub details: String,
     pub platform: Platform,
-    /// An arcOS program (else Linux or Windows).
+    /// An JustOS program (else Linux or Windows).
     pub native: bool,
     /// Has a window (else it runs in the terminal).
     pub gui: bool,
@@ -92,7 +92,7 @@ pub struct PackageInfo {
     pub source: String,
     /// What opening it types in the terminal (text programs).
     pub open: String,
-    /// Who the app is to the sandbox (`app_id=`; else `org.arcos.<id>`).
+    /// Who the app is to the sandbox (`app_id=`; else `dev.justos.<id>`).
     pub app_id: String,
     /// What it says it will ask for (`permissions=files:Immagini, camera`),
     /// shown on its page; an update that adds one waits for the user.
@@ -126,7 +126,7 @@ pub fn parse_info(text: &str, id: &str) -> PackageInfo {
     if p.app_id.is_empty() {
         p.app_id = crate::sandbox::default_id(id);
     }
-    p.native = p.platform == Platform::Arcos;
+    p.native = p.platform == Platform::Justos;
     if p.command.is_empty() {
         p.command = id.to_string();
     }
@@ -155,7 +155,7 @@ pub fn available() -> Vec<PackageInfo> {
     let mut v: Vec<PackageInfo> = fs::list_dir(&dir)
         .unwrap_or_default()
         .into_iter()
-        .filter(|(_, st)| st.kind == arcfs::Kind::Dir)
+        .filter(|(_, st)| st.kind == justfs::Kind::Dir)
         .filter_map(|(e, _)| {
             let mut p = read_info(&format!("{STORE}/{}/info", e.name), &e.name)?;
             p.size = fs::stat(&dir.join(&e.name).join("app")).map(|s| s.size).unwrap_or(0);
@@ -172,7 +172,7 @@ pub fn program_path(p: &PackageInfo) -> String {
         return p.program.clone();
     }
     match p.platform {
-        Platform::Arcos => format!("{APPS}/{}.app", p.id),
+        Platform::Justos => format!("{APPS}/{}.app", p.id),
         Platform::Linux => format!("{APPS}/{}", p.id),
         Platform::Windows => format!("{APPS}/{}.exe", p.id),
     }
@@ -295,7 +295,7 @@ pub fn catalog() -> Vec<CatalogApp> {
     let c = path(CATALOG_FILE)
         .and_then(|p| fs::read_file(&p))
         .ok()
-        .and_then(|b| arcjson::parse_bytes(&b))
+        .and_then(|b| justjson::parse_bytes(&b))
         .map(|v| parse_catalog(&v))
         .unwrap_or_default();
     *CATALOG.lock() = Some(c.clone());
@@ -308,7 +308,7 @@ pub fn refresh_catalog() -> Result<usize, String> {
     if !r.ok() {
         return Err(format!("the catalog is not available ({})", r.status));
     }
-    let v = arcjson::parse_bytes(&r.body).ok_or("the catalog is damaged")?;
+    let v = justjson::parse_bytes(&r.body).ok_or("the catalog is damaged")?;
     let apps = parse_catalog(&v);
     if apps.is_empty() {
         return Err("the catalog is empty".to_string());
@@ -341,7 +341,7 @@ fn github_json(url: &str) -> Result<Value, String> {
     if !r.ok() {
         return Err(format!("GitHub answered {}", r.status));
     }
-    arcjson::parse_bytes(&r.body).ok_or_else(|| "GitHub sent something unreadable".to_string())
+    justjson::parse_bytes(&r.body).ok_or_else(|| "GitHub sent something unreadable".to_string())
 }
 
 fn url_encode(s: &str) -> String {
@@ -378,7 +378,7 @@ pub struct Asset {
     pub platform: Platform,
 }
 
-/// Which platform a release file is for, if arcOS can use it.
+/// Which platform a release file is for, if JustOS can use it.
 pub fn asset_platform(name: &str) -> Option<Platform> {
     let n = name.to_ascii_lowercase();
     let x64 = n.contains("x86_64") || n.contains("amd64") || n.contains("x64") || n.contains("linux64") || n.contains("win64");
@@ -400,7 +400,7 @@ pub fn asset_platform(name: &str) -> Option<Platform> {
     None
 }
 
-/// The latest release of `repo`: its tag and the files arcOS could use,
+/// The latest release of `repo`: its tag and the files JustOS could use,
 /// static Linux builds first.
 pub fn github_release(repo: &str) -> Result<(String, Vec<Asset>), String> {
     let v = github_json(&format!("https://api.github.com/repos/{repo}/releases/latest"))?;
@@ -637,7 +637,7 @@ pub fn is_package(name: &str) -> bool {
 ///   `sys:/apps` like a store program;
 /// - a macOS installer `.pkg`: its payload is unpacked into
 ///   `sys:/home/Applicazioni macOS/<name>`. macOS programs themselves (Mach-O)
-///   cannot run on arcOS; Linux or Windows programs inside are installed.
+///   cannot run on JustOS; Linux or Windows programs inside are installed.
 ///
 /// Returns what to tell the user.
 pub fn install_file(file: &str) -> Result<String, String> {
@@ -694,20 +694,20 @@ fn install_program(program_name: &str, program: &[u8], id: &str, platform: Platf
 }
 
 fn install_mac(data: &[u8], name: &str) -> Result<String, String> {
-    let xar = arczip::unxar(data).ok_or("il pacchetto macOS è danneggiato")?;
+    let xar = justzip::unxar(data).ok_or("il pacchetto macOS è danneggiato")?;
     let stem = package_stem(name);
     let dest = format!("sys:/home/Applicazioni macOS/{stem}");
     let mut files = 0;
     let mut native = None;
     for payload in xar.iter().filter(|e| e.name == "Payload" || e.name.ends_with("/Payload")) {
         let cpio = if payload.data.starts_with(b"\x1f\x8b") {
-            arczip::gunzip(&payload.data).ok_or("il pacchetto macOS è danneggiato")?
+            justzip::gunzip(&payload.data).ok_or("il pacchetto macOS è danneggiato")?
         } else if payload.data.starts_with(b"pbzx") {
             return Err("questo pacchetto macOS usa la compressione LZMA (pbzx), non ancora supportata".to_string());
         } else {
             payload.data.clone()
         };
-        for e in arczip::uncpio(&cpio).ok_or("il contenuto del pacchetto macOS è danneggiato")? {
+        for e in justzip::uncpio(&cpio).ok_or("il contenuto del pacchetto macOS è danneggiato")? {
             if e.link.is_some() {
                 continue;
             }
@@ -736,7 +736,7 @@ fn install_mac(data: &[u8], name: &str) -> Result<String, String> {
             return install_program(&n, &d, &stem, platform, name);
         }
     }
-    Ok(format!("{files} file estratti in {dest}. I programmi macOS non possono girare su arcOS"))
+    Ok(format!("{files} file estratti in {dest}. I programmi macOS non possono girare su JustOS"))
 }
 
 /// Makes a directory and those above it (those that exist are kept).
@@ -760,26 +760,26 @@ fn make_dirs(dir: &str) {
 
 /// The files of a download or package (archives unpacked).
 fn entries(data: &[u8], name: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
-    let files = |v: Vec<arczip::Entry>| v.into_iter().filter(|e| !e.dir && e.link.is_none()).map(|e| (e.name, e.data)).collect();
+    let files = |v: Vec<justzip::Entry>| v.into_iter().filter(|e| !e.dir && e.link.is_none()).map(|e| (e.name, e.data)).collect();
     let lower = name.to_ascii_lowercase();
     Ok(if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
-        let tar = arczip::gunzip(data).ok_or("the archive is damaged")?;
-        files(arczip::untar(&tar).ok_or("the archive is damaged")?)
+        let tar = justzip::gunzip(data).ok_or("the archive is damaged")?;
+        files(justzip::untar(&tar).ok_or("the archive is damaged")?)
     } else if lower.ends_with(".tar") {
-        files(arczip::untar(data).ok_or("the archive is damaged")?)
+        files(justzip::untar(data).ok_or("the archive is damaged")?)
     } else if lower.ends_with(".deb") {
-        let ar = arczip::unar(data).ok_or("the package is damaged")?;
+        let ar = justzip::unar(data).ok_or("the package is damaged")?;
         let member = ar.iter().find(|e| e.name.starts_with("data.tar")).ok_or("the package has no data")?;
         let tar = match member.name.as_str() {
             "data.tar" => member.data.clone(),
-            "data.tar.gz" => arczip::gunzip(&member.data).ok_or("the package is damaged")?,
+            "data.tar.gz" => justzip::gunzip(&member.data).ok_or("the package is damaged")?,
             other => return Err(format!("{other}: questa compressione non è ancora supportata (solo gzip)")),
         };
-        files(arczip::untar(&tar).ok_or("the package is damaged")?)
+        files(justzip::untar(&tar).ok_or("the package is damaged")?)
     } else if lower.ends_with(".zip") {
-        files(arczip::unzip(data).ok_or("the archive is damaged")?)
+        files(justzip::unzip(data).ok_or("the archive is damaged")?)
     } else if lower.ends_with(".gz") {
-        alloc::vec![(name[..name.len() - 3].to_string(), arczip::gunzip(data).ok_or("the file is damaged")?)]
+        alloc::vec![(name[..name.len() - 3].to_string(), justzip::gunzip(data).ok_or("the file is damaged")?)]
     } else {
         alloc::vec![(name.to_string(), data.to_vec())]
     })
@@ -790,7 +790,7 @@ fn unpack(data: &[u8], name: &str, want: &str, command: &str, platform: Platform
     pick(&entries(data, name)?, want, command, platform)
 }
 
-/// Picks the program among the files and checks that arcOS can run it.
+/// Picks the program among the files and checks that JustOS can run it.
 fn pick(entries: &[(String, Vec<u8>)], want: &str, command: &str, platform: Platform) -> Result<(String, Vec<u8>), String> {
     let base = |n: &str| n.rsplit('/').next().unwrap_or(n).to_string();
     let is_program = |d: &[u8]| match platform {
@@ -827,7 +827,7 @@ fn pick(entries: &[(String, Vec<u8>)], want: &str, command: &str, platform: Plat
             let phnum = u16::from_le_bytes([d[56], d[57]]) as usize;
             let dynamic = (0..phnum).any(|i| d.get(phoff + i * phent..phoff + i * phent + 4) == Some(&3u32.to_le_bytes()[..]));
             if dynamic {
-                return Err("this build needs Linux libraries (arcOS runs static programs)".to_string());
+                return Err("this build needs Linux libraries (JustOS runs static programs)".to_string());
             }
         }
     }

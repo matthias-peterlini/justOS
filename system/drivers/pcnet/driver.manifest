@@ -4,5 +4,5 @@ name        = pcnet
 version     = 1.1.0
 class       = network
 description = AMD PCnet Ethernet
-author      = arcOS
+author      = JustOS
 match       = pci 1022:2000     # Am79C970A PCnet-PCI II and later

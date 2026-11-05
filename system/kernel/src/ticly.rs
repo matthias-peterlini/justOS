@@ -12,8 +12,8 @@ use crate::sync::IrqLock;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use arcjson::Value;
-use arctls::hash::{hmac, Alg};
+use justjson::Value;
+use justtls::hash::{hmac, Alg};
 
 const DIR: &str = "sys:/system/ticly";
 /// Rounds of HMAC over the password.
@@ -84,7 +84,7 @@ fn password_hash(salt: &str, password: &str) -> String {
 }
 
 fn load() -> Vec<Stored> {
-    let Some(v) = read(&format!("{DIR}/accounts.json")).and_then(|b| arcjson::parse_bytes(&b)) else { return Vec::new() };
+    let Some(v) = read(&format!("{DIR}/accounts.json")).and_then(|b| justjson::parse_bytes(&b)) else { return Vec::new() };
     v.get("accounts")
         .as_array()
         .iter()
@@ -215,7 +215,7 @@ pub fn default_models() -> Vec<Model> {
 }
 
 /// Why ticly AI does not answer.
-pub const AI_UNAVAILABLE: &str = "ticly AI non è ancora disponibile su arcOS: le risposte arriveranno con il collegamento al servizio ticly. La conversazione resta salvata.";
+pub const AI_UNAVAILABLE: &str = "ticly AI non è ancora disponibile su JustOS: le risposte arriveranno con il collegamento al servizio ticly. La conversazione resta salvata.";
 
 /// Asks ticly AI (not connected yet: always the note above).
 pub fn chat(_model: &str, _messages: &[(String, String)]) -> Result<String, String> {

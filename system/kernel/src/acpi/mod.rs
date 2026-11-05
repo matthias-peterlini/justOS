@@ -377,7 +377,7 @@ pub fn power_off() {
     // and says which sleep type S5 is.
     let from_aml = aml::with(3000, |aml| {
         if aml.find("\\_PTS").is_some() {
-            let _ = aml.evaluate("\\_PTS", &[arcaml::Value::Integer(5)]);
+            let _ = aml.evaluate("\\_PTS", &[justaml::Value::Integer(5)]);
         }
         aml.sleep_type(5)
     })

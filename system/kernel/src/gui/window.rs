@@ -20,7 +20,7 @@ use alloc::collections::VecDeque;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use arcdk::syscall as sys;
+use justdk::syscall as sys;
 
 /// Largest window content a program may ask for (in units).
 pub const MAX_W: i32 = 2560;

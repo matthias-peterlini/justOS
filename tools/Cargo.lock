@@ -3,27 +3,27 @@
 version = 4
 
 [[package]]
-name = "arcdk"
+name = "justdk"
 version = "0.6.0"
 
 [[package]]
-name = "arcfs"
+name = "justfs"
 version = "0.6.0"
 
 [[package]]
-name = "arcjson"
+name = "justjson"
 version = "0.6.0"
 
 [[package]]
-name = "arctls"
+name = "justtls"
 version = "0.6.0"
 
 [[package]]
-name = "arctool"
+name = "justtool"
 version = "0.1.0"
 dependencies = [
- "arcdk",
- "arcfs",
- "arcjson",
- "arctls",
+ "justdk",
+ "justfs",
+ "justjson",
+ "justtls",
 ]

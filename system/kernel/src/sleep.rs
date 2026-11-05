@@ -86,7 +86,7 @@ fn run(wake_after: Option<u64>) -> Result<u64, String> {
     crate::fs::sync_all();
     acpi_sleep::will_sleep();
     pm::pause_io();
-    let mut pci: Vec<u32> = dev::list().iter().filter(|d| d.info.bus == arcdk::BUS_PCI).map(|d| d.info.location).collect();
+    let mut pci: Vec<u32> = dev::list().iter().filter(|d| d.info.bus == justdk::BUS_PCI).map(|d| d.info.location).collect();
     pci.sort_unstable();
     pci.dedup();
     let saved = dev::pci::save_config(&pci);

@@ -2,7 +2,7 @@
 //! "vmware" display.
 //!
 //! The device has an index/value register pair in I/O space, its
-//! framebuffer in the second BAR and a command FIFO in the third. arcOS
+//! framebuffer in the second BAR and a command FIFO in the third. JustOS
 //! draws into the framebuffer and tells the device what changed with an
 //! UPDATE command in the FIFO.
 
@@ -13,11 +13,11 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use arcdrv::port::{inl, outl};
-use arcdrv::{DeviceInfo, DisplayDesc, DisplayMode, Framebuffer, Mmio, Mutex, Pci, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, OK};
+use justdrv::port::{inl, outl};
+use justdrv::{DeviceInfo, DisplayDesc, DisplayMode, Framebuffer, Mmio, Mutex, Pci, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, OK};
 use core::ffi::c_void;
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "vmsvga",
     version: "1.1.0",
     probe: probe,
@@ -132,7 +132,7 @@ impl Svga {
     /// Waits until the device has processed the whole FIFO.
     fn sync(&self) {
         self.write(REG_SYNC, 1);
-        arcdrv::wait_until(100, || self.read(REG_BUSY) == 0);
+        justdrv::wait_until(100, || self.read(REG_BUSY) == 0);
     }
 
     /// Appends one command (a list of words) to the FIFO.
@@ -244,7 +244,7 @@ fn probe(dev: &DeviceInfo) -> Status {
     let (Some(port), fb, fifo) = (dev.io(0), dev.resources[1], dev.resources[2]) else { return E_NODEV };
     Pci(dev.id).enable(true, true, false);
     if !negotiate(port) {
-        arcdrv::info!("the device does not speak SVGA II");
+        justdrv::info!("the device does not speak SVGA II");
         return E_NODEV;
     }
     let read = |reg: u32| {
@@ -271,19 +271,19 @@ fn probe(dev: &DeviceInfo) -> Status {
         lock: Mutex::new((0, 0)),
     };
     s.init_fifo();
-    arcdrv::info!("{} MiB of video memory, up to {}x{}", s.vram >> 20, s.max.0, s.max.1);
+    justdrv::info!("{} MiB of video memory, up to {}x{}", s.vram >> 20, s.max.0, s.max.1);
     let s: &'static Svga = Box::leak(Box::new(s));
     let desc: &'static DisplayDesc = Box::leak(Box::new(DisplayDesc {
         ctx: s as *const Svga as *mut c_void,
         modes,
         set_mode,
         flush: Some(flush),
-        name: arcdrv::model_name("VMware SVGA II display"),
+        name: justdrv::model_name("VMware SVGA II display"),
     }));
-    let n = arcdrv::display_register(dev.id, desc);
+    let n = justdrv::display_register(dev.id, desc);
     if n < 0 {
         return n;
     }
-    arcdrv::power_hooks(dev.id, s as *const Svga as *mut c_void, Some(suspend), resume);
+    justdrv::power_hooks(dev.id, s as *const Svga as *mut c_void, Some(suspend), resume);
     OK
 }

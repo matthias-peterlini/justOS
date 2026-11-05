@@ -17,12 +17,12 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::vec::Vec;
-use arcdrv::pcm::{Hardware, PcmRing};
-use arcdrv::{AudioDesc, DeviceInfo, Dma, Mmio, Pci, Status, E_IO, E_NODEV, E_NOMEM, OK, RES_MEMORY};
+use justdrv::pcm::{Hardware, PcmRing};
+use justdrv::{AudioDesc, DeviceInfo, Dma, Mmio, Pci, Status, E_IO, E_NODEV, E_NOMEM, OK, RES_MEMORY};
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "hda",
     version: "1.1.0",
     probe: probe,
@@ -118,10 +118,10 @@ impl Controller {
         self.corb.write::<u32>(wp * 4, word);
         self.regs.write16(CORBWP, wp as u16);
         let want = (self.rirb_read.get() + 1) % 256;
-        if !arcdrv::wait_until(100, || self.regs.read16(RIRBWP) & 0xFF == want) {
+        if !justdrv::wait_until(100, || self.regs.read16(RIRBWP) & 0xFF == want) {
             // The rings do not work on this controller: use the immediate
             // command registers from now on.
-            arcdrv::warn!("command rings do not answer; using immediate commands");
+            justdrv::warn!("command rings do not answer; using immediate commands");
             self.immediate.set(true);
             return self.command_immediate(word);
         }
@@ -132,13 +132,13 @@ impl Controller {
     }
 
     fn command_immediate(&self, word: u32) -> Option<u32> {
-        if !arcdrv::wait_until(100, || self.regs.read16(ICIS) & 1 == 0) {
+        if !justdrv::wait_until(100, || self.regs.read16(ICIS) & 1 == 0) {
             return None;
         }
         self.regs.write16(ICIS, 2); // clear "answer valid"
         self.regs.write32(ICOI, word);
         self.regs.write16(ICIS, 1);
-        arcdrv::wait_until(100, || self.regs.read16(ICIS) & 3 == 2).then(|| self.regs.read32(ICII))
+        justdrv::wait_until(100, || self.regs.read16(ICIS) & 3 == 2).then(|| self.regs.read32(ICII))
     }
 
     fn param(&self, codec: u32, node: u32, p: u32) -> u32 {
@@ -342,7 +342,7 @@ impl Hardware for Stream {
 
     fn stop(&self) {
         self.set_ctl(self.ctl() & !CTL_RUN);
-        arcdrv::wait_until(10, || self.ctl() & CTL_RUN == 0);
+        justdrv::wait_until(10, || self.ctl() & CTL_RUN == 0);
     }
 }
 
@@ -417,9 +417,9 @@ fn set_tcsel(pci: Pci) {
 fn setup_stream(stream: &Stream, bdl: u64) {
     let (regs, base) = (&stream.regs, stream.base);
     stream.set_ctl(CTL_RESET);
-    arcdrv::wait_until(10, || stream.ctl() & CTL_RESET != 0);
+    justdrv::wait_until(10, || stream.ctl() & CTL_RESET != 0);
     stream.set_ctl(0);
-    arcdrv::wait_until(10, || stream.ctl() & CTL_RESET == 0);
+    justdrv::wait_until(10, || stream.ctl() & CTL_RESET == 0);
     regs.write32(base + SD_BDPL, bdl as u32);
     regs.write32(base + SD_BDPU, (bdl >> 32) as u32);
     regs.write32(base + SD_CBL, (PERIODS * PERIOD_BYTES) as u32);
@@ -459,30 +459,30 @@ unsafe extern "C" fn irq(ctx: *mut c_void) {
 
 fn reset(regs: &Mmio) -> bool {
     regs.write32(GCTL, regs.read32(GCTL) & !1);
-    if !arcdrv::wait_until(100, || regs.read32(GCTL) & 1 == 0) {
+    if !justdrv::wait_until(100, || regs.read32(GCTL) & 1 == 0) {
         return false;
     }
-    arcdrv::sleep_ms(1);
+    justdrv::sleep_ms(1);
     regs.write32(GCTL, regs.read32(GCTL) | 1);
-    if !arcdrv::wait_until(100, || regs.read32(GCTL) & 1 != 0) {
+    if !justdrv::wait_until(100, || regs.read32(GCTL) & 1 != 0) {
         return false;
     }
     // Codecs announce themselves within 521 µs.
-    arcdrv::sleep_ms(2);
+    justdrv::sleep_ms(2);
     true
 }
 
 fn start_rings(regs: &Mmio, corb: &Dma, rirb: &Dma) {
     regs.write8(CORBCTL, 0);
     regs.write8(RIRBCTL, 0);
-    arcdrv::wait_until(10, || regs.read8(CORBCTL) & 2 == 0 && regs.read8(RIRBCTL) & 2 == 0);
+    justdrv::wait_until(10, || regs.read8(CORBCTL) & 2 == 0 && regs.read8(RIRBCTL) & 2 == 0);
     regs.write8(CORBSIZE, 2); // 256 entries
     regs.write32(CORBLBASE, corb.phys() as u32);
     regs.write32(CORBLBASE + 4, (corb.phys() >> 32) as u32);
     regs.write16(CORBRP, 1 << 15);
-    arcdrv::wait_until(10, || regs.read16(CORBRP) & (1 << 15) != 0);
+    justdrv::wait_until(10, || regs.read16(CORBRP) & (1 << 15) != 0);
     regs.write16(CORBRP, 0);
-    arcdrv::wait_until(10, || regs.read16(CORBRP) & (1 << 15) == 0);
+    justdrv::wait_until(10, || regs.read16(CORBRP) & (1 << 15) == 0);
     regs.write16(CORBWP, 0);
     regs.write8(RIRBSIZE, 2);
     regs.write32(RIRBLBASE, rirb.phys() as u32);
@@ -506,13 +506,13 @@ fn probe(dev: &DeviceInfo) -> Status {
     }
     let Some(regs) = Mmio::map(bar.base, 0x4000) else { return E_NOMEM };
     if !reset(&regs) {
-        arcdrv::warn!("the controller does not come out of reset");
+        justdrv::warn!("the controller does not come out of reset");
         return E_IO;
     }
     let gcap = regs.read16(GCAP);
     let (outputs, inputs) = ((gcap >> 12) & 0xF, (gcap >> 8) & 0xF);
     if outputs == 0 {
-        arcdrv::warn!("no output stream");
+        justdrv::warn!("no output stream");
         return E_NODEV;
     }
     let (Some(corb), Some(rirb)) = (Dma::new(1024), Dma::new(2048)) else { return E_NOMEM };
@@ -545,7 +545,7 @@ fn probe(dev: &DeviceInfo) -> Status {
         }
     }
     let Some((vendor, kinds, codec)) = chosen else {
-        arcdrv::info!("no analog output on the codecs (only HDMI or digital?)");
+        justdrv::info!("no analog output on the codecs (only HDMI or digital?)");
         return E_NODEV;
     };
 
@@ -574,19 +574,19 @@ fn probe(dev: &DeviceInfo) -> Status {
         has_irq: AtomicBool::new(false),
     }));
     let ctx = d as *const Device as *mut c_void;
-    if arcdrv::irq_attach_any(dev, irq, ctx) {
+    if justdrv::irq_attach_any(dev, irq, ctx) {
         d.has_irq.store(true, Ordering::Relaxed);
         regs.write32(INTCTL, 1 << 31 | 1 << inputs as u32);
     }
     let what = kinds.join(", ");
     let name = format!("HD Audio, {what}");
     let desc: &'static AudioDesc =
-        Box::leak(Box::new(AudioDesc { ctx, rate: RATE, channels: 2, write, drain, name: arcdrv::model_name(&name) }));
-    arcdrv::info!("codec {:04x}:{:04x}: {what}", vendor >> 16, vendor & 0xFFFF);
-    let n = arcdrv::audio_register(dev.id, desc);
+        Box::leak(Box::new(AudioDesc { ctx, rate: RATE, channels: 2, write, drain, name: justdrv::model_name(&name) }));
+    justdrv::info!("codec {:04x}:{:04x}: {what}", vendor >> 16, vendor & 0xFFFF);
+    let n = justdrv::audio_register(dev.id, desc);
     if n < 0 {
         return n;
     }
-    arcdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
+    justdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
     OK
 }

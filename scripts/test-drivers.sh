@@ -1,5 +1,5 @@
 #!/bin/sh
-# Boots an arcOS image once for every kind of hardware QEMU can emulate
+# Boots an JustOS image once for every kind of hardware QEMU can emulate
 # and checks that the matching driver installs and works: disks (a file is
 # written and the file system checked), network cards (DHCP and ping) and
 # USB controllers (a keyboard and a USB stick behind each one) and SD card
@@ -21,7 +21,7 @@ set -u
 IMAGE=${1:?usage: test-drivers.sh <image> [case...]}
 shift
 HERE=$(dirname "$0")
-ARCTOOL=${ARCTOOL:-$HERE/../tools/target/release/arctool}
+JUSTTOOL=${JUSTTOOL:-$HERE/../tools/target/release/justtool}
 QEMU_MODELS=${QEMU_MODELS:-$HERE/../build/qemu/build/qemu-system-x86_64}
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
@@ -31,12 +31,12 @@ e1000 e1000e igb rtl8139 pcnet virtio-net virtio-net-modern multi-nic rtl8169 rt
 xhci ehci uhci ohci sdhci sdhci-sdma sdhci-pio"
 CASES=${*:-$ALL}
 
-# A USB stick: one ArcFS partition labelled "Stick".
-"$ARCTOOL" mkfs "$WORK/stick.img" --size 16M --label Stick >/dev/null || exit 2
+# A USB stick: one JustFS partition labelled "Stick".
+"$JUSTTOOL" mkfs "$WORK/stick.img" --size 16M --label Stick >/dev/null || exit 2
 
 # SD cards: 64 MiB (byte addressing) and 4 GiB (SDHC, sector addressing).
-"$ARCTOOL" mkfs "$WORK/sd.img" --size 64M --label Card >/dev/null || exit 2
-"$ARCTOOL" mkfs "$WORK/sdhc.img" --size 4G --label Card >/dev/null || exit 2
+"$JUSTTOOL" mkfs "$WORK/sd.img" --size 64M --label Card >/dev/null || exit 2
+"$JUSTTOOL" mkfs "$WORK/sdhc.img" --size 4G --label Card >/dev/null || exit 2
 
 # Commands for each kind of case, and what the session has to show.
 cat > "$WORK/disk.txt" <<'EOT'
@@ -126,7 +126,7 @@ for c in $CASES; do
     case $CMDS in
         net) EXPECT="3 of 3 replies" ;;
         sd) EXPECT="sdhci 1.1.0 installed|$EXPECT_SD|written on the card|card: no problems found" ;;
-        usb) EXPECT="usbhid 1.0.0 installed|usbstorage 1.0.0 installed|Benvenuto in arcOS|stick: no problems found" ;;
+        usb) EXPECT="usbhid 1.0.0 installed|usbstorage 1.0.0 installed|Benvenuto in JustOS|stick: no problems found" ;;
     esac
     [ "$c" = multi-nic ] && EXPECT="$EXPECT|^net2 "
     [ "${SLEEP:-0}" = 1 ] && EXPECT="$EXPECT|awake again after"

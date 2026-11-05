@@ -7,5 +7,5 @@ name        = sdhci
 version     = 1.1.0
 class       = storage
 description = SD card reader (SD host controller)
-author      = arcOS
+author      = JustOS
 match       = pci-class 08:05

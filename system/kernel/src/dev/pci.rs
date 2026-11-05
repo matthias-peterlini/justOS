@@ -3,7 +3,7 @@
 use crate::arch::cpu::{inl, outl};
 use crate::sync::IrqLock;
 use alloc::vec::Vec;
-use arcdk::{DeviceInfo, Resource, BUS_PCI, IRQ_NONE, RES_64BIT, RES_IO, RES_MEMORY, RES_PREFETCH};
+use justdk::{DeviceInfo, Resource, BUS_PCI, IRQ_NONE, RES_64BIT, RES_IO, RES_MEMORY, RES_PREFETCH};
 
 static CONFIG: IrqLock<()> = IrqLock::new(());
 /// BARs already sized, by location and vendor/device id. Sizing turns the

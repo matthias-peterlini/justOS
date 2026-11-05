@@ -10,9 +10,9 @@ extern crate alloc;
 use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
-use arcui::{ui, Event, Font, Key, Rect, Rng, Window};
+use justui::{ui, Event, Font, Key, Rect, Rng, Window};
 
-arcrt::main!(main);
+justrt::main!(main);
 
 const LEVELS: [(&str, usize, usize, usize); 3] = [("Facile", 9, 9, 10), ("Medio", 16, 16, 40), ("Difficile", 24, 16, 76)];
 const CELL: i32 = 30;
@@ -104,7 +104,7 @@ impl Game {
         if self.state == State::Ready {
             self.place(i);
             self.state = State::Playing;
-            self.started = arcui::now_ms();
+            self.started = justui::now_ms();
         }
         if self.state != State::Playing || self.flag[i] {
             return;
@@ -132,7 +132,7 @@ impl Game {
             self.open[i] = true;
             self.boom = Some(i);
             self.state = State::Lost;
-            self.ended = arcui::now_ms();
+            self.ended = justui::now_ms();
             return;
         }
         // Flood the empty area.
@@ -151,7 +151,7 @@ impl Game {
     fn check_won(&mut self) {
         if self.state == State::Playing && (0..self.w * self.h).all(|i| self.mine[i] || self.open[i]) {
             self.state = State::Won;
-            self.ended = arcui::now_ms();
+            self.ended = justui::now_ms();
             for i in 0..self.w * self.h {
                 if self.mine[i] {
                     self.flag[i] = true;
@@ -183,7 +183,7 @@ impl Game {
     fn seconds(&self) -> u64 {
         match self.state {
             State::Ready => 0,
-            State::Playing => (arcui::now_ms() - self.started) / 1000,
+            State::Playing => (justui::now_ms() - self.started) / 1000,
             _ => (self.ended - self.started) / 1000,
         }
     }
@@ -236,7 +236,7 @@ impl Game {
                 }
             }
         }
-        if matches!(self.state, State::Won | State::Lost) && arcui::now_ms() - self.ended > 600 {
+        if matches!(self.state, State::Won | State::Lost) && justui::now_ms() - self.ended > 600 {
             let area = Rect::new(0, 0, ww, win.height());
             let card = ui::overlay(&mut win.canvas, area, 280, 140);
             let (title, color) = if self.state == State::Won { ("Hai vinto!", ui::GREEN) } else { ("Boom!", ui::RED) };
@@ -263,7 +263,7 @@ fn main(_args: &str) -> i32 {
         // While playing, the clock moves every second.
         let ev = match game.state {
             State::Playing => win.event(250),
-            State::Won | State::Lost if arcui::now_ms() - game.ended < 700 => win.event(100),
+            State::Won | State::Lost if justui::now_ms() - game.ended < 700 => win.event(100),
             _ => Some(win.wait()),
         };
         let Some(ev) = ev else { continue };
@@ -286,7 +286,7 @@ fn main(_args: &str) -> i32 {
                     continue;
                 }
                 if matches!(game.state, State::Won | State::Lost) {
-                    if arcui::now_ms() - game.ended > 600 {
+                    if justui::now_ms() - game.ended > 600 {
                         game = Game::new(level);
                     }
                     continue;

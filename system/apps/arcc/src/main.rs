@@ -1,4 +1,4 @@
-//! `arcc`: ArcScript on arcOS. Compiles `.as` programs and projects into
+//! `arcc`: ArcScript on JustOS. Compiles `.as` programs and projects into
 //! `.arc` packages and runs both, with the commands of ArcScript's `arcc`
 //! (and `arc-runner --info`). The shell starts `.arc` and `.as` files
 //! through it.
@@ -19,14 +19,14 @@ use alloc::vec::Vec;
 use arc_vm::{UiNode, Vm};
 use arcc_core::package::ArcPackage;
 use arcc_core::CompileOptions;
-use arcrt::console::color::*;
-use arcrt::{eprintln, fs, print, println};
+use justrt::console::color::*;
+use justrt::{eprintln, fs, print, println};
 use project::Input;
 
-arcrt::main!(main);
+justrt::main!(main);
 
 const HELP: &str = "\
-arcc - ArcScript on arcOS
+arcc - ArcScript on JustOS
 
   arcc run <PATH> [ARGUMENTS...]   compile and run (also a .arc package)
   arcc <FILE.as|FILE.arc> [ARGS]   the same
@@ -178,12 +178,12 @@ fn cmd_run(args: &Args) -> i32 {
     // A finished package runs as its app, in the app's sandbox; a source
     // being written runs as whoever started it.
     if path.ends_with(".arc") {
-        if let Err(e) = arcrt::app::enter(&app_id, &title) {
+        if let Err(e) = justrt::app::enter(&app_id, &title) {
             eprintln!("{path}: cannot run as {app_id}: {}", e.as_str());
             return EXIT_BAD_PACKAGE;
         }
     }
-    let mut vm = match Vm::with_host(package.program, Box::new(host::ArcHost)) {
+    let mut vm = match Vm::with_host(package.program, Box::new(host::JustHost)) {
         Ok(vm) => vm,
         Err(e) => {
             eprintln!("{path}: {e}");
@@ -222,7 +222,7 @@ fn cmd_build(args: &Args) -> i32 {
     };
     let profile = if args.release { "release" } else { "debug" };
     status("Compiling", &format!("{} v{} ({}) [{profile}]", input.name, input.version, input.source_name));
-    let started = arcrt::time::uptime_ms();
+    let started = justrt::time::uptime_ms();
     let pkg = match compile(&input, options(args)) {
         Ok(p) => p,
         Err(code) => return code,
@@ -244,7 +244,7 @@ fn cmd_build(args: &Args) -> i32 {
         eprintln!("{output}: {}", e.as_str());
         return 1;
     }
-    let ms = arcrt::time::uptime_ms() - started;
+    let ms = justrt::time::uptime_ms() - started;
     status("Finished", &format!("{output} ({}) in {}.{:02}s", format_size(bytes.len()), ms / 1000, ms % 1000 / 10));
     0
 }
@@ -325,7 +325,7 @@ fn cmd_new(args: &Args) -> i32 {
 }
 
 fn main(args: &str) -> i32 {
-    let args = match parse_args(arcrt::split_args(args)) {
+    let args = match parse_args(justrt::split_args(args)) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("{e}");
@@ -339,7 +339,7 @@ fn main(args: &str) -> i32 {
             0
         }
         "version" => {
-            println!("arcc {} (arcOS)", arcc_core::VERSION);
+            println!("arcc {} (JustOS)", arcc_core::VERSION);
             0
         }
         "run" => cmd_run(&args),

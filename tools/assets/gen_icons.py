@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Draws the arcOS icon set into one atlas image.
+"""Draws the JustOS icon set into one atlas image.
 
 Every icon is drawn from scratch here (shapes, gradients, symbols) at 512 px
 and reduced to 128 px for smooth edges. The style: a rounded "squircle" with

@@ -1,6 +1,6 @@
 [package]
 name = "sdhci"
-description = "arcOS driver: SD card readers (SD host controller)"
+description = "JustOS driver: SD card readers (SD host controller)"
 version = "1.1.0"
 edition.workspace = true
 publish.workspace = true
@@ -13,7 +13,7 @@ test = false
 bench = false
 
 [dependencies]
-arcdrv.workspace = true
+justdrv.workspace = true
 
 [lints]
 workspace = true

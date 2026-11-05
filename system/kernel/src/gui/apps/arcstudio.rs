@@ -39,7 +39,7 @@ const STEPS: u64 = 3_000_000;
 /// Lines of output kept.
 const KEEP: usize = 400;
 
-const NEW_FILE: &str = "# Un programma ArcScript\n\nlet clicks = 0\n\nfn click()\n    clicks += 1\n\nprint(\"Ciao da arcOS!\")\n\nview\n    window \"Nuovo\" width: 320\n        column gap: 12, align: \"center\"\n            label \"Hai cliccato {clicks} volte\"\n            button \"Clicca\" style: \"filled\" -> click()\n";
+const NEW_FILE: &str = "# Un programma ArcScript\n\nlet clicks = 0\n\nfn click()\n    clicks += 1\n\nprint(\"Ciao da JustOS!\")\n\nview\n    window \"Nuovo\" width: 320\n        column gap: 12, align: \"center\"\n            label \"Hai cliccato {clicks} volte\"\n            button \"Clicca\" style: \"filled\" -> click()\n";
 
 /// One row of the explorer.
 struct Row {
@@ -152,7 +152,7 @@ fn exists(path: &str) -> bool {
 fn list(dir: &str) -> Vec<(String, bool)> {
     let Ok(p) = fs::abs(dir) else { return Vec::new() };
     let mut v: Vec<(String, bool)> = fs::list_dir(&p)
-        .map(|l| l.into_iter().map(|(e, st)| (e.name, st.kind == arcfs::Kind::Dir)).collect())
+        .map(|l| l.into_iter().map(|(e, st)| (e.name, st.kind == justfs::Kind::Dir)).collect())
         .unwrap_or_default();
     v.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase())));
     v

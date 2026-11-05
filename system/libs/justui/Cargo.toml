@@ -1,0 +1,19 @@
+[package]
+name = "justui"
+description = "Windows for JustOS programs: a window on the desktop, its events, and the look of the system's apps"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[lib]
+test = false
+bench = false
+
+[dependencies]
+justdk.workspace = true
+justgfx.workspace = true
+justrt.workspace = true
+
+[lints]
+workspace = true

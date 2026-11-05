@@ -10,11 +10,11 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
-use arcdrv::{DeviceInfo, Dma, IrqLock, NetDesc, Regs, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, OK};
+use justdrv::{DeviceInfo, Dma, IrqLock, NetDesc, Regs, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, OK};
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "rtl8139",
     version: "1.1.0",
     probe: probe,
@@ -118,7 +118,7 @@ impl Nic {
             }
             if iface >= 0 {
                 // The length counts the CRC, which is not passed on.
-                arcdrv::net_receive(iface as u32, &ring[at + 4..at + len]);
+                justdrv::net_receive(iface as u32, &ring[at + 4..at + len]);
             }
             st.rx_at = (at + len + 4 + 3) & !3;
             if st.rx_at >= RING {
@@ -155,7 +155,7 @@ impl Nic {
         if self.paused.load(Ordering::Acquire) {
             return E_IO;
         }
-        let start = arcdrv::time_ms();
+        let start = justdrv::time_ms();
         let mut st = loop {
             let st = self.state.lock();
             let i = st.tx_next;
@@ -164,10 +164,10 @@ impl Nic {
                 break st;
             }
             drop(st);
-            if arcdrv::time_ms() - start > 100 {
+            if justdrv::time_ms() - start > 100 {
                 return E_IO;
             }
-            arcdrv::yield_now();
+            justdrv::yield_now();
         };
         let i = st.tx_next;
         // The card does not pad short frames itself.
@@ -210,7 +210,7 @@ unsafe extern "C" fn poller(ctx: *mut c_void) {
     let nic = unsafe { &*(ctx as *const Nic) };
     loop {
         nic.receive();
-        arcdrv::sleep_ms(if nic.has_irq.load(Ordering::Relaxed) { 50 } else { 5 });
+        justdrv::sleep_ms(if nic.has_irq.load(Ordering::Relaxed) { 50 } else { 5 });
     }
 }
 
@@ -241,8 +241,8 @@ unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
 fn reset(regs: &Regs) -> Status {
     regs.write8(CONFIG1, 0); // wake up
     regs.write8(CR, CR_RESET);
-    if !arcdrv::wait_until(100, || regs.read8(CR) & CR_RESET == 0) {
-        arcdrv::warn!("the card does not come out of reset");
+    if !justdrv::wait_until(100, || regs.read8(CR) & CR_RESET == 0) {
+        justdrv::warn!("the card does not come out of reset");
         return E_IO;
     }
     regs.write16(IMR, 0);
@@ -279,20 +279,20 @@ fn probe(dev: &DeviceInfo) -> Status {
 
     let ctx = nic as *const Nic as *mut c_void;
     let desc: &'static NetDesc = Box::leak(Box::new(NetDesc { ctx, mac, _pad: [0; 2], mtu: 1500, send }));
-    let iface = arcdrv::net_register(dev.id, desc);
+    let iface = justdrv::net_register(dev.id, desc);
     if iface < 0 {
         regs.write8(CR, 0);
         return iface;
     }
     nic.iface.store(iface, Ordering::Relaxed);
-    if arcdrv::irq_attach_any(dev, irq, ctx) {
+    if justdrv::irq_attach_any(dev, irq, ctx) {
         nic.has_irq.store(true, Ordering::Relaxed);
         nic.unmask();
     }
     // Interrupt routing can be wrong on some boards; poll as a safety net.
-    arcdrv::spawn("rtl8139-rx", poller, ctx);
-    arcdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
-    arcdrv::info!(
+    justdrv::spawn("rtl8139-rx", poller, ctx);
+    justdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
+    justdrv::info!(
         "link {}, {}",
         if nic.link_up() { "up" } else { "down" },
         if nic.has_irq.load(Ordering::Relaxed) { "interrupts" } else { "polling" }

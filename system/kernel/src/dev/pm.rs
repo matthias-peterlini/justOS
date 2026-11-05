@@ -12,7 +12,7 @@ use crate::task::WaitQueue;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use arcdk::{PowerHooks, Status, E_INVAL, OK};
+use justdk::{PowerHooks, Status, E_INVAL, OK};
 use core::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Clone, Copy)]
@@ -73,7 +73,7 @@ pub fn suspend_devices() -> Result<(), String> {
                 // SAFETY: as above.
                 unsafe { (done.hooks.resume)(done.hooks.ctx) };
             }
-            return Err(format!("{} cannot stop: {}", describe(e.device), arcdk::status_name(st)));
+            return Err(format!("{} cannot stop: {}", describe(e.device), justdk::status_name(st)));
         }
     }
     Ok(())
@@ -88,7 +88,7 @@ pub fn resume_devices() {
         // SAFETY: the driver's own hook with its own context.
         let st = unsafe { (e.hooks.resume)(e.hooks.ctx) };
         if st != OK {
-            crate::warn!("sleep", "{} did not wake up: {}", describe(e.device), arcdk::status_name(st));
+            crate::warn!("sleep", "{} did not wake up: {}", describe(e.device), justdk::status_name(st));
         } else if crate::time::uptime_ms() - started > 500 {
             crate::debug!("sleep", "{} took {} ms to wake up", describe(e.device), crate::time::uptime_ms() - started);
         }

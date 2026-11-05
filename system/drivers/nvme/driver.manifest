@@ -3,6 +3,6 @@ name        = nvme
 version     = 1.1.0
 class       = storage
 description = NVM Express SSD
-author      = arcOS
+author      = JustOS
 boot        = yes
 match       = pci-class 01:08:02

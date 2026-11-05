@@ -1,8 +1,8 @@
 //! Who an app is, and what it may touch.
 //!
-//! An installed arcOS app (a `.app` in `sys:/apps` with its `.info`, or an
+//! An installed JustOS app (a `.app` in `sys:/apps` with its `.info`, or an
 //! ArcScript package that `arcc` starts with `APP_ENTER`) runs as its
-//! `app_id`, such as `org.arcos.disegno`, in a sandbox:
+//! `app_id`, such as `dev.justos.disegno`, in a sandbox:
 //!
 //! - its own folder, `sys:/home/.apps/<app_id>`, is all its, and it starts
 //!   there;
@@ -16,7 +16,7 @@
 //!
 //! Everything else is `Denied`. System programs (a `.app` without `.info`,
 //! the shell, the desktop) have no sandbox; a program an app starts runs in
-//! the app's. Devices ask through the `arc.permissions` port
+//! the app's. Devices ask through the `just.permissions` port
 //! ([`crate::ipc`]), with the same dialog and the same table.
 
 use crate::fs::{self, Path};
@@ -25,8 +25,8 @@ use crate::task::WaitQueue;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use arcdk::syscall::Error;
-use arcjson::Value;
+use justdk::syscall::Error;
+use justjson::Value;
 
 /// Where apps keep their own files.
 pub const DATA: &str = "sys:/home/.apps";
@@ -51,17 +51,17 @@ pub struct App {
 }
 
 /// Is `id` a good app id: reverse-DNS (`org.example.app`; letters, digits,
-/// `-` and `_`), outside `arc.`, which is the system's? Ids are kept in
+/// `-` and `_`), outside `just.`, which is the system's? Ids are kept in
 /// lowercase, as file names do not mind case.
 pub fn valid_id(id: &str) -> bool {
     let parts: Vec<&str> = id.split('.').collect();
     id.len() <= 128
         && parts.len() >= 2
-        && !parts[0].eq_ignore_ascii_case("arc")
+        && !parts[0].eq_ignore_ascii_case("just")
         && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'))
 }
 
-/// The id of a package that does not name one: `org.arcos.<name>`.
+/// The id of a package that does not name one: `dev.justos.<name>`.
 pub fn default_id(name: &str) -> String {
     let mut s = String::new();
     for c in name.chars() {
@@ -73,13 +73,13 @@ pub fn default_id(name: &str) -> String {
     }
     let s = s.trim_end_matches('-');
     match s.bytes().next() {
-        None => String::from("org.arcos.app"),
-        Some(b) if b.is_ascii_digit() => format!("org.arcos.app-{s}"),
-        Some(_) => format!("org.arcos.{s}"),
+        None => String::from("dev.justos.app"),
+        Some(b) if b.is_ascii_digit() => format!("dev.justos.app-{s}"),
+        Some(_) => format!("dev.justos.{s}"),
     }
 }
 
-/// The app a program file is: an installed arcOS package in `sys:/apps`.
+/// The app a program file is: an installed JustOS package in `sys:/apps`.
 pub fn for_program(path: &Path) -> Option<App> {
     if !path.volume.eq_ignore_ascii_case("sys") {
         return None;
@@ -90,7 +90,7 @@ pub fn for_program(path: &Path) -> Option<App> {
         return None;
     }
     let p = crate::store::installed(stem)?;
-    if p.platform != crate::store::Platform::Arcos {
+    if p.platform != crate::store::Platform::Justos {
         return None;
     }
     let icon = crate::store::icon(stem).unwrap_or_else(|| String::from("window"));
@@ -153,7 +153,7 @@ fn rule(app: &App, picked: &[(Path, bool)], path: &Path, write: bool) -> Rule {
         // lengths, so the name can be cut from the path as written).
         let len = rest.find('/').unwrap_or(rest.len());
         let folder = &path.inner["/home/".len().."/home/".len() + len];
-        let file_in_home = len == rest.len() && fs::stat(path).is_ok_and(|s| s.kind != arcfs::Kind::Dir);
+        let file_in_home = len == rest.len() && fs::stat(path).is_ok_and(|s| s.kind != justfs::Kind::Dir);
         if !folder.is_empty() && !folder.starts_with('.') && !file_in_home {
             return Rule::Ask(format!("files:{}", folder_name(folder)));
         }
@@ -209,7 +209,7 @@ static GRANTS: IrqLock<Option<Vec<Grants>>> = IrqLock::new(None);
 static SAVING: Mutex<()> = Mutex::new(());
 
 fn load() -> Vec<Grants> {
-    let Some(v) = fs::abs(FILE).and_then(|p| fs::read_file(&p)).ok().and_then(|b| arcjson::parse_bytes(&b)) else {
+    let Some(v) = fs::abs(FILE).and_then(|p| fs::read_file(&p)).ok().and_then(|b| justjson::parse_bytes(&b)) else {
         return Vec::new();
     };
     v.get("apps")

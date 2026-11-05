@@ -1,23 +1,23 @@
-//! What ArcScript programs reach on arcOS: the console, the clock, the
+//! What ArcScript programs reach on JustOS: the console, the clock, the
 //! files of the mounted volumes and the other programs.
 
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use arc_vm::{Host, RunOutput};
-use arcrt::{console, fs, process, time};
+use justrt::{console, fs, process, time};
 
-/// Seconds from 1970-01-01 to 2000-01-01, where the arcOS clock starts.
+/// Seconds from 1970-01-01 to 2000-01-01, where the JustOS clock starts.
 const UNIX_2000: u64 = 946_684_800;
 
-pub struct ArcHost;
+pub struct JustHost;
 
-fn fail(path: &str, e: arcrt::Error) -> String {
+fn fail(path: &str, e: justrt::Error) -> String {
     format!("{path}: {}", e.as_str())
 }
 
 /// Puts an argument in double quotes when it has spaces (see
-/// `arcrt::split_args`).
+/// `justrt::split_args`).
 pub fn quote(arg: &str) -> String {
     if arg.is_empty() || arg.contains(char::is_whitespace) {
         format!("\"{arg}\"")
@@ -26,7 +26,7 @@ pub fn quote(arg: &str) -> String {
     }
 }
 
-impl Host for ArcHost {
+impl Host for JustHost {
     fn print(&mut self, text: &str) {
         console::write(text);
         console::write("\n");
@@ -85,7 +85,7 @@ impl Host for ArcHost {
             let part = &path[..end.unwrap_or(path.len())];
             if !part.is_empty() && !part.ends_with(':') && !part.ends_with('/') {
                 match fs::make_dir(part) {
-                    Ok(()) | Err(arcrt::Error::Exists) => {}
+                    Ok(()) | Err(justrt::Error::Exists) => {}
                     Err(e) => return Err(fail(part, e)),
                 }
             }
@@ -117,6 +117,6 @@ impl Host for ArcHost {
     }
 
     fn os_name(&self) -> &'static str {
-        "arcos"
+        "justos"
     }
 }

@@ -1,4 +1,4 @@
-//! The arcOS kernel.
+//! The JustOS kernel.
 //!
 //! Boot order: serial console → CPU tables → memory → screen (and the boot
 //! splash) → clock and scheduler → interrupts on → ACPI → boot pack and RAM
@@ -79,7 +79,7 @@ static mut BOOT_STACK: Stack = Stack([0; BOOT_STACK_SIZE]);
 #[no_mangle]
 extern "C" fn kmain(boot_phys: u64) -> ! {
     console::serial::init();
-    console::early("\narcOS kernel ");
+    console::early("\nJustOS kernel ");
     console::early(VERSION);
     console::early("\n");
 
@@ -132,7 +132,7 @@ extern "C" fn kmain(boot_phys: u64) -> ! {
     driver::init();
     gui::boot_progress(60);
     if fs::volume("sys").is_none()
-        && dev::list().iter().any(|d| d.driver.is_some() && d.info.bus == arcdk::BUS_PCI && d.info.class == 0x0C && d.info.subclass == 0x03)
+        && dev::list().iter().any(|d| d.driver.is_some() && d.info.bus == justdk::BUS_PCI && d.info.class == 0x0C && d.info.subclass == 0x03)
     {
         // The system disk may be a USB drive: its controller finds it in
         // the background.

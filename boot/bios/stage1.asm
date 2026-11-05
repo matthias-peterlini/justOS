@@ -1,8 +1,8 @@
-; ArcBoot stage 1 — master boot record, and boot sector of the ISO.
+; JustBoot stage 1 — master boot record, and boot sector of the ISO.
 ;
 ; The BIOS loads this sector at 0000:7C00. It reads stage 2 (from LBA 1 on a
 ; disk) to 0000:7E00 with the INT 13h extensions and jumps there with the
-; boot drive in DL. The boot table at offset 0x180 is filled in by `arctool`
+; boot drive in DL. The boot table at offset 0x180 is filled in by `justtool`
 ; when the image is built; stage 2 reads it from memory.
 ;
 ; On a CD (El Torito, no emulation) sectors are 2048 bytes: the boot table
@@ -101,13 +101,13 @@ dap_segment dw 0
 dap_lba     dq 0
 
 ; ---------------------------------------------------------------------------
-; Boot table (written by arctool). Layout shared with stage2.asm. Positions
+; Boot table (written by justtool). Layout shared with stage2.asm. Positions
 ; and sizes count 512-byte sectors.
 times 0x180 - ($ - $$) db 0
 boot_stage2_lba     dd 0
 boot_system_lba     dd 0            ; a live system volume to load, if any
 boot_system_sectors dd 0
-boot_ctl_lba        dd 0            ; ARCOS/BOOT.CTL: picks the system slot
+boot_ctl_lba        dd 0            ; JUSTOS/BOOT.CTL: picks the system slot
 boot_magic          dd 0            ; "ARCB"
 boot_stage2_sectors dw 0
 boot_flags          dw 0            ; BOOT_CD

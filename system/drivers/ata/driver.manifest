@@ -3,6 +3,6 @@ name        = ata
 version     = 1.1.0
 class       = storage
 description = ATA/IDE disk controller
-author      = arcOS
+author      = JustOS
 boot        = yes
 match       = pci-class 01:01

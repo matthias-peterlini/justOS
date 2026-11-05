@@ -9,7 +9,7 @@ use crate::console::FbInfo;
 use crate::sync::IrqLock;
 use alloc::string::String;
 use alloc::vec::Vec;
-use arcdk::{DisplayDesc, DisplayMode, Framebuffer, Status};
+use justdk::{DisplayDesc, DisplayMode, Framebuffer, Status};
 
 struct Controller {
     device: u32,

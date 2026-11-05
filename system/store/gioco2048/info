@@ -3,6 +3,6 @@ category=Giochi
 about=Il celebre rompicapo dei numeri: unisci le tessere uguali fino a 2048.
 details=Sposta tutte le tessere con le frecce: quando due tessere con lo stesso numero si toccano diventano una sola, del valore doppio. Ogni mossa porta una tessera nuova. Riesci ad arrivare a 2048? Il record resta salvato.
 version=1.1
-developer=arcOS
+developer=JustOS
 type=native
 gui=yes

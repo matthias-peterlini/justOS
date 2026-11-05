@@ -1,9 +1,9 @@
 //! Windows with a message loop: a part of `user32` and `gdi32` on top of the
-//! arcOS windows of [`arcui`].
+//! JustOS windows of [`justui`].
 //!
-//! Each Win32 window is an arcOS window whose canvas keeps what the program
+//! Each Win32 window is an JustOS window whose canvas keeps what the program
 //! drew, as a Windows window does. Mouse, keyboard, resizing and closing come
-//! back from arcOS as events and become `WM_*` messages; `GetMessage` merges
+//! back from JustOS as events and become `WM_*` messages; `GetMessage` merges
 //! them with posted messages, timers and `WM_PAINT`. A device context draws
 //! with GDI's pen, brush and font onto the window or onto a bitmap (for the
 //! usual double buffering with `BitBlt`).
@@ -18,7 +18,7 @@ use crate::crt::{cstr, wstr};
 use alloc::collections::VecDeque;
 use alloc::string::String;
 use alloc::vec::Vec;
-use arcui::{ui, Canvas, Event, Font, Key, Rect, Window};
+use justui::{ui, Canvas, Event, Font, Key, Rect, Window};
 
 pub fn resolve(name: &str) -> Option<u64> {
     let f: u64 = match name {
@@ -409,8 +409,8 @@ fn font_of(d: &Dc) -> Font {
     }
 }
 
-fn fonts() -> &'static arcui::Fonts {
-    arcui::fonts().expect("the system fonts")
+fn fonts() -> &'static justui::Fonts {
+    justui::fonts().expect("the system fonts")
 }
 
 /// Shows what was drawn on a window.
@@ -592,7 +592,7 @@ extern "win64" fn CreateWindowExW(_ex: u32, class: u64, title: *const u16, style
 fn destroy(hwnd: u64) {
     if let Some(i) = hwnd.checked_sub(HWND_BASE) {
         if let Some(slot) = st().wins.get_mut(i as usize) {
-            *slot = None; // closes the arcOS window
+            *slot = None; // closes the JustOS window
         }
     }
     st().timers.retain(|t| t.hwnd != hwnd);
@@ -750,7 +750,7 @@ fn vk(k: Key) -> Option<u8> {
     })
 }
 
-fn char_code(k: arcui::KeyEvent) -> Option<u32> {
+fn char_code(k: justui::KeyEvent) -> Option<u32> {
     Some(match k.key {
         Key::Enter => 13,
         Key::Backspace => 8,
@@ -762,13 +762,13 @@ fn char_code(k: arcui::KeyEvent) -> Option<u32> {
     })
 }
 
-/// A key is "down" for a moment after it was pressed: arcOS reports presses,
+/// A key is "down" for a moment after it was pressed: JustOS reports presses,
 /// not releases.
 const KEY_HOLD_MS: u64 = 150;
 
 extern "win64" fn GetKeyState(key: i32) -> i16 {
     let t = st().keys[(key & 0xFF) as usize];
-    if t != 0 && arcrt::time::uptime_ms().saturating_sub(t) < KEY_HOLD_MS {
+    if t != 0 && justrt::time::uptime_ms().saturating_sub(t) < KEY_HOLD_MS {
         0x8000_u16 as i16 | 1
     } else {
         0
@@ -778,7 +778,7 @@ extern "win64" fn GetKeyState(key: i32) -> i16 {
 // ----------------------------------------------------------------------------
 // The message loop
 
-/// Turns the arcOS events of every window into messages.
+/// Turns the JustOS events of every window into messages.
 fn pump(wait_ms: u64) -> bool {
     let n = st().wins.len();
     let mut got = false;
@@ -793,13 +793,13 @@ fn pump(wait_ms: u64) -> bool {
         translate(hwnd, ev);
     }
     if alive.is_empty() && wait_ms > 0 {
-        arcrt::time::sleep_ms(wait_ms.min(50));
+        justrt::time::sleep_ms(wait_ms.min(50));
     }
     got
 }
 
 fn translate(hwnd: u64, ev: Event) {
-    let now = arcrt::time::uptime_ms();
+    let now = justrt::time::uptime_ms();
     match ev {
         Event::Press { x, y, double } => {
             st().pointer = (x, y);
@@ -875,7 +875,7 @@ fn next(wait: bool, remove: bool) -> Option<Msg> {
             continue;
         }
         // Timers.
-        let now = arcrt::time::uptime_ms();
+        let now = justrt::time::uptime_ms();
         if let Some(t) = st().timers.iter_mut().filter(|t| t.due <= now).min_by_key(|t| t.due) {
             let m = Msg { hwnd: t.hwnd, msg: WM_TIMER, wp: t.id, lp: t.proc_ as i64 };
             if remove {
@@ -905,7 +905,7 @@ fn store(out: *mut MSG, m: Msg) {
     let (x, y) = st().pointer;
     // SAFETY: the program passes a MSG.
     unsafe {
-        *out = MSG { hwnd: m.hwnd, message: m.msg, wparam: m.wp, lparam: m.lp, time: arcrt::time::uptime_ms() as u32, pt: [x, y], private: 0 };
+        *out = MSG { hwnd: m.hwnd, message: m.msg, wparam: m.wp, lparam: m.lp, time: justrt::time::uptime_ms() as u32, pt: [x, y], private: 0 };
     }
 }
 
@@ -935,7 +935,7 @@ extern "win64" fn DispatchMessage(m: *const MSG) -> i64 {
     if m.message == WM_TIMER && m.lparam != 0 {
         // SAFETY: the TIMERPROC the program passed to SetTimer.
         let f: extern "win64" fn(u64, u32, u64, u32) = unsafe { core::mem::transmute(m.lparam) };
-        f(m.hwnd, WM_TIMER, m.wparam, arcrt::time::uptime_ms() as u32);
+        f(m.hwnd, WM_TIMER, m.wparam, justrt::time::uptime_ms() as u32);
         return 0;
     }
     if m.message == WM_PAINT {
@@ -975,7 +975,7 @@ extern "win64" fn SetTimer(hwnd: u64, id: u64, ms: u32, proc_: u64) -> u64 {
     };
     s.timers.retain(|t| !(t.hwnd == hwnd && t.id == id));
     let ms = (ms as u64).max(10);
-    s.timers.push(Timer { hwnd, id, ms, due: arcrt::time::uptime_ms() + ms, proc_ });
+    s.timers.push(Timer { hwnd, id, ms, due: justrt::time::uptime_ms() + ms, proc_ });
     id
 }
 extern "win64" fn KillTimer(hwnd: u64, id: u64) -> u32 {

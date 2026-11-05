@@ -1,6 +1,6 @@
 [package]
 name = "uhci"
-description = "arcOS driver: USB 1.1 host controllers (UHCI)"
+description = "JustOS driver: USB 1.1 host controllers (UHCI)"
 version = "1.1.0"
 edition.workspace = true
 publish.workspace = true
@@ -13,8 +13,8 @@ test = false
 bench = false
 
 [dependencies]
-arcdrv.workspace = true
-arcusb.workspace = true
+justdrv.workspace = true
+justusb.workspace = true
 
 [lints]
 workspace = true

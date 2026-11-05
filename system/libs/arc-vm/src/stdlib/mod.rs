@@ -262,7 +262,7 @@ fn fs(vm: &mut Vm, name: &str, args: &[Value]) -> Result<Value, String> {
 
 // ------------------------------------------------------------------- path
 
-/// Paths are text with `/` between names; a name ending in `:` (an arcOS
+/// Paths are text with `/` between names; a name ending in `:` (an JustOS
 /// volume, a Windows drive) or a leading `/` makes a path absolute.
 fn is_absolute(p: &str) -> bool {
     p.starts_with('/') || p.starts_with('\\') || p.split(['/', '\\']).next().is_some_and(|first| first.ends_with(':'))

@@ -1,6 +1,6 @@
 //! The driver manager: finds, installs and loads drivers by itself.
 //!
-//! Drivers are `.adp` packages (see `arcdk::package`) kept in three places:
+//! Drivers are `.adp` packages (see `justdk::package`) kept in three places:
 //!
 //! * `boot:/drivers` — the drivers needed before the system disk is mounted
 //!   (disk controllers, keyboard), inside the boot pack;
@@ -32,9 +32,9 @@ use crate::fs::{self, Path};
 use crate::sync::Mutex;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use arcdk::manifest::{compare_versions, Manifest};
-use arcdk::package::Package;
-use arcdk::{DriverEntry, DriverInfo, Status, ABI_VERSION, DRIVER_MAGIC, E_BUSY, E_NODEV, OK};
+use justdk::manifest::{compare_versions, Manifest};
+use justdk::package::Package;
+use justdk::{DriverEntry, DriverInfo, Status, ABI_VERSION, DRIVER_MAGIC, E_BUSY, E_NODEV, OK};
 
 pub const STORE: &str = "sys:/system/drivers";
 pub const BOOT_DRIVERS: &str = "boot:/drivers";
@@ -123,7 +123,7 @@ fn scan_folder(dir: &str, origin: Origin, out: &mut Vec<PackageEntry>) {
     let Ok(dir) = fs::abs(dir) else { return };
     let Ok(entries) = fs::list_dir(&dir) else { return };
     for (e, st) in entries {
-        if st.kind != arcfs::Kind::File || !e.name.to_ascii_lowercase().ends_with(".adp") {
+        if st.kind != justfs::Kind::File || !e.name.to_ascii_lowercase().ends_with(".adp") {
             continue;
         }
         let path = dir.join(&e.name);
@@ -150,7 +150,7 @@ impl Manager {
     }
 
     /// Packages that match a device, best first.
-    fn candidates(&self, dev: &arcdk::DeviceInfo) -> Vec<(u32, PackageEntry)> {
+    fn candidates(&self, dev: &justdk::DeviceInfo) -> Vec<(u32, PackageEntry)> {
         let mut c: Vec<(u32, PackageEntry)> =
             self.packages.iter().filter_map(|p| p.manifest().score(dev).map(|s| (s, p.clone()))).collect();
         c.sort_by(|a, b| {
@@ -250,7 +250,7 @@ impl Manager {
                     last_error = None;
                     break;
                 } else if status != E_NODEV {
-                    let e = alloc::format!("{} could not start the device: {}", self.loaded[idx].name, arcdk::status_name(status));
+                    let e = alloc::format!("{} could not start the device: {}", self.loaded[idx].name, justdk::status_name(status));
                     crate::warn!("drivers", "{e} ({})", d.location());
                     last_error = Some(e);
                 }
@@ -469,7 +469,7 @@ pub fn process_inbox() -> Vec<String> {
     let Ok(inbox) = fs::abs(INBOX) else { return out };
     let Ok(entries) = fs::list_dir(&inbox) else { return out };
     for (e, st) in entries {
-        if st.kind != arcfs::Kind::File || !e.name.to_ascii_lowercase().ends_with(".adp") {
+        if st.kind != justfs::Kind::File || !e.name.to_ascii_lowercase().ends_with(".adp") {
             continue;
         }
         let path = inbox.join(&e.name);

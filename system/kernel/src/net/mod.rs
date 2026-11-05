@@ -257,8 +257,8 @@ fn dhcp_send(iface: u32, kind: u8, xid: u32, requested: Option<(Ip, Ip)>) {
         d.extend_from_slice(&server.0);
     }
     d.extend_from_slice(&[55, 3, 1, 3, 6]); // ask for mask, router, DNS
-    d.extend_from_slice(&[12, 5]);
-    d.extend_from_slice(b"arcos");
+    d.extend_from_slice(&[12, 6]);
+    d.extend_from_slice(b"justos");
     d.push(255);
     let packet = ipv4_packet(Ip::ANY, Ip::BROADCAST, 17, &udp_datagram(68, 67, &d), 0);
     send_ethernet(iface, BROADCAST_MAC, 0x0800, &packet);
@@ -451,7 +451,7 @@ pub fn ping(dst: Ip, seq: u16, timeout_ms: u64) -> Result<u64, &'static str> {
     let mut msg = vec![8u8, 0, 0, 0];
     msg.extend_from_slice(&id.to_be_bytes());
     msg.extend_from_slice(&seq.to_be_bytes());
-    msg.extend_from_slice(b"arcOS ping payload 0123456789abcdef");
+    msg.extend_from_slice(b"JustOS ping payload 0123456789abcdef");
     let c = checksum(&msg);
     msg[2..4].copy_from_slice(&c.to_be_bytes());
     let start = time::uptime_ms();

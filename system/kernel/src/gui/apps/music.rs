@@ -68,7 +68,7 @@ impl Music {
             }
         };
         add("sys:/home/Musica", "La mia musica");
-        add("sys:/system/sounds", "Suoni di arcOS");
+        add("sys:/system/sounds", "Suoni di JustOS");
         Music { songs, current: None, paused_at: None, scroll: 0, hover: None, dragging: None, note: String::new(), last_shown: u64::MAX }
     }
 

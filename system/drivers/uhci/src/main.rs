@@ -19,16 +19,16 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use arcdrv::port::{inw, outb, outl, outw};
-use arcdrv::usb::*;
-use arcdrv::{
+use justdrv::port::{inw, outb, outl, outw};
+use justdrv::usb::*;
+use justdrv::{
     DeviceInfo, Dma, Event, IrqLock, Mutex, Pci, Status, E_BUSY, E_GONE, E_INVAL, E_IO, E_NODEV, E_NOMEM, E_STALL, E_TIMEOUT, OK,
 };
-use arcusb::{Attach, Handle, Host, HubInfo, PortStatus, Table};
+use justusb::{Attach, Handle, Host, HubInfo, PortStatus, Table};
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU8, Ordering};
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "uhci",
     version: "1.1.0",
     probe: probe,
@@ -278,7 +278,7 @@ impl Uhci {
             self.relink(&list);
         }
         // The controller may still be inside one of them in this frame.
-        arcdrv::sleep_ms(2);
+        justdrv::sleep_ms(2);
     }
 
     // ------------------------------------------------------------------
@@ -311,17 +311,17 @@ impl Uhci {
             if pipe.gone.load(Ordering::Acquire) {
                 return Err(E_GONE);
             }
-            if arcdrv::time_ms() >= deadline {
+            if justdrv::time_ms() >= deadline {
                 return Err(E_TIMEOUT);
             }
-            arcdrv::sleep_ms(1);
+            justdrv::sleep_ms(1);
         }
     }
 
     /// Stops the queue after a transfer that did not finish cleanly.
     fn halt(&self, pipe: &Pipe) {
         pipe.start(LINK_T);
-        arcdrv::sleep_ms(2);
+        justdrv::sleep_ms(2);
     }
 
     fn actual(pipe: &Pipe, i: usize) -> usize {
@@ -360,7 +360,7 @@ impl Uhci {
         pipe.set_td(status, LINK_T, base | TD_IOC, token(status_pid, addr, 0, true, 0), 0);
         pipe.start(pipe.td_phys(0));
 
-        let deadline = arcdrv::time_ms() + timeout_ms as u64;
+        let deadline = justdrv::time_ms() + timeout_ms as u64;
         let result = match self.wait_tds(&pipe, 0, status + 1, deadline) {
             // A short data stage: go on with the status stage.
             Ok(Some(i)) if i >= 1 && i < status => {
@@ -420,7 +420,7 @@ impl Uhci {
                 );
             }
             pipe.start(pipe.td_phys(0));
-            let deadline = arcdrv::time_ms() + timeout_ms as u64;
+            let deadline = justdrv::time_ms() + timeout_ms as u64;
             let (completed, result) = match self.wait_tds(&pipe, 0, packets, deadline) {
                 Ok(Some(i)) => (i + 1, Ok(())),
                 Ok(None) => (packets, Ok(())),
@@ -476,7 +476,7 @@ impl Uhci {
             };
             let Some(p) = poll else { continue };
             if st & TD_ERRORS != 0 {
-                arcdrv::debug!("endpoint {:#x}: polling stopped (status {:#x})", pipe.endpoint, st >> 16 & 0xFF);
+                justdrv::debug!("endpoint {:#x}: polling stopped (status {:#x})", pipe.endpoint, st >> 16 & 0xFF);
                 *pipe.poll.lock() = None;
                 pipe.in_callback.store(false, Ordering::Release);
                 self.polls.lock().retain(|q| !Arc::ptr_eq(q, &pipe));
@@ -527,10 +527,10 @@ impl Host for Uhci {
     fn port_reset(&self, port: u8) -> Result<u8, Status> {
         let r = self.port_reg(port);
         outw(r, (inw(r) & PORT_KEEP) | PORT_PR);
-        arcdrv::sleep_ms(50);
+        justdrv::sleep_ms(50);
         outw(r, inw(r) & PORT_KEEP & !PORT_PR);
         for _ in 0..10 {
-            arcdrv::port::io_wait();
+            justdrv::port::io_wait();
         }
         // The port does not enable itself after a reset.
         for _ in 0..10 {
@@ -542,11 +542,11 @@ impl Host for Uhci {
                 outw(r, (v & PORT_KEEP) | (v & PORT_CHANGES));
             }
             if v & PORT_PED != 0 {
-                arcdrv::sleep_ms(10); // reset recovery
+                justdrv::sleep_ms(10); // reset recovery
                 return Ok(if v & PORT_LSDA != 0 { SPEED_LOW } else { SPEED_FULL });
             }
             outw(r, (v & PORT_KEEP) | PORT_PED);
-            arcdrv::sleep_ms(10);
+            justdrv::sleep_ms(10);
         }
         Err(E_IO)
     }
@@ -579,7 +579,7 @@ impl Host for Uhci {
 
     fn configure(&self, dev: Handle, config: &[u8], _hub: Option<HubInfo>) -> Result<(), Status> {
         let d = self.dev(dev)?;
-        for e in arcusb::config_endpoints(config) {
+        for e in justusb::config_endpoints(config) {
             if d.pipe(e.address).is_some() {
                 continue;
             }
@@ -652,7 +652,7 @@ impl Host for Uhci {
         self.asleep.store(true, Ordering::Release);
         outw(self.io + USBINTR, 0);
         outw(self.io + USBCMD, 0);
-        arcdrv::wait_until(10, || inw(self.io + USBSTS) & STS_HALTED != 0);
+        justdrv::wait_until(10, || inw(self.io + USBSTS) & STS_HALTED != 0);
     }
 
     fn restart(&self) -> Status {
@@ -678,12 +678,12 @@ impl Uhci {
         outw(io + USBINTR, INTR_ENABLE);
         Pci(self.pci).write16(USBLEGSUP, LEGSUP_PIRQ);
         outw(io + USBCMD, CMD_RUN | CMD_CF | CMD_MAXP);
-        if !arcdrv::wait_until(100, || inw(io + USBSTS) & STS_HALTED == 0) {
-            arcdrv::warn!("controller does not start");
+        if !justdrv::wait_until(100, || inw(io + USBSTS) & STS_HALTED == 0) {
+            justdrv::warn!("controller does not start");
             return E_IO;
         }
         if inw(io + USBSTS) & STS_FATAL != 0 {
-            arcdrv::warn!("controller reports an error");
+            justdrv::warn!("controller reports an error");
         }
         OK
     }
@@ -693,14 +693,14 @@ impl Uhci {
 fn reset(io: u16) -> Status {
     outw(io + USBINTR, 0);
     outw(io + USBCMD, 0);
-    arcdrv::wait_until(10, || inw(io + USBSTS) & STS_HALTED != 0);
+    justdrv::wait_until(10, || inw(io + USBSTS) & STS_HALTED != 0);
     outw(io + USBCMD, CMD_GRESET);
-    arcdrv::sleep_ms(50);
+    justdrv::sleep_ms(50);
     outw(io + USBCMD, 0);
-    arcdrv::sleep_ms(10);
+    justdrv::sleep_ms(10);
     outw(io + USBCMD, CMD_HCRESET);
-    if !arcdrv::wait_until(50, || inw(io + USBCMD) & CMD_HCRESET == 0) {
-        arcdrv::warn!("controller reset timed out");
+    if !justdrv::wait_until(50, || inw(io + USBCMD) & CMD_HCRESET == 0) {
+        justdrv::warn!("controller reset timed out");
         return E_TIMEOUT;
     }
     OK
@@ -721,7 +721,7 @@ fn init_frames(frames: &Dma) {
 fn stop_poll(u: &Uhci, pipe: &Arc<Pipe>) {
     let stopped = pipe.poll.lock().take().is_some();
     while pipe.in_callback.load(Ordering::Acquire) {
-        arcdrv::sleep_ms(1);
+        justdrv::sleep_ms(1);
     }
     if stopped {
         u.polls.lock().retain(|q| !Arc::ptr_eq(q, pipe));
@@ -755,7 +755,7 @@ unsafe extern "C" fn poll_thread(ctx: *mut c_void) {
         }
         let sts = inw(u.io + USBSTS);
         if sts & STS_HALTED != 0 && !reported && !u.asleep.load(Ordering::Acquire) {
-            arcdrv::error!("controller stopped (status {sts:#x})");
+            justdrv::error!("controller stopped (status {sts:#x})");
             reported = true;
         }
         u.service_polls();
@@ -815,14 +815,14 @@ fn probe(dev: &DeviceInfo) -> Status {
         asleep: AtomicBool::new(false),
     }));
     let ctx = u as *const Uhci as *mut c_void;
-    u.has_irq.store(arcdrv::irq_attach_any(dev, irq, ctx), Ordering::Relaxed);
-    arcdrv::spawn("uhci-poll", poll_thread, ctx);
+    u.has_irq.store(justdrv::irq_attach_any(dev, irq, ctx), Ordering::Relaxed);
+    justdrv::spawn("uhci-poll", poll_thread, ctx);
 
     let st = u.start();
     if st != OK {
         return st;
     }
-    arcdrv::info!("{} ports, {}", ports, if u.has_irq.load(Ordering::Relaxed) { "interrupts" } else { "polling" });
-    arcusb::start(u, dev.id, "uhci-ports");
+    justdrv::info!("{} ports, {}", ports, if u.has_irq.load(Ordering::Relaxed) { "interrupts" } else { "polling" });
+    justusb::start(u, dev.id, "uhci-ports");
     OK
 }

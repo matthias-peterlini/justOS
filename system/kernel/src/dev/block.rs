@@ -10,7 +10,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
-use arcdk::{BlockDesc, Status, BLOCK_READONLY, BLOCK_REMOVABLE, E_INVAL, E_IO, OK};
+use justdk::{BlockDesc, Status, BLOCK_READONLY, BLOCK_REMOVABLE, E_INVAL, E_IO, OK};
 
 pub struct Disk {
     pub name: String,
@@ -22,7 +22,7 @@ pub struct Disk {
     pub removable: bool,
     /// For partitions: the whole disk and the first sector.
     pub parent: Option<(Arc<Disk>, u64)>,
-    /// Partition type ("ArcFS", "FAT32", GUID...) for partitions.
+    /// Partition type ("JustFS", "FAT32", GUID...) for partitions.
     pub kind: String,
     desc: *const BlockDesc,
     io: Mutex<()>,
@@ -52,7 +52,7 @@ impl Disk {
 
     pub fn write(&self, lba: u64, buf: &[u8]) -> Status {
         if self.readonly {
-            return arcdk::E_UNSUPPORTED;
+            return justdk::E_UNSUPPORTED;
         }
         self.transfer(lba, buf.as_ptr() as *mut u8, buf.len(), true)
     }
@@ -237,7 +237,7 @@ fn add_partition(disk: &Arc<Disk>, index: usize, start: u64, sectors: u64, kind:
 
 fn mbr_type_name(t: u8) -> &'static str {
     match t {
-        0xAC => "ArcFS",
+        0xAC => "JustFS",
         0x01 | 0x04 | 0x06 | 0x0E => "FAT16",
         0x0B | 0x0C => "FAT32",
         0x07 => "NTFS/exFAT",
@@ -249,11 +249,11 @@ fn mbr_type_name(t: u8) -> &'static str {
     }
 }
 
-const GPT_ARCFS: [u8; 16] = *b"ArcOS-ArcFS-v1\0\0";
+const GPT_JUSTFS: [u8; 16] = *b"JustOS-JustFS-1\0";
 
 fn guid_kind(g: &[u8]) -> String {
     match g {
-        _ if g == GPT_ARCFS => String::from("ArcFS"),
+        _ if g == GPT_JUSTFS => String::from("JustFS"),
         [0x28, 0x73, 0x2A, 0xC1, 0x1F, 0xF8, 0xD2, 0x11, ..] => String::from("EFI system"),
         [0xA2, 0xA0, 0xD0, 0xEB, 0xE5, 0xB9, 0x33, 0x44, ..] => String::from("Microsoft data"),
         [0xAF, 0x3D, 0xC6, 0x0F, 0x83, 0x84, 0x72, 0x47, ..] => String::from("Linux"),
@@ -324,39 +324,39 @@ fn scan_gpt(disk: &Arc<Disk>) -> Vec<Arc<Disk>> {
     out
 }
 
-/// ArcFS on top of a disk or partition: 4 KiB blocks over its sectors.
+/// JustFS on top of a disk or partition: 4 KiB blocks over its sectors.
 pub struct DiskBlocks {
     pub disk: Arc<Disk>,
 }
 
-impl arcfs::BlockDevice for DiskBlocks {
-    fn read_block(&mut self, block: u64, buf: &mut arcfs::Block) -> arcfs::Result<()> {
-        let per = arcfs::BLOCK_SIZE as u64 / self.disk.sector_size as u64;
+impl justfs::BlockDevice for DiskBlocks {
+    fn read_block(&mut self, block: u64, buf: &mut justfs::Block) -> justfs::Result<()> {
+        let per = justfs::BLOCK_SIZE as u64 / self.disk.sector_size as u64;
         if self.disk.read(block * per, buf) == OK {
             Ok(())
         } else {
-            Err(arcfs::Error::Io)
+            Err(justfs::Error::Io)
         }
     }
 
-    fn write_block(&mut self, block: u64, buf: &arcfs::Block) -> arcfs::Result<()> {
-        let per = arcfs::BLOCK_SIZE as u64 / self.disk.sector_size as u64;
+    fn write_block(&mut self, block: u64, buf: &justfs::Block) -> justfs::Result<()> {
+        let per = justfs::BLOCK_SIZE as u64 / self.disk.sector_size as u64;
         if self.disk.write(block * per, buf) == OK {
             Ok(())
         } else {
-            Err(arcfs::Error::Io)
+            Err(justfs::Error::Io)
         }
     }
 
     fn block_count(&self) -> u64 {
-        self.disk.size_bytes() / arcfs::BLOCK_SIZE as u64
+        self.disk.size_bytes() / justfs::BLOCK_SIZE as u64
     }
 
-    fn flush(&mut self) -> arcfs::Result<()> {
+    fn flush(&mut self) -> justfs::Result<()> {
         if self.disk.flush() == OK {
             Ok(())
         } else {
-            Err(arcfs::Error::Io)
+            Err(justfs::Error::Io)
         }
     }
 

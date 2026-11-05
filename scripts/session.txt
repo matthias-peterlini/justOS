@@ -9,7 +9,7 @@ disks
 ls sys:/
 cat sys:/home/welcome.txt
 mkdir ram:/test/deep
-write ram:/test/deep/note.txt hello from arcOS
+write ram:/test/deep/note.txt hello from JustOS
 append ram:/test/deep/note.txt second line
 cp ram:/test/deep/note.txt sys:/home/note.txt
 cat sys:/home/note.txt
@@ -29,9 +29,9 @@ ports
 ipc test
 # apps and their sandbox
 sandbox test
-perms allow org.arcos.esempio files:Immagini
+perms allow dev.justos.esempio files:Immagini
 perms
-perms forget org.arcos.esempio
+perms forget dev.justos.esempio
 # app updates: signed index, damaged download, an open app, a new permission
 updates test
 @sleep 3

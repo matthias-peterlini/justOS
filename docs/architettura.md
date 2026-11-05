@@ -1,22 +1,22 @@
-# Architettura di arcOS
+# Architettura di JustOS
 
 ## Avvio
 
 ```
- firmware ──► ArcBoot (BIOS o UEFI) ──► kernel ──► driver di avvio ──► sys: ──► tutti i driver ──► shell
+ firmware ──► JustBoot (BIOS o UEFI) ──► kernel ──► driver di avvio ──► sys: ──► tutti i driver ──► shell
 ```
 
 ### L'immagine del disco
 
-`arctool image` produce un disco con partizioni MBR che si avvia sia da BIOS
+`justtool image` produce un disco con partizioni MBR che si avvia sia da BIOS
 sia da UEFI:
 
 | Settori | Contenuto |
 |---|---|
 | 0 | MBR: codice dello stadio 1, tabella di avvio (da 0x180, firma `ARCB` a 0x190), tabella delle partizioni |
 | 1–63 | stadio 2 del loader BIOS |
-| 2048– (partizione 2, tipo 0xEF) | partizione di sistema EFI, FAT16: `EFI/BOOT/BOOTX64.EFI`, `ARCOS/BOOT.CTL` e i due **slot di sistema** `ARCOS/SLOTA.BIN`, `ARCOS/SLOTB.BIN` (24 MiB l'uno, `make SLOT_SIZE=…`) |
-| partizione 1 (tipo 0xAC) | il volume ArcFS "System", che diventa `sys:` |
+| 2048– (partizione 2, tipo 0xEF) | partizione di sistema EFI, FAT16: `EFI/BOOT/BOOTX64.EFI`, `JUSTOS/BOOT.CTL` e i due **slot di sistema** `JUSTOS/SLOTA.BIN`, `JUSTOS/SLOTB.BIN` (24 MiB l'uno, `make SLOT_SIZE=…`) |
+| partizione 1 (tipo 0xAC) | il volume JustFS "System", che diventa `sys:` |
 
 Uno **slot** contiene una versione del sistema: un settore di intestazione
 (versione, posizioni, SHA-256 del resto), il kernel (immagine piatta) e il
@@ -27,7 +27,7 @@ file. La tabella di avvio dell'MBR punta a `BOOT.CTL` e, per il caso in cui
 sia illeggibile, al kernel e al pacchetto dello slot A. Vedi
 [Aggiornamenti del sistema](#aggiornamenti-del-sistema-ab).
 
-Il **pacchetto di avvio** è un piccolo volume ArcFS in sola lettura con
+Il **pacchetto di avvio** è un piccolo volume JustFS in sola lettura con
 tutti i driver che vengono con il sistema: in `drivers/` quelli marcati
 `boot = yes` (dischi, controller USB, tastiere e chiavette USB), in
 `system/` gli altri. Il loader lo carica in memoria e il kernel lo monta
@@ -37,8 +37,8 @@ porta con sé i suoi driver.
 
 ### Il CD live
 
-`arctool iso` produce un CD ISO 9660 con un catalogo El Torito per BIOS e
-per UEFI (`tools/arctool/src/iso.rs`):
+`justtool iso` produce un CD ISO 9660 con un catalogo El Torito per BIOS e
+per UEFI (`tools/justtool/src/iso.rs`):
 
 | Settori da 2048 byte | Contenuto |
 |---|---|
@@ -55,7 +55,7 @@ passano nella `BootInfo`; il kernel lo monta come `sys:` (in memoria: le
 modifiche si perdono allo spegnimento). Così non serve un driver per i
 lettori CD.
 
-### ArcBoot per BIOS (`boot/bios`)
+### JustBoot per BIOS (`boot/bios`)
 
 - **Stadio 1** (512 byte, nell'MBR o nel primo settore di avvio del CD):
   legge lo stadio 2 con INT 13h esteso. La tabella di avvio dà posizioni e
@@ -73,14 +73,14 @@ lettori CD.
   5. costruisce le tabelle delle pagine, passa in modo lungo a 64 bit e
      salta al kernel con `rdi` = indirizzo fisico della `BootInfo`.
 
-### ArcBoot per UEFI (`boot/uefi`)
+### JustBoot per UEFI (`boot/uefi`)
 
 È un'applicazione EFI scritta in Rust senza librerie: le strutture e i
 GUID UEFI che usa sono dichiarati a mano in `efi.rs`. Esegue gli stessi
 passi del loader BIOS con i servizi del firmware:
 
 1. dalla partizione da cui è stato avviato (Loaded Image + Simple File
-   System) sceglie lo slot da `ARCOS/BOOT.CTL` e lo carica; su un CD live
+   System) sceglie lo slot da `JUSTOS/BOOT.CTL` e lo carica; su un CD live
    legge invece `KERNEL.BIN`, `BOOTPACK.IMG` e `SYSTEM.IMG`;
 2. sceglie un modo grafico con il Graphics Output Protocol;
 3. prende l'RSDP dalla tabella di configurazione;
@@ -105,8 +105,8 @@ CD live, RSDP, tipo di loader e lo slot avviato (con i segni "in prova" e
 
 ### Aggiornamenti del sistema (A/B)
 
-Un aggiornamento di arcOS è un'immagine di slot (`arctool slot`,
-`arcos-<versione>.slot`). Il kernel (`sysupdate.rs`) la scrive nello slot
+Un aggiornamento di JustOS è un'immagine di slot (`justtool slot`,
+`justos-<versione>.slot`). Il kernel (`sysupdate.rs`) la scrive nello slot
 che **non** è in esecuzione, la rilegge e ne controlla lo SHA-256, e solo
 allora la rende quella che parte, **in prova**. `BOOT.CTL` tiene lo slot
 attivo, i tentativi che gli restano e quali slot sono noti per funzionare:
@@ -164,7 +164,7 @@ La metà bassa appartiene al programma in esecuzione.
 | scheduler | `task.rs` | thread del kernel su tutti i processori, round-robin preemptivo (10 ms), code di attesa, sleep |
 | sincronizzazione | `sync.rs` | `IrqLock` (spinlock con interruzioni spente), `Mutex` (cede il processore mentre aspetta) |
 | console | `console/` | terminale con sequenze ANSI su framebuffer, VGA testo e porta seriale; giornale di sistema; con la grafica attiva è una griglia mostrata dalla finestra Terminale |
-| grafica | `gui/` | splash d'avvio, configurazione guidata, scrivania con animazioni, app di sistema, finestre dei programmi, schermata di errore ([gui.md](gui.md)); il disegno è nella libreria `arcgfx` |
+| grafica | `gui/` | splash d'avvio, configurazione guidata, scrivania con animazioni, app di sistema, finestre dei programmi, schermata di errore ([gui.md](gui.md)); il disegno è nella libreria `justgfx` |
 | Linux | `linux.rs` | caricatore ELF statico e chiamate di sistema Linux ([compat.md](compat.md)) |
 | dispositivi | `dev/` | registro dei dispositivi, PCI, piattaforma (8042), IRQ condivisi, dischi e partizioni (MBR, GPT), tastiera, interfacce di rete, uscite audio (conversione, volume, WAV), controller video (risoluzioni) |
 | driver | `driver/` | gestore dei driver, caricatore ELF dei moduli, tabella `KernelApi` |
@@ -181,9 +181,9 @@ La metà bassa appartiene al programma in esecuzione.
 Il firmware descrive il computer con le tabelle ACPI; la DSDT e le SSDT
 contengono codice, l'AML, che solo lui sa come parla al suo hardware:
 quanto è carica la batteria, se il coperchio è chiuso, quanto è caldo il
-processore. arcOS lo esegue con il suo interprete, `arcaml`
-(`system/libs/arcaml`, senza `std`, provato anche sul PC di sviluppo con
-`cargo test -p arcaml` e con le tabelle di portatili veri). Copre l'AML
+processore. JustOS lo esegue con il suo interprete, `justaml`
+(`system/libs/justaml`, senza `std`, provato anche sul PC di sviluppo con
+`cargo test -p justaml` e con le tabelle di portatili veri). Copre l'AML
 che i firmware usano davvero: tipi, pacchetti, campi (anche Index e Bank),
 buffer field, metodi con argomenti e variabili locali, `While` con limite
 di tempo, mutex ed eventi, `Notify`, `_OSI` (risponde come Windows, come
@@ -256,7 +256,7 @@ provano ogni driver dopo un risveglio; `make test-display` ha i casi
 Il kernel conosce i bus (PCI e piattaforma), non i dispositivi: tutto il
 resto lo fanno i driver. Un driver è un'immagine ELF indipendente dalla
 posizione. Il kernel la carica nella regione dei moduli, applica le
-rilocazioni e chiama `arc_driver_entry` con la tabella dei servizi
+rilocazioni e chiama `just_driver_entry` con la tabella dei servizi
 (`KernelApi`). In cambio riceve una `DriverInfo` con `probe` e `remove`. I
 driver registrano dischi, sorgenti di input, interfacce di rete, uscite
 audio e controller video; il kernel fa il resto: partizioni e volumi,
@@ -295,7 +295,7 @@ toglie una pagina della sua metà (la pila di un thread finito), chiede agli
 altri processori di svuotare il TLB con un'interruzione e aspetta che lo
 abbiano fatto prima di riusare la memoria.
 
-### File system: ArcFS
+### File system: JustFS
 
 ```
 blocco 0             superblocco (etichetta, dimensioni, posizione delle aree)
@@ -311,10 +311,10 @@ dati                 contenuto di file e cartelle
   non distinguono maiuscole e minuscole.
 - `check` verifica la coerenza tra bitmap, nodi e cartelle.
 
-La stessa libreria (`system/libs/arcfs`) serve al kernel e ad `arctool`,
+La stessa libreria (`system/libs/justfs`) serve al kernel e ad `justtool`,
 che così crea e modifica i volumi dal computer di sviluppo.
 
-All'avvio ogni partizione ArcFS viene montata. La prima con etichetta
+All'avvio ogni partizione JustFS viene montata. La prima con etichetta
 "System" diventa `sys:`, le altre prendono il nome dalla loro etichetta.
 
 ### Programmi
@@ -339,8 +339,8 @@ Oltre ai programmi nativi, il kernel riconosce altri due tipi di eseguibile
 dal loro contenuto. Un ELF che non è un `.app` è un **programma Linux**:
 `linux.rs` lo carica (ET_EXEC o PIE statico, con stack iniziale e vettore
 ausiliario) e serve le chiamate di sistema Linux che arrivano sull'istruzione
-`syscall` (`arch/syscall.rs`), traducendole nelle operazioni di arcOS. Un file
+`syscall` (`arch/syscall.rs`), traducendole nelle operazioni di JustOS. Un file
 che inizia con `MZ` è un **programma Windows**: il kernel avvia `winrun`, un
-normale programma di arcOS che carica il `.exe`, risolve le importazioni verso
+normale programma di JustOS che carica il `.exe`, risolve le importazioni verso
 un `kernel32`/`msvcrt` scritti da zero e salta al punto d'ingresso. I
 dettagli, e cosa è gestito, sono in [compat.md](compat.md).

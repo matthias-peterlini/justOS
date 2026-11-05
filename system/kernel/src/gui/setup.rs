@@ -195,9 +195,9 @@ impl View for Setup {
         let mut y = card.y + 44;
         match self.step {
             0 => {
-                draw_logo(c, cx, y + 40, 44, 0xFFFF_FFFF);
+                draw_logo(c, cx, y + 40, 35, 0xFFF2_EFE6);
                 y += 110;
-                text::draw_centered(c, Font::Title, cx, y, "Benvenuto in arcOS", TEXT);
+                text::draw_centered(c, Font::Title, cx, y, "Benvenuto in JustOS", TEXT);
                 text::draw_centered(c, Font::Body, cx, y + 56, "Prepariamo il computer in pochi passi.", TEXT_DIM);
                 text::draw_centered(c, Font::Body, cx, y + 78, "Ci vuole meno di un minuto.", TEXT_DIM);
             }
@@ -244,11 +244,11 @@ impl View for Setup {
                 }
             }
             _ => {
-                draw_logo(c, cx, y + 40, 44, 0xFFFF_FFFF);
+                draw_logo(c, cx, y + 40, 35, 0xFFF2_EFE6);
                 y += 110;
                 let title = format!("Tutto pronto, {}!", self.name.trim());
                 text::draw_centered(c, Font::Title, cx, y, &text::fit(Font::Title, &title, card.w - 60), TEXT);
-                text::draw_centered(c, Font::Body, cx, y + 56, "arcOS è configurato. Buon lavoro!", TEXT_DIM);
+                text::draw_centered(c, Font::Body, cx, y + 56, "JustOS è configurato. Buon lavoro!", TEXT_DIM);
             }
         }
         let (mx, my) = self.mouse;

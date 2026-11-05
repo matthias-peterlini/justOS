@@ -1,21 +1,21 @@
-# Programmi Linux, Windows e Android su arcOS
+# Programmi Linux, Windows e Android su JustOS
 
-arcOS esegue, oltre ai suoi programmi nativi e a quelli ArcScript, anche
+JustOS esegue, oltre ai suoi programmi nativi e a quelli ArcScript, anche
 programmi **Linux** e **Windows** per x86-64 e app **Android** e programmi
 Java (vedi [più sotto](#programmi-java-e-app-android)), senza modificarli. Non c'è una
 macchina virtuale: il programma gira nello stesso modo degli altri, in ring 3
-e nel suo spazio di indirizzi; quando chiede qualcosa al sistema, arcOS traduce
+e nel suo spazio di indirizzi; quando chiede qualcosa al sistema, JustOS traduce
 la richiesta nelle proprie chiamate.
 
 L'idea è la stessa di [Wine](https://www.winehq.org/) e di
 [WSL](https://learn.microsoft.com/windows/wsl/), in piccolo: nessun codice di
-Microsoft o di Linux è copiato in arcOS. Il supporto è scritto da zero a
+Microsoft o di Linux è copiato in JustOS. Il supporto è scritto da zero a
 partire dalle interfacce pubbliche (la ABI di System V per Linux, la
 convenzione x64 e i pochi `.dll` di sistema per Windows).
 
 ## Programmi Linux
 
-arcOS carica un eseguibile ELF x86-64 **collegato staticamente** (senza
+JustOS carica un eseguibile ELF x86-64 **collegato staticamente** (senza
 librerie condivise: niente `ld.so`) e serve le chiamate di sistema Linux che
 fa. Funziona con i programmi costruiti con [musl](https://musl.libc.org/), per
 esempio `musl-gcc -static`.
@@ -29,7 +29,7 @@ busybox ls -la             un programma installato (vedi "Installare programmi")
 
 ### Cosa vede il programma
 
-| Area | Su arcOS |
+| Area | Su JustOS |
 |---|---|
 | `stdin`, `stdout`, `stderr` | la console; `stdin` legge una riga per volta, con l'eco dei tasti |
 | file e cartelle | i volumi montati: il "/" di Linux è la radice del volume corrente, così `/home/x` è `<volume>:/home/x` |
@@ -51,19 +51,19 @@ ogni thread).
 
 ## Programmi Windows
 
-I programmi Windows li esegue `winrun`, un programma di arcOS
+I programmi Windows li esegue `winrun`, un programma di JustOS
 (`system/apps/winrun`). `winrun` carica l'eseguibile `.exe` (PE32+ per x64),
 mette i propri indirizzi nella tabella delle importazioni al posto delle
 funzioni di `kernel32.dll` e `msvcrt.dll`, prepara un blocco di thread (TEB) e
 salta al punto d'ingresso. Il programma gira nello stesso processo di `winrun`:
 quando chiama, per esempio, `printf`, chiama il codice di `winrun`, che a sua
-volta usa le chiamate di arcOS.
+volta usa le chiamate di JustOS.
 
-Un `.exe` si avvia per nome (arcOS riconosce l'intestazione `MZ` e usa `winrun`
+Un `.exe` si avvia per nome (JustOS riconosce l'intestazione `MZ` e usa `winrun`
 da solo) o esplicitamente:
 
 ```
-hello.exe                  arcOS vede che è un programma Windows e lo avvia
+hello.exe                  JustOS vede che è un programma Windows e lo avvia
 winrun hello.exe alpha     lo stesso, scritto per esteso
 ```
 
@@ -71,16 +71,16 @@ Sono gestiti i **programmi x64** costruiti con
 [MinGW-w64](https://www.mingw-w64.org/) (`x86_64-w64-mingw32-gcc`), da console
 e con finestre:
 
-| Area | Su arcOS |
+| Area | Su JustOS |
 |---|---|
 | console | i tre flussi standard, `printf`/`scanf` e famiglia, `fgets(stdin)`, `getchar`, `ReadConsole` |
-| file | `fopen`/`fread`/`fgets`/`fscanf`/`fseek` e `CreateFile`/`ReadFile`/`WriteFile`; i percorsi Windows (`C:\x`) diventano percorsi di arcOS |
+| file | `fopen`/`fread`/`fgets`/`fscanf`/`fseek` e `CreateFile`/`ReadFile`/`WriteFile`; i percorsi Windows (`C:\x`) diventano percorsi di JustOS |
 | runtime C | memoria (`malloc`, `HeapAlloc`, `VirtualAlloc`), stringhe, `ctype`, `strtol`/`strtod`, `qsort`/`bsearch`, `rand`, `time`/`localtime`, matematica |
 | finestre (`user32`) | classi di finestra, `CreateWindowEx`, il ciclo dei messaggi (`GetMessage`, `PeekMessage`, `DispatchMessage`), timer, messaggi di mouse e tastiera, `WM_PAINT`, `MessageBox` |
 | disegno (`gdi32`) | penne, pennelli e caratteri, rettangoli, ellissi, linee, poligoni, testo e `DrawText`, DC in memoria con `BitBlt` |
 
 Un `.exe` con finestre (sottosistema GUI) si apre con un doppio clic senza
-Terminale: le sue finestre sono finestre di arcOS. Una funzione importata che
+Terminale: le sue finestre sono finestre di JustOS. Una funzione importata che
 `winrun` non conosce non ferma più il programma: lo stub lo dice una volta e
 restituisce 0.
 
@@ -96,7 +96,7 @@ Com'è fatto: `system/apps/winrun/src/pe.rs` (il caricatore),
 Le app Android e i programmi Java compilati per Android sono bytecode
 **Dalvik** (file `.dex`, da soli o dentro un `.apk` o un `.jar`). Li esegue
 `dalvik` (`system/apps/dalvik`), un interprete scritto da zero
-(`system/libs/arcdex`): legge il file DEX, esegue le istruzioni Dalvik e
+(`system/libs/justdex`): legge il file DEX, esegue le istruzioni Dalvik e
 fornisce la parte della libreria Java e del framework Android che serve.
 
 ```
@@ -106,10 +106,10 @@ SelfTest.apk               un'app Android: si apre nella sua finestra
 ```
 
 Un doppio clic su un `.apk` apre l'app nella sua finestra; un `.dex` o un
-`.jar` parte nel Terminale. arcOS riconosce il formato dai primi byte
+`.jar` parte nel Terminale. JustOS riconosce il formato dai primi byte
 (`dex\n` o un archivio zip con `classes.dex`).
 
-| Area | Su arcOS |
+| Area | Su JustOS |
 |---|---|
 | linguaggio | tutte le istruzioni Dalvik: classi, interfacce, eccezioni con `try`/`catch`, array multidimensionali, `switch`, enum, classi interne e anonime |
 | `java.lang` | `String`, `StringBuilder`, i tipi incapsulati, `Math`, `System`, `Character`, `Thread` (eseguito subito, non in parallelo), le eccezioni con lo stesso messaggio della JVM |
@@ -125,7 +125,7 @@ ferma con un'eccezione, compare la scheda "*app* si è arrestata".
 Il test `basics_print_what_java_prints` controlla che un programma di prova
 scriva esattamente quello che scrive una JVM vera.
 
-Com'è fatto: `system/libs/arcdex/src/dex.rs` (il formato DEX),
+Com'è fatto: `system/libs/justdex/src/dex.rs` (il formato DEX),
 `interp.rs` (le istruzioni), `java.rs` (la libreria Java), `text.rs` (numeri,
 `format` ed espressioni regolari), `android.rs` (le viste e le attività) e
 `system/apps/dalvik/src/screen.rs` (il disegno delle finestre).
@@ -146,15 +146,15 @@ uninstall lua              lo toglie
 
 [BusyBox](https://busybox.net/) è un programma solo che, a seconda del nome con
 cui lo si chiama, diventa uno di decine di comandi Unix. Dopo `install busybox`,
-arcOS mette a disposizione quei comandi (`cat`, `grep`, `wc`, `seq`, `sort`,
+JustOS mette a disposizione quei comandi (`cat`, `grep`, `wc`, `seq`, `sort`,
 `ash`…): digitandone uno, la shell avvia `busybox` passandogli quel nome. I
-comandi propri di arcOS (per esempio `ls`) hanno la precedenza.
+comandi propri di JustOS (per esempio `ls`) hanno la precedenza.
 
 ### Pacchetti con un doppio clic
 
 Nell'app File un doppio clic su un pacchetto lo installa in `sys:/apps`, in
 sottofondo, con una notifica alla fine (`system/kernel/src/store.rs`,
-`install_file`; i formati sono in `system/libs/arczip`):
+`install_file`; i formati sono in `system/libs/justzip`):
 
 | Pacchetto | Cosa succede |
 |---|---|
@@ -188,10 +188,10 @@ anche senza estensione) lo avvia nel Terminale.
 `make test-compat` compila al volo un piccolo programma Linux (con `musl-gcc`) e
 alcuni Windows (con `x86_64-w64-mingw32-gcc`: console, file, tastiera e una
 finestra), li mette su una copia dell'immagine insieme ai programmi del
-negozio e ai programmi Java e Android di prova, avvia arcOS e controlla che
+negozio e ai programmi Java e Android di prova, avvia JustOS e controlla che
 funzionino. Se uno dei due compilatori non c'è, quella parte viene saltata (e
 segnalata). I file `.dex` e `.apk` di prova sono già nel repository
-(`system/libs/arcdex/tests`); `build.sh` li ricrea con un JDK e `dx`.
+(`system/libs/justdex/tests`); `build.sh` li ricrea con un JDK e `dx`.
 
 Per compilare a mano un programma da provare:
 
@@ -200,4 +200,4 @@ musl-gcc -static -Os -o hello hello.c            # Linux
 x86_64-w64-mingw32-gcc -O2 -o hello.exe hello.c  # Windows
 ```
 
-poi copiarlo nell'immagine con `arctool fs` (vedi `docs/programmi.md`).
+poi copiarlo nell'immagine con `justtool fs` (vedi `docs/programmi.md`).

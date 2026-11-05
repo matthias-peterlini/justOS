@@ -8,9 +8,9 @@ extern crate alloc;
 
 use alloc::collections::VecDeque;
 use alloc::format;
-use arcui::{ui, Event, Font, Key, Rect, Rng, Window};
+use justui::{ui, Event, Font, Key, Rect, Rng, Window};
 
-arcrt::main!(main);
+justrt::main!(main);
 
 const COLS: i32 = 26;
 const ROWS: i32 = 18;
@@ -22,7 +22,7 @@ const H: i32 = ROWS * CELL + TOP + PAD;
 
 /// Where the best score is kept (the app's own folder).
 fn best_file() -> alloc::string::String {
-    arcrt::app::data_file("best")
+    justrt::app::data_file("best")
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -96,14 +96,14 @@ impl Game {
             self.state = State::Over;
             if self.score > self.best {
                 self.best = self.score;
-                let _ = arcrt::fs::write(&best_file(), format!("{}", self.best).as_bytes());
+                let _ = justrt::fs::write(&best_file(), format!("{}", self.best).as_bytes());
             }
             return;
         }
         self.body.push_front(head);
         if head == self.apple {
             self.score += 1;
-            self.ate = arcui::now_ms();
+            self.ate = justui::now_ms();
             self.place_apple();
         } else {
             self.body.pop_back();
@@ -117,7 +117,7 @@ impl Game {
         }
         if self.state == State::Ready {
             self.state = State::Running;
-            self.next_step = arcui::now_ms();
+            self.next_step = justui::now_ms();
         }
     }
 
@@ -183,7 +183,7 @@ impl Game {
 }
 
 fn main(_args: &str) -> i32 {
-    let best = arcrt::fs::read_to_string(&best_file()).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+    let best = justrt::fs::read_to_string(&best_file()).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
     let Ok(mut win) = Window::new("Serpente", W, H) else { return 1 };
     let mut game = Game::new(best);
     let mut dirty = true;
@@ -194,7 +194,7 @@ fn main(_args: &str) -> i32 {
             dirty = false;
         }
         let ev = if game.state == State::Running {
-            let now = arcui::now_ms();
+            let now = justui::now_ms();
             if now >= game.next_step {
                 game.step();
                 game.next_step = now + game.interval();
@@ -218,7 +218,7 @@ fn main(_args: &str) -> i32 {
                     game.state = match game.state {
                         State::Running => State::Paused,
                         State::Paused => {
-                            game.next_step = arcui::now_ms();
+                            game.next_step = justui::now_ms();
                             State::Running
                         }
                         s => s,

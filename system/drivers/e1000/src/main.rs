@@ -11,11 +11,11 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
-use arcdrv::{DeviceInfo, Dma, IrqLock, Mmio, NetDesc, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, OK, RES_MEMORY};
+use justdrv::{DeviceInfo, Dma, IrqLock, Mmio, NetDesc, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, OK, RES_MEMORY};
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "e1000",
     version: "1.1.0",
     probe: probe,
@@ -86,7 +86,7 @@ impl Rings {
             let len = self.rx_ring.read::<u16>(at + 8) as usize;
             if status & 2 != 0 && iface >= 0 && len <= BUF {
                 let frame = &self.rx_bufs.as_slice()[self.rx_next * BUF..self.rx_next * BUF + len];
-                arcdrv::net_receive(iface as u32, frame);
+                justdrv::net_receive(iface as u32, frame);
             }
             self.rx_ring.write::<u8>(at + 12, 0);
             regs.write32(RDT, self.rx_next as u32);
@@ -101,7 +101,7 @@ impl Rings {
         let i = self.tx_next;
         let at = i * 16;
         // Wait for the descriptor to be free (done or never used).
-        if !arcdrv::wait_until(100, || {
+        if !justdrv::wait_until(100, || {
             let st = self.tx_ring.read::<u8>(at + 12);
             st & 1 != 0 || self.tx_ring.read::<u16>(at + 8) == 0
         }) {
@@ -190,7 +190,7 @@ unsafe extern "C" fn poller(ctx: *mut c_void) {
         if !nic.paused.load(Ordering::Acquire) {
             nic.rings.lock().receive(&nic.regs, nic.iface.load(Ordering::Relaxed));
         }
-        arcdrv::sleep_ms(if nic.has_irq.load(Ordering::Relaxed) { 50 } else { 5 });
+        justdrv::sleep_ms(if nic.has_irq.load(Ordering::Relaxed) { 50 } else { 5 });
     }
 }
 
@@ -232,8 +232,8 @@ unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
 fn reset(regs: &Mmio) -> bool {
     regs.write32(IMC, u32::MAX);
     regs.write32(CTRL, regs.read32(CTRL) | (1 << 26));
-    arcdrv::sleep_ms(10);
-    let done = arcdrv::wait_until(100, || regs.read32(CTRL) & (1 << 26) == 0);
+    justdrv::sleep_ms(10);
+    let done = justdrv::wait_until(100, || regs.read32(CTRL) & (1 << 26) == 0);
     regs.write32(IMC, u32::MAX);
     regs.write32(CTRL, (regs.read32(CTRL) | (1 << 6) | (1 << 5)) & !(1 << 3));
     done
@@ -252,7 +252,7 @@ fn read_mac(regs: &Mmio) -> [u8; 6] {
     for word in 0..3u32 {
         regs.write32(EERD, 1 | word << 8);
         let mut v = 0;
-        arcdrv::wait_until(10, || {
+        justdrv::wait_until(10, || {
             v = regs.read32(EERD);
             v & (1 << 4) != 0
         });
@@ -271,7 +271,7 @@ fn probe(dev: &DeviceInfo) -> Status {
     if bar.kind != RES_MEMORY || bar.base == 0 {
         return E_IO;
     }
-    arcdrv::Pci(dev.id).enable(false, true, true);
+    justdrv::Pci(dev.id).enable(false, true, true);
     let Some(regs) = Mmio::map(bar.base, 0x20000) else { return E_NOMEM };
 
     reset(&regs);
@@ -301,7 +301,7 @@ fn probe(dev: &DeviceInfo) -> Status {
     let ctx = nic as *const Nic as *mut c_void;
 
     let desc: &'static NetDesc = Box::leak(Box::new(NetDesc { ctx, mac, _pad: [0; 2], mtu: 1500, send }));
-    let iface = arcdrv::net_register(dev.id, desc);
+    let iface = justdrv::net_register(dev.id, desc);
     if iface < 0 {
         nic.regs.write32(RCTL, 0);
         nic.regs.write32(TCTL, 0);
@@ -309,14 +309,14 @@ fn probe(dev: &DeviceInfo) -> Status {
     }
     nic.iface.store(iface, Ordering::Relaxed);
 
-    if arcdrv::irq_attach_any(dev, irq, ctx) {
+    if justdrv::irq_attach_any(dev, irq, ctx) {
         nic.has_irq.store(true, Ordering::Relaxed);
     }
     nic.unmask();
     // Interrupt routing can be wrong on some boards; poll as a safety net.
-    arcdrv::spawn("e1000-rx", poller, ctx);
-    arcdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
-    arcdrv::info!(
+    justdrv::spawn("e1000-rx", poller, ctx);
+    justdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
+    justdrv::info!(
         "link {}, {}",
         if link { "up" } else { "down" },
         if nic.has_irq.load(Ordering::Relaxed) { "interrupts" } else { "polling" }

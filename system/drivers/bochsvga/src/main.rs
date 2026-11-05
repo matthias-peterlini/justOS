@@ -14,11 +14,11 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use arcdrv::port::{inw, outw};
-use arcdrv::{DeviceInfo, DisplayDesc, DisplayMode, Framebuffer, Mmio, Pci, Status, E_INVAL, E_IO, E_NODEV, OK, RES_MEMORY};
+use justdrv::port::{inw, outw};
+use justdrv::{DeviceInfo, DisplayDesc, DisplayMode, Framebuffer, Mmio, Pci, Status, E_INVAL, E_IO, E_NODEV, OK, RES_MEMORY};
 use core::ffi::c_void;
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "bochsvga",
     version: "1.1.0",
     probe: probe,
@@ -74,7 +74,7 @@ struct Dispi {
     vram: u64,
     max: (u32, u32),
     /// The mode registers while the machine sleeps.
-    saved: arcdrv::IrqLock<[u16; 7]>,
+    saved: justdrv::IrqLock<[u16; 7]>,
 }
 
 /// The registers that make up the mode, in the order they are written back.
@@ -192,10 +192,10 @@ fn probe(dev: &DeviceInfo) -> Status {
         pci.enable(true, true, false);
         Regs::Ports
     };
-    let mut d = Dispi { regs, fb_phys: bar0.base, vram: bar0.size, max: (0, 0), saved: arcdrv::IrqLock::new([0; 7]) };
+    let mut d = Dispi { regs, fb_phys: bar0.base, vram: bar0.size, max: (0, 0), saved: justdrv::IrqLock::new([0; 7]) };
     let id = d.read(ID);
     if !(0xB0C0..=0xB0CF).contains(&id) {
-        arcdrv::info!("no DISPI interface (id {id:#x})");
+        justdrv::info!("no DISPI interface (id {id:#x})");
         return E_NODEV;
     }
     if id >= 0xB0C5 {
@@ -218,19 +218,19 @@ fn probe(dev: &DeviceInfo) -> Status {
         _ if matches!(d.regs, Regs::Mem(_)) => "QEMU display",
         _ => "Bochs display",
     };
-    arcdrv::info!("{name}: {} MiB of video memory, up to {}x{}", d.vram >> 20, d.max.0, d.max.1);
+    justdrv::info!("{name}: {} MiB of video memory, up to {}x{}", d.vram >> 20, d.max.0, d.max.1);
     let d: &'static Dispi = Box::leak(Box::new(d));
     let desc: &'static DisplayDesc = Box::leak(Box::new(DisplayDesc {
         ctx: d as *const Dispi as *mut c_void,
         modes,
         set_mode,
         flush: None,
-        name: arcdrv::model_name(name),
+        name: justdrv::model_name(name),
     }));
-    let n = arcdrv::display_register(dev.id, desc);
+    let n = justdrv::display_register(dev.id, desc);
     if n < 0 {
         return n;
     }
-    arcdrv::power_hooks(dev.id, d as *const Dispi as *mut c_void, Some(suspend), resume);
+    justdrv::power_hooks(dev.id, d as *const Dispi as *mut c_void, Some(suspend), resume);
     OK
 }

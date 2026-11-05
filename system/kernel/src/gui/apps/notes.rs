@@ -93,7 +93,7 @@ impl Notes {
         let mut list = Vec::new();
         if let Ok(dir) = fs::abs(DIR) {
             for (e, st) in fs::list_dir(&dir).unwrap_or_default() {
-                if st.kind != arcfs::Kind::File || !e.name.ends_with(".txt") {
+                if st.kind != justfs::Kind::File || !e.name.ends_with(".txt") {
                     continue;
                 }
                 let p = dir.join(&e.name);

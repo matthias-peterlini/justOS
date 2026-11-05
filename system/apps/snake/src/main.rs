@@ -6,10 +6,10 @@
 extern crate alloc;
 
 use alloc::collections::VecDeque;
-use arcrt::console::{self, color::*, Key};
-use arcrt::println;
+use justrt::console::{self, color::*, Key};
+use justrt::println;
 
-arcrt::main!(main);
+justrt::main!(main);
 
 struct Rng(u64);
 
@@ -44,7 +44,7 @@ fn main(_: &str) -> i32 {
         put(ox + w * 2 + 1, oy + y, &alloc::format!("{DIM}│{RESET}"));
     }
 
-    let mut rng = Rng(arcrt::time::uptime_ms() ^ 0x9E37_79B9_7F4A_7C15);
+    let mut rng = Rng(justrt::time::uptime_ms() ^ 0x9E37_79B9_7F4A_7C15);
     let mut snake: VecDeque<(usize, usize)> = VecDeque::new();
     for i in 0..4 {
         snake.push_back((w / 2 - i, h / 2));
@@ -66,8 +66,8 @@ fn main(_: &str) -> i32 {
     let mut speed = 140;
     loop {
         put(ox + w * 2 - 10, 0, &alloc::format!("{WHITE}score {score:>3}{RESET}"));
-        let deadline = arcrt::time::uptime_ms() + speed;
-        while let Some(k) = console::poll_key(deadline.saturating_sub(arcrt::time::uptime_ms())) {
+        let deadline = justrt::time::uptime_ms() + speed;
+        while let Some(k) = console::poll_key(deadline.saturating_sub(justrt::time::uptime_ms())) {
             let (nx, ny) = match k.key {
                 Key::Up | Key::Char('w') => (0, -1),
                 Key::Down | Key::Char('s') => (0, 1),
@@ -83,7 +83,7 @@ fn main(_: &str) -> i32 {
             if (nx, ny) != (-dx, -dy) {
                 (dx, dy) = (nx, ny);
             }
-            if arcrt::time::uptime_ms() >= deadline {
+            if justrt::time::uptime_ms() >= deadline {
                 break;
             }
         }

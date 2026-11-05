@@ -13,10 +13,10 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::string::String;
-use arcdrv::{BlockDesc, DeviceInfo, Dma, Mmio, Mutex, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, E_TIMEOUT, OK, RES_MEMORY};
+use justdrv::{BlockDesc, DeviceInfo, Dma, Mmio, Mutex, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, E_TIMEOUT, OK, RES_MEMORY};
 use core::ffi::c_void;
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "nvme",
     version: "1.1.0",
     probe: probe,
@@ -101,7 +101,7 @@ impl Controller {
     fn enable(&mut self) -> Status {
         let (regs, timeout) = (&self.regs, self.timeout);
         regs.write32(REG_CC, regs.read32(REG_CC) & !1);
-        if !arcdrv::wait_until(timeout, || regs.read32(REG_CSTS) & 1 == 0) {
+        if !justdrv::wait_until(timeout, || regs.read32(REG_CSTS) & 1 == 0) {
             return E_TIMEOUT;
         }
         self.admin.clear();
@@ -110,8 +110,8 @@ impl Controller {
         regs.write64(REG_ASQ, self.admin.sq.phys());
         regs.write64(REG_ACQ, self.admin.cq.phys());
         regs.write32(REG_CC, 1 | 6 << 16 | 4 << 20); // enable, 64-byte SQ and 16-byte CQ entries, 4 KiB pages
-        if !arcdrv::wait_until(timeout, || regs.read32(REG_CSTS) & 3 != 0) || regs.read32(REG_CSTS) & 2 != 0 {
-            arcdrv::warn!("controller failed to start");
+        if !justdrv::wait_until(timeout, || regs.read32(REG_CSTS) & 3 != 0) || regs.read32(REG_CSTS) & 2 != 0 {
+            justdrv::warn!("controller failed to start");
             return E_IO;
         }
         OK
@@ -151,7 +151,7 @@ impl Controller {
 
         let entry = q.cq_head as usize * 16;
         let phase = q.phase;
-        if !arcdrv::wait_until(5000, || (q.cq.read::<u16>(entry + 14) & 1 != 0) == phase) {
+        if !justdrv::wait_until(5000, || (q.cq.read::<u16>(entry + 14) & 1 != 0) == phase) {
             return Err(E_TIMEOUT);
         }
         let result = q.cq.read::<u32>(entry);
@@ -162,7 +162,7 @@ impl Controller {
         }
         regs.write32(0x1000 + (2 * q.id as usize + 1) * stride, q.cq_head as u32);
         if status & 0x7FF != 0 {
-            arcdrv::warn!("command {:#x} failed with status {:#x}", c.opcode, status);
+            justdrv::warn!("command {:#x} failed with status {:#x}", c.opcode, status);
             return Err(E_IO);
         }
         Ok(result)
@@ -258,8 +258,8 @@ unsafe extern "C" fn suspend(ctx: *mut c_void) -> Status {
     let _ = c.io(Command { opcode: 0x00, nsid: u32::MAX, ..Command::default() });
     let regs = &c.regs;
     regs.write32(REG_CC, (regs.read32(REG_CC) & !(3 << 14)) | 1 << 14);
-    if !arcdrv::wait_until(c.timeout.max(5000), || (regs.read32(REG_CSTS) >> 2) & 3 == 2) {
-        arcdrv::warn!("controller did not finish its shutdown");
+    if !justdrv::wait_until(c.timeout.max(5000), || (regs.read32(REG_CSTS) >> 2) & 3 == 2) {
+        justdrv::warn!("controller did not finish its shutdown");
     }
     OK
 }
@@ -290,7 +290,7 @@ fn probe(dev: &DeviceInfo) -> Status {
     if bar.kind != RES_MEMORY || bar.base == 0 {
         return E_IO;
     }
-    arcdrv::Pci(dev.id).enable(false, true, true);
+    justdrv::Pci(dev.id).enable(false, true, true);
     let Some(regs) = Mmio::map(bar.base, (bar.size as usize).clamp(0x2000, 0x4000)) else { return E_NOMEM };
     let cap = regs.read64(REG_CAP);
     let stride = 4usize << ((cap >> 32) & 0xF);
@@ -318,7 +318,7 @@ fn probe(dev: &DeviceInfo) -> Status {
     let id = ctrl.bounce.as_slice();
     let model = text(&id[24..64]);
     let namespaces = u32::from_le_bytes(id[516..520].try_into().unwrap());
-    arcdrv::info!("{} (NVMe {}.{}), {} namespace(s)", model, vs >> 16, (vs >> 8) & 0xFF, namespaces);
+    justdrv::info!("{} (NVMe {}.{}), {} namespace(s)", model, vs >> 16, (vs >> 8) & 0xFF, namespaces);
 
     let Some(io) = Queue::new(1) else { return E_NOMEM };
     let st = ctrl.create_io(io);
@@ -327,7 +327,7 @@ fn probe(dev: &DeviceInfo) -> Status {
     }
 
     let ctrl: &'static Mutex<Controller> = Box::leak(Box::new(Mutex::new(ctrl)));
-    arcdrv::power_hooks(dev.id, ctrl as *const Mutex<Controller> as *mut c_void, Some(suspend), resume);
+    justdrv::power_hooks(dev.id, ctrl as *const Mutex<Controller> as *mut c_void, Some(suspend), resume);
     for nsid in 1..=namespaces.min(16) {
         let mut c = ctrl.lock();
         let prp = c.bounce.phys();
@@ -351,9 +351,9 @@ fn probe(dev: &DeviceInfo) -> Status {
             read,
             write,
             flush: Some(flush),
-            model: arcdrv::model_name(&model),
+            model: justdrv::model_name(&model),
         }));
-        arcdrv::block_register(dev.id, desc);
+        justdrv::block_register(dev.id, desc);
     }
     OK
 }

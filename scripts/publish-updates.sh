@@ -1,6 +1,6 @@
 #!/bin/sh
 # Publishes the signed index of updates (make updates) on the branch
-# "updates" of the repository, where arcOS looks for it
+# "updates" of the repository, where JustOS looks for it
 # (kernel/src/appupdate.rs). The branch holds only the latest index, its
 # apps and the system image: each publication replaces it.
 #
@@ -21,5 +21,5 @@ SERIAL=$(sed -n 's/.*"serial":\([0-9]*\).*/\1/p' index.json)
 git -c user.name="$(git -C "$REPO" config user.name)" -c user.email="$(git -C "$REPO" config user.email)" \
     commit -q -m "Updates, index $SERIAL"
 git push -q -f "$REMOTE" updates
-SYSTEM=$(ls arcos-*.slot 2>/dev/null | sed 's/^arcos-\(.*\)\.slot$/, arcOS \1/')
+SYSTEM=$(ls justos-*.slot 2>/dev/null | sed 's/^justos-\(.*\)\.slot$/, JustOS \1/')
 echo "published index $SERIAL ($(ls *.app | wc -l) apps$SYSTEM)"

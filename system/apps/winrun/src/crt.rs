@@ -185,7 +185,7 @@ extern "win64" fn ret1() -> u64 {
 // ----------------------------------------------------------------------------
 // Paths
 
-/// A Windows path as an arcOS one: `\` becomes `/` and a drive (`C:\x`) is
+/// A Windows path as an JustOS one: `\` becomes `/` and a drive (`C:\x`) is
 /// the system volume.
 pub fn path(p: &str) -> String {
     let p = p.replace('\\', "/");
@@ -244,7 +244,7 @@ pub struct CFile {
 impl CFile {
     fn open(p: &str, read: bool, write: bool, truncate: bool, create: bool, append: bool) -> Option<*mut CFile> {
         let p = path(p);
-        let data = match arcrt::fs::read(&p) {
+        let data = match justrt::fs::read(&p) {
             Ok(d) if !truncate => d,
             Ok(_) => Vec::new(),
             Err(_) if create => Vec::new(),
@@ -299,7 +299,7 @@ impl CFile {
             return true;
         }
         self.dirty = false;
-        arcrt::fs::write(&self.path, &self.data).is_ok()
+        justrt::fs::write(&self.path, &self.data).is_ok()
     }
 
     fn peek(&self) -> Option<u8> {
@@ -378,7 +378,7 @@ fn stdin_fill() -> bool {
         if STDIN_EOF {
             return false;
         }
-        match arcrt::console::read_line() {
+        match justrt::console::read_line() {
             Some(line) => {
                 STDIN = line.into_bytes();
                 STDIN.push(b'\n');
@@ -603,14 +603,14 @@ extern "win64" fn clearerr(f: u64) {
     }
 }
 extern "win64" fn remove(name: *const u8) -> i32 {
-    if arcrt::fs::remove(&path(&cstr(name))).is_ok() {
+    if justrt::fs::remove(&path(&cstr(name))).is_ok() {
         0
     } else {
         -1
     }
 }
 extern "win64" fn rename(from: *const u8, to: *const u8) -> i32 {
-    if arcrt::fs::rename(&path(&cstr(from)), &path(&cstr(to))).is_ok() {
+    if justrt::fs::rename(&path(&cstr(from)), &path(&cstr(to))).is_ok() {
         0
     } else {
         -1
@@ -1232,9 +1232,9 @@ extern "win64" fn system(_cmd: *const u8) -> i32 {
 // ----------------------------------------------------------------------------
 // Time
 
-/// Seconds since 1970 (arcOS counts from 2000).
+/// Seconds since 1970 (JustOS counts from 2000).
 fn unix_now() -> i64 {
-    arcrt::time::now() as i64 + 946_684_800
+    justrt::time::now() as i64 + 946_684_800
 }
 
 extern "win64" fn time(out: *mut i64) -> i64 {
@@ -1246,7 +1246,7 @@ extern "win64" fn time(out: *mut i64) -> i64 {
     t
 }
 extern "win64" fn clock() -> i32 {
-    arcrt::time::uptime_ms() as i32 // CLOCKS_PER_SEC = 1000
+    justrt::time::uptime_ms() as i32 // CLOCKS_PER_SEC = 1000
 }
 extern "win64" fn difftime(a: i64, b: i64) -> f64 {
     (a - b) as f64
@@ -1257,10 +1257,10 @@ static mut TM: [i32; 9] = [0; 9];
 extern "win64" fn localtime(t: *const i64) -> *mut i32 {
     // SAFETY: a pointer to a time_t.
     let secs = if t.is_null() { unix_now() } else { unsafe { *t } };
-    let d = arcrt::time::date((secs - 946_684_800).max(0) as u64);
+    let d = justrt::time::date((secs - 946_684_800).max(0) as u64);
     let mut yday = d.day as i32 - 1;
     for mo in 1..d.month {
-        yday += arcrt::time::days_in_month(d.year, mo) as i32;
+        yday += justrt::time::days_in_month(d.year, mo) as i32;
     }
     // SAFETY: single-threaded; one static struct tm, as in C.
     unsafe {
@@ -1277,7 +1277,7 @@ extern "win64" fn mktime(tm: *const i32) -> i64 {
         days += if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 { 366 } else { 365 };
     }
     for mo in 1..=tm[4] as u64 {
-        days += arcrt::time::days_in_month(year as u64, mo) as i64;
+        days += justrt::time::days_in_month(year as u64, mo) as i64;
     }
     days += tm[3] as i64 - 1;
     days * 86400 + tm[2] as i64 * 3600 + tm[1] as i64 * 60 + tm[0] as i64
@@ -1622,7 +1622,7 @@ const INVALID: u64 = u64::MAX;
 fn create_file(name: &str, access: u32, disposition: u32) -> u64 {
     let read = access & 0x8000_0000 != 0 || access & 1 != 0;
     let write = access & 0x4000_0000 != 0 || access & 2 != 0;
-    let exists = arcrt::fs::read(&path(name)).is_ok();
+    let exists = justrt::fs::read(&path(name)).is_ok();
     let (truncate, create) = match disposition {
         1 if exists => {
             crate::win::set_last_error(80); // ERROR_FILE_EXISTS
@@ -1755,16 +1755,16 @@ extern "win64" fn SetEndOfFile(h: u64) -> u32 {
     }
 }
 extern "win64" fn DeleteFileA(name: *const u8) -> u32 {
-    arcrt::fs::remove(&path(&cstr(name))).is_ok() as u32
+    justrt::fs::remove(&path(&cstr(name))).is_ok() as u32
 }
 extern "win64" fn DeleteFileW(name: *const u16) -> u32 {
-    arcrt::fs::remove(&path(&wstr(name))).is_ok() as u32
+    justrt::fs::remove(&path(&wstr(name))).is_ok() as u32
 }
 fn attributes(name: &str) -> u32 {
     let p = path(name);
-    if arcrt::fs::list_dir(&p).is_ok() {
+    if justrt::fs::list_dir(&p).is_ok() {
         0x10 // FILE_ATTRIBUTE_DIRECTORY
-    } else if arcrt::fs::read(&p).is_ok() {
+    } else if justrt::fs::read(&p).is_ok() {
         0x80 // FILE_ATTRIBUTE_NORMAL
     } else {
         u32::MAX // INVALID_FILE_ATTRIBUTES
@@ -1777,13 +1777,13 @@ extern "win64" fn GetFileAttributesW(name: *const u16) -> u32 {
     attributes(&wstr(name))
 }
 extern "win64" fn CreateDirectoryA(name: *const u8, _sec: u64) -> u32 {
-    arcrt::fs::make_dir(&path(&cstr(name))).is_ok() as u32
+    justrt::fs::make_dir(&path(&cstr(name))).is_ok() as u32
 }
 extern "win64" fn CreateDirectoryW(name: *const u16, _sec: u64) -> u32 {
-    arcrt::fs::make_dir(&path(&wstr(name))).is_ok() as u32
+    justrt::fs::make_dir(&path(&wstr(name))).is_ok() as u32
 }
 extern "win64" fn GetCurrentDirectoryA(n: u32, buf: *mut u8) -> u32 {
-    let dir = arcrt::fs::current_dir();
+    let dir = justrt::fs::current_dir();
     if (n as usize) < dir.len() + 1 || buf.is_null() {
         return dir.len() as u32 + 1;
     }
@@ -1795,7 +1795,7 @@ extern "win64" fn GetCurrentDirectoryA(n: u32, buf: *mut u8) -> u32 {
     dir.len() as u32
 }
 extern "win64" fn SetCurrentDirectoryA(name: *const u8) -> u32 {
-    arcrt::fs::set_current_dir(&path(&cstr(name))).is_ok() as u32
+    justrt::fs::set_current_dir(&path(&cstr(name))).is_ok() as u32
 }
 extern "win64" fn ReadConsoleA(_h: u64, buf: *mut u8, n: u32, got: *mut u32, _ctl: u64) -> u32 {
     ReadFile(3, buf, n, got, 0)
@@ -1832,8 +1832,8 @@ extern "win64" fn WriteConsoleW(_h: u64, buf: *const u16, n: u32, written: *mut 
     1
 }
 extern "win64" fn GetLocalTime(out: *mut u16) {
-    let d = arcrt::time::date(arcrt::time::now());
-    let ms = (arcrt::time::uptime_ms() % 1000) as u16;
+    let d = justrt::time::date(justrt::time::now());
+    let ms = (justrt::time::uptime_ms() % 1000) as u16;
     let v = [d.year as u16, d.month as u16, ((d.weekday + 1) % 7) as u16, d.day as u16, d.hour as u16, d.min as u16, d.sec as u16, ms];
     // SAFETY: a SYSTEMTIME of eight WORDs.
     unsafe { core::ptr::copy_nonoverlapping(v.as_ptr(), out, 8) };

@@ -1,6 +1,6 @@
 //! Volumes and paths.
 //!
-//! arcOS has no single root: every mounted file system is a **volume** with
+//! JustOS has no single root: every mounted file system is a **volume** with
 //! a name, and a path names the volume first:
 //!
 //! ```text
@@ -10,7 +10,7 @@
 //! ```
 //!
 //! Names are case-insensitive. Volumes mount by themselves when a disk with
-//! an ArcFS partition shows up: the first one labelled "System" becomes
+//! an JustFS partition shows up: the first one labelled "System" becomes
 //! `sys:`, the others use their label.
 
 use crate::dev::block::{Disk, DiskBlocks};
@@ -19,15 +19,15 @@ use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use arcfs::{BlockDevice, DirEntry, Fs, Kind, MemDisk};
+use justfs::{BlockDevice, DirEntry, Fs, Kind, MemDisk};
 
-pub use arcfs::Error;
+pub use justfs::Error;
 
 pub type Result<T> = core::result::Result<T, Error>;
 
 struct KernelClock;
 
-impl arcfs::Clock for KernelClock {
+impl justfs::Clock for KernelClock {
     fn now(&self) -> u64 {
         crate::time::now()
     }
@@ -95,7 +95,7 @@ fn name_for(label: &str, fallback: &str) -> String {
     name
 }
 
-/// Mounts the boot pack (an ArcFS image the loader put in memory).
+/// Mounts the boot pack (an JustFS image the loader put in memory).
 pub fn mount_boot_pack(phys: u64, size: u64) {
     if size == 0 {
         crate::warn!("fs", "the boot loader passed no boot pack");
@@ -128,7 +128,7 @@ pub fn mount_live_system(phys: u64, size: u64) {
 
 /// Creates the `ram:` volume.
 pub fn mount_ram(bytes: usize) {
-    let disk = MemDisk::new(bytes / arcfs::BLOCK_SIZE);
+    let disk = MemDisk::new(bytes / justfs::BLOCK_SIZE);
     match Fs::format(Box::new(disk) as Box<dyn BlockDevice + Send>, "RAM", &CLOCK) {
         Ok(fs) => {
             mount("ram", "memory", fs);
@@ -137,12 +137,12 @@ pub fn mount_ram(bytes: usize) {
     }
 }
 
-/// Mounts the disk if it holds ArcFS (called for every new disk/partition).
+/// Mounts the disk if it holds JustFS (called for every new disk/partition).
 pub fn offer(disk: &Arc<Disk>) {
-    if disk.sector_size as usize > arcfs::BLOCK_SIZE || is_mounted_on(&disk.name) {
+    if disk.sector_size as usize > justfs::BLOCK_SIZE || is_mounted_on(&disk.name) {
         return;
     }
-    let mut block0 = [0u8; arcfs::BLOCK_SIZE];
+    let mut block0 = [0u8; justfs::BLOCK_SIZE];
     let mut dev = DiskBlocks { disk: disk.clone() };
     if dev.read_block(0, &mut block0).is_err() || !Fs::<MemDisk>::probe(&block0) {
         return;
@@ -152,7 +152,7 @@ pub fn offer(disk: &Arc<Disk>) {
             let name = name_for(&fs.superblock().label.clone(), &disk.name);
             mount(&name, &disk.name, fs);
         }
-        Err(e) => crate::warn!("fs", "{}: ArcFS volume not mounted: {e}", disk.name),
+        Err(e) => crate::warn!("fs", "{}: JustFS volume not mounted: {e}", disk.name),
     }
 }
 
@@ -178,7 +178,7 @@ pub fn disk_gone(disk: &str) {
     }
 }
 
-/// Formats a disk or partition with ArcFS and mounts it.
+/// Formats a disk or partition with JustFS and mounts it.
 pub fn format(disk: &Arc<Disk>, label: &str) -> Result<String> {
     if is_mounted_on(&disk.name) {
         return Err(Error::Exists);

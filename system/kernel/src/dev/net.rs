@@ -4,7 +4,7 @@
 use crate::sync::IrqLock;
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
-use arcdk::{NetDesc, Status, E_INVAL, OK};
+use justdk::{NetDesc, Status, E_INVAL, OK};
 
 pub struct Iface {
     pub device: u32,

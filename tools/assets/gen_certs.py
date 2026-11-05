@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Turns Mozilla's trusted roots into the files arcOS reads.
+"""Turns Mozilla's trusted roots into the files JustOS reads.
 
 Source: tools/assets/src/cacert.pem, the bundle of the `certifi` package
 (Mozilla's CA list, MPL-2.0). Outputs:
 
-    rootfs/system/certs.bin               for arctls: "ARCR", u32 count, then
+    rootfs/system/certs.bin               for justtls: "ARCR", u32 count, then
                                           per root u16 + subject (DER Name),
                                           u16 + SubjectPublicKeyInfo (DER)
     rootfs/etc/ssl/certs/ca-certificates.crt

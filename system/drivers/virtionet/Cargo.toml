@@ -1,6 +1,6 @@
 [package]
 name = "virtionet"
-description = "arcOS driver: virtio network cards"
+description = "JustOS driver: virtio network cards"
 version = "1.1.0"
 edition.workspace = true
 publish.workspace = true
@@ -13,8 +13,8 @@ test = false
 bench = false
 
 [dependencies]
-arcdrv.workspace = true
-arcvirtio.workspace = true
+justdrv.workspace = true
+justvirtio.workspace = true
 
 [lints]
 workspace = true

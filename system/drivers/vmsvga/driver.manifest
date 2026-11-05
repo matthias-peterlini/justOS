@@ -4,5 +4,5 @@ name        = vmsvga
 version     = 1.1.0
 class       = display
 description = VMware SVGA II display
-author      = arcOS
+author      = JustOS
 match       = pci 15ad:0405

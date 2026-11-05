@@ -4,10 +4,10 @@
 #![no_std]
 #![no_main]
 
-use arcdrv::{port, DeviceInfo, IrqLock, Status, AXIS_WHEEL, AXIS_X, AXIS_Y, E_IO, E_NODEV, INPUT_BUTTON, INPUT_REL, OK};
+use justdrv::{port, DeviceInfo, IrqLock, Status, AXIS_WHEEL, AXIS_X, AXIS_Y, E_IO, E_NODEV, INPUT_BUTTON, INPUT_REL, OK};
 use core::ffi::c_void;
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "ps2mouse",
     version: "1.1.0",
     probe: probe,
@@ -28,15 +28,15 @@ struct State {
 static STATE: IrqLock<State> = IrqLock::new(State { device: 0, packet: [0; 4], len: 0, size: 3, buttons: 0 });
 
 fn write_mouse(byte: u8) -> Option<u8> {
-    arcdrv::wait_until(50, || port::inb(STATUS) & 2 == 0);
+    justdrv::wait_until(50, || port::inb(STATUS) & 2 == 0);
     port::outb(STATUS, 0xD4); // next data byte goes to the second port
-    arcdrv::wait_until(50, || port::inb(STATUS) & 2 == 0);
+    justdrv::wait_until(50, || port::inb(STATUS) & 2 == 0);
     port::outb(DATA, byte);
-    arcdrv::wait_until(100, || port::inb(STATUS) & 1 != 0).then(|| port::inb(DATA))
+    justdrv::wait_until(100, || port::inb(STATUS) & 1 != 0).then(|| port::inb(DATA))
 }
 
 fn read_byte() -> Option<u8> {
-    arcdrv::wait_until(100, || port::inb(STATUS) & 1 != 0).then(|| port::inb(DATA))
+    justdrv::wait_until(100, || port::inb(STATUS) & 1 != 0).then(|| port::inb(DATA))
 }
 
 fn packet(s: &mut State) {
@@ -48,18 +48,18 @@ fn packet(s: &mut State) {
     let dy = p[2] as i32 - if p[0] & 0x20 != 0 { 256 } else { 0 };
     let dev = s.device;
     if dx != 0 {
-        arcdrv::input_event(dev, INPUT_REL, AXIS_X, dx);
+        justdrv::input_event(dev, INPUT_REL, AXIS_X, dx);
     }
     if dy != 0 {
-        arcdrv::input_event(dev, INPUT_REL, AXIS_Y, -dy); // PS/2 counts up, screens count down
+        justdrv::input_event(dev, INPUT_REL, AXIS_Y, -dy); // PS/2 counts up, screens count down
     }
     if s.size == 4 && p[3] != 0 {
-        arcdrv::input_event(dev, INPUT_REL, AXIS_WHEEL, (p[3] as i8 as i32).clamp(-8, 7));
+        justdrv::input_event(dev, INPUT_REL, AXIS_WHEEL, (p[3] as i8 as i32).clamp(-8, 7));
     }
     let buttons = p[0] & 7;
     for (bit, code) in [(1u8, 0u32), (2, 1), (4, 2)] {
         if (buttons ^ s.buttons) & bit != 0 {
-            arcdrv::input_event(dev, INPUT_BUTTON, code, (buttons & bit != 0) as i32);
+            justdrv::input_event(dev, INPUT_BUTTON, code, (buttons & bit != 0) as i32);
         }
     }
     s.buttons = buttons;
@@ -119,12 +119,12 @@ fn probe(dev: &DeviceInfo) -> Status {
         s.device = dev.id;
         s.size = size;
     }
-    let st = arcdrv::irq_attach(dev.id, dev.irq, irq, core::ptr::null_mut());
+    let st = justdrv::irq_attach(dev.id, dev.irq, irq, core::ptr::null_mut());
     if st != OK {
         return st;
     }
-    arcdrv::power_hooks(dev.id, core::ptr::null_mut(), None, resume);
-    arcdrv::info!("mouse ready on IRQ {}{}", dev.irq, if size == 4 { ", with wheel" } else { "" });
+    justdrv::power_hooks(dev.id, core::ptr::null_mut(), None, resume);
+    justdrv::info!("mouse ready on IRQ {}{}", dev.irq, if size == 4 { ", with wheel" } else { "" });
     OK
 }
 
@@ -133,7 +133,7 @@ fn probe(dev: &DeviceInfo) -> Status {
 /// come here.
 unsafe extern "C" fn resume(_: *mut c_void) -> Status {
     let device = STATE.lock().device;
-    arcdrv::irq_detach(device, 12);
+    justdrv::irq_detach(device, 12);
     while port::inb(STATUS) & 1 != 0 {
         port::inb(DATA);
     }
@@ -147,13 +147,13 @@ unsafe extern "C" fn resume(_: *mut c_void) -> Status {
         if s.buttons != 0 {
             for (bit, code) in [(1u8, 0u32), (2, 1), (4, 2)] {
                 if s.buttons & bit != 0 {
-                    arcdrv::input_event(device, INPUT_BUTTON, code, 0);
+                    justdrv::input_event(device, INPUT_BUTTON, code, 0);
                 }
             }
             s.buttons = 0;
         }
     }
-    arcdrv::irq_attach(device, 12, irq, core::ptr::null_mut());
+    justdrv::irq_attach(device, 12, irq, core::ptr::null_mut());
     if size.is_some() {
         OK
     } else {
@@ -163,5 +163,5 @@ unsafe extern "C" fn resume(_: *mut c_void) -> Status {
 
 fn remove(device: u32) {
     write_mouse(0xF5); // stop reporting
-    arcdrv::irq_detach(device, 12);
+    justdrv::irq_detach(device, 12);
 }

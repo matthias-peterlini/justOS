@@ -7,7 +7,7 @@
 
 use crate::arch::cpu::{inb, outb};
 use alloc::vec::Vec;
-use arcdk::{DeviceInfo, Resource, BUS_PLATFORM, IRQ_NONE, RES_IO};
+use justdk::{DeviceInfo, Resource, BUS_PLATFORM, IRQ_NONE, RES_IO};
 use core::sync::atomic::{AtomicU8, Ordering};
 
 const DATA: u16 = 0x60;

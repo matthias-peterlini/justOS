@@ -65,7 +65,7 @@ impl Picker {
 
     fn reload(&mut self) {
         let mut items: Vec<(String, bool)> = fs::list_dir(&self.dir)
-            .map(|l| l.into_iter().map(|(e, st)| (e.name, st.kind == arcfs::Kind::Dir)).collect())
+            .map(|l| l.into_iter().map(|(e, st)| (e.name, st.kind == justfs::Kind::Dir)).collect())
             .unwrap_or_default();
         let filter = self.filter;
         let saving = self.saving;

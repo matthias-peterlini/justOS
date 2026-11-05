@@ -13,10 +13,10 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
-use arcdrv::{BlockDesc, DeviceInfo, Dma, Mmio, Mutex, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, E_TIMEOUT, OK, RES_MEMORY};
+use justdrv::{BlockDesc, DeviceInfo, Dma, Mmio, Mutex, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, E_TIMEOUT, OK, RES_MEMORY};
 use core::ffi::c_void;
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "ahci",
     version: "1.1.0",
     probe: probe,
@@ -89,13 +89,13 @@ impl Port {
 
     fn stop(&self) -> bool {
         self.write(P_CMD, self.read(P_CMD) & !CMD_ST);
-        let ok = arcdrv::wait_until(500, || self.read(P_CMD) & CMD_CR == 0);
+        let ok = justdrv::wait_until(500, || self.read(P_CMD) & CMD_CR == 0);
         self.write(P_CMD, self.read(P_CMD) & !CMD_FRE);
-        ok && arcdrv::wait_until(500, || self.read(P_CMD) & CMD_FR == 0)
+        ok && justdrv::wait_until(500, || self.read(P_CMD) & CMD_FR == 0)
     }
 
     fn start(&self) {
-        arcdrv::wait_until(500, || self.read(P_CMD) & CMD_CR == 0);
+        justdrv::wait_until(500, || self.read(P_CMD) & CMD_CR == 0);
         self.write(P_CMD, self.read(P_CMD) | CMD_FRE);
         self.write(P_CMD, self.read(P_CMD) | CMD_ST);
     }
@@ -123,11 +123,11 @@ impl Port {
     fn wake(&self) -> Status {
         self.write(P_CMD, self.read(P_CMD) | CMD_POD | CMD_SUD);
         let link = || self.read(P_SSTS) & 0xF == 3;
-        if !arcdrv::wait_until(1000, link) {
+        if !justdrv::wait_until(1000, link) {
             self.write(P_SCTL, (self.read(P_SCTL) & !0xF) | 1);
-            arcdrv::sleep_ms(2);
+            justdrv::sleep_ms(2);
             self.write(P_SCTL, self.read(P_SCTL) & !0xF);
-            if !arcdrv::wait_until(1000, link) {
+            if !justdrv::wait_until(1000, link) {
                 return E_IO;
             }
         }
@@ -135,7 +135,7 @@ impl Port {
             return E_IO;
         }
         // A hard disk takes seconds to spin up.
-        if arcdrv::wait_until(15_000, || self.read(P_TFD) & 0x88 == 0) {
+        if justdrv::wait_until(15_000, || self.read(P_TFD) & 0x88 == 0) {
             OK
         } else {
             E_TIMEOUT
@@ -145,7 +145,7 @@ impl Port {
     /// Runs one ATA command on slot 0. `bytes` of data move through the
     /// bounce buffer; `write` is the direction.
     fn command(&self, cmd: u8, lba: u64, count: u32, bytes: usize, write: bool) -> Status {
-        if !arcdrv::wait_until(1000, || self.read(P_TFD) & 0x88 == 0) {
+        if !justdrv::wait_until(1000, || self.read(P_TFD) & 0x88 == 0) {
             return E_TIMEOUT;
         }
         let m = &self.mem;
@@ -179,7 +179,7 @@ impl Port {
         self.write(P_IS, u32::MAX);
         self.write(P_CI, 1);
         let mut failed = false;
-        let done = arcdrv::wait_until(10_000, || {
+        let done = justdrv::wait_until(10_000, || {
             if self.read(P_IS) & (1 << 30) != 0 {
                 failed = true; // task file error
                 return true;
@@ -187,7 +187,7 @@ impl Port {
             self.read(P_CI) & 1 == 0
         });
         if failed || self.read(P_TFD) & 1 != 0 {
-            arcdrv::warn!("command {cmd:#x} failed (TFD {:#x})", self.read(P_TFD));
+            justdrv::warn!("command {cmd:#x} failed (TFD {:#x})", self.read(P_TFD));
             // Recover the port for the next command.
             self.stop();
             self.write(P_SERR, u32::MAX);
@@ -269,7 +269,7 @@ struct Hba {
 fn take_hba(hba: &Mmio) {
     if hba.read32(CAP2) & 1 != 0 {
         hba.write32(BOHC, hba.read32(BOHC) | 2);
-        arcdrv::wait_until(100, || hba.read32(BOHC) & 1 == 0);
+        justdrv::wait_until(100, || hba.read32(BOHC) & 1 == 0);
     }
     hba.write32(GHC, hba.read32(GHC) | (1 << 31));
     hba.write32(GHC, hba.read32(GHC) & !2);
@@ -315,7 +315,7 @@ fn setup_port(dev: u32, hba: Mmio, index: usize) -> Result<&'static Disk, Status
     let (Some(mem), Some(bounce)) = (Dma::new(4096), Dma::new(MAX_SECTORS as usize * 512)) else { return Err(E_NOMEM) };
     let port = Port { hba, base, mem, bounce };
     if !port.setup() {
-        arcdrv::warn!("port {index} does not stop");
+        justdrv::warn!("port {index} does not stop");
         return Err(E_IO);
     }
 
@@ -340,9 +340,9 @@ fn setup_port(dev: u32, hba: Mmio, index: usize) -> Result<&'static Disk, Status
         read,
         write,
         flush: Some(flush),
-        model: arcdrv::model_name(&name),
+        model: justdrv::model_name(&name),
     }));
-    let n = arcdrv::block_register(dev, desc);
+    let n = justdrv::block_register(dev, desc);
     if n < 0 {
         Err(n)
     } else {
@@ -356,10 +356,10 @@ fn probe(dev: &DeviceInfo) -> Status {
     }
     let bar = dev.resources[5];
     if bar.kind != RES_MEMORY || bar.base == 0 {
-        arcdrv::warn!("no AHCI register window (BAR5)");
+        justdrv::warn!("no AHCI register window (BAR5)");
         return E_IO;
     }
-    let pci = arcdrv::Pci(dev.id);
+    let pci = justdrv::Pci(dev.id);
     pci.enable(false, true, true);
     let Some(hba) = Mmio::map(bar.base, (bar.size as usize).max(0x1100)) else { return E_NOMEM };
 
@@ -367,7 +367,7 @@ fn probe(dev: &DeviceInfo) -> Status {
 
     let ports = hba.read32(PI);
     let slots = (hba.read32(CAP) >> 8 & 0x1F) + 1;
-    arcdrv::debug!("{} ports implemented, {slots} command slots", ports.count_ones());
+    justdrv::debug!("{} ports implemented, {slots} command slots", ports.count_ones());
     let mut disks = Vec::new();
     for i in 0..32 {
         if ports & (1 << i) == 0 {
@@ -383,13 +383,13 @@ fn probe(dev: &DeviceInfo) -> Status {
         }
         match setup_port(dev.id, hba, i) {
             Ok(d) => disks.push(d),
-            Err(e) => arcdrv::warn!("port {i}: {}", arcdrv::status_name(e)),
+            Err(e) => justdrv::warn!("port {i}: {}", justdrv::status_name(e)),
         }
     }
     if disks.is_empty() {
-        arcdrv::info!("no SATA disks attached");
+        justdrv::info!("no SATA disks attached");
     }
     let ctl: &'static Hba = Box::leak(Box::new(Hba { regs: hba, disks }));
-    arcdrv::power_hooks(dev.id, ctl as *const Hba as *mut c_void, Some(suspend), resume);
+    justdrv::power_hooks(dev.id, ctl as *const Hba as *mut c_void, Some(suspend), resume);
     OK
 }

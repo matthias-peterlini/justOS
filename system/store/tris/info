@@ -1,8 +1,8 @@
 name=Tris
 category=Giochi
 about=Il gioco del tris contro il computer.
-details=Allinea tre X prima che arcOS allinei tre O. In Facile il computer ogni tanto sbaglia; in Difficile non perde mai.
+details=Allinea tre X prima che JustOS allinei tre O. In Facile il computer ogni tanto sbaglia; in Difficile non perde mai.
 version=1.0
-developer=arcOS
+developer=JustOS
 type=native
 gui=yes

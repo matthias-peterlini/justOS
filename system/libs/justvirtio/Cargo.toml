@@ -1,0 +1,13 @@
+[package]
+name = "justvirtio"
+description = "virtio transport for JustOS drivers: legacy and modern PCI, virtqueues"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[dependencies]
+justdrv.workspace = true
+
+[lints]
+workspace = true

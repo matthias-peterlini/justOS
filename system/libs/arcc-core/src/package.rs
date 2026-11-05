@@ -48,11 +48,11 @@ pub const TAG_ASSETS: [u8; 4] = *b"ASST";
 pub const TAG_TYPES: [u8; 4] = *b"TYPE";
 
 /// Prefix of the application ids of ArcScript apps on Arc Desktop.
-pub const APP_ID_PREFIX: &str = "org.arcos.";
+pub const APP_ID_PREFIX: &str = "dev.justos.";
 
-/// The application id of the app `name`: `org.arcos.` followed by the name
+/// The application id of the app `name`: `dev.justos.` followed by the name
 /// in lowercase, with every run of other characters turned into `-`
-/// (`"My App"` becomes `org.arcos.my-app`). It is the Wayland app id / X11
+/// (`"My App"` becomes `dev.justos.my-app`). It is the Wayland app id / X11
 /// `WM_CLASS` of the window, the name of the `.desktop` file and of the icon,
 /// and the `app_icon` of notifications, so the desktop can match them.
 pub fn app_id(name: &str) -> String {
@@ -344,16 +344,16 @@ mod tests {
 
     #[test]
     fn app_ids() {
-        assert_eq!(app_id("aurora"), "org.arcos.aurora");
-        assert_eq!(app_id("My App!"), "org.arcos.my-app");
-        assert_eq!(app_id("  Note_Book 2 "), "org.arcos.note-book-2");
-        assert_eq!(app_id("2048"), "org.arcos.app-2048");
-        assert_eq!(app_id(""), "org.arcos.app");
-        for id in ["org.arcos.notes", "org.arcos.my-app", "com.example.App_2"] {
+        assert_eq!(app_id("aurora"), "dev.justos.aurora");
+        assert_eq!(app_id("My App!"), "dev.justos.my-app");
+        assert_eq!(app_id("  Note_Book 2 "), "dev.justos.note-book-2");
+        assert_eq!(app_id("2048"), "dev.justos.app-2048");
+        assert_eq!(app_id(""), "dev.justos.app");
+        for id in ["dev.justos.notes", "dev.justos.my-app", "com.example.App_2"] {
             assert!(check_app_id(id).is_ok(), "{id}");
             assert!(check_app_id(&app_id(id)).is_ok());
         }
-        for id in ["notes", "org..notes", "org.arcos.2048", "org.arcos.a b", "org.arcos."] {
+        for id in ["notes", "org..notes", "dev.justos.2048", "dev.justos.a b", "dev.justos."] {
             assert!(check_app_id(id).is_err(), "{id}");
         }
     }

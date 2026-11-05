@@ -2,7 +2,7 @@
 //!
 //! Brings the controller up (taking it over from the firmware first), runs
 //! its command and event rings and the transfer rings of every endpoint,
-//! and implements `arcusb::Host`, so the USB core can enumerate devices and
+//! and implements `justusb::Host`, so the USB core can enumerate devices and
 //! hubs on its ports. Low-, full-, high- and SuperSpeed devices all work.
 //!
 //! Events are handled by one thread per controller, woken by the
@@ -18,16 +18,16 @@ use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use arcdrv::usb::*;
-use arcdrv::{
+use justdrv::usb::*;
+use justdrv::{
     DeviceInfo, Dma, Event, IrqLock, Mmio, Mutex, Pci, Status, E_BUSY, E_GONE, E_INVAL, E_IO, E_NODEV, E_NOMEM, E_STALL, E_TIMEOUT, OK,
     RES_MEMORY,
 };
-use arcusb::{Attach, Bus, Handle, Host, HubInfo, PortStatus};
+use justusb::{Attach, Bus, Handle, Host, HubInfo, PortStatus};
 use core::ffi::c_void;
 use core::sync::atomic::{fence, AtomicBool, Ordering};
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "xhci",
     version: "1.1.0",
     probe: probe,
@@ -322,16 +322,16 @@ impl Xhci {
         *self.cmd_result.lock() = None;
         let phys = self.cmd_ring.lock().push(trb);
         self.doorbell(0, 0);
-        let start = arcdrv::time_ms();
+        let start = justdrv::time_ms();
         loop {
             if let Some((p, code, slot)) = *self.cmd_result.lock() {
                 if p == phys {
                     return Ok((code, slot));
                 }
             }
-            let waited = arcdrv::time_ms() - start;
+            let waited = justdrv::time_ms() - start;
             if waited >= 5000 {
-                arcdrv::warn!("command {} timed out", trb[3] >> 10 & 0x3F);
+                justdrv::warn!("command {} timed out", trb[3] >> 10 & 0x3F);
                 return Err(E_TIMEOUT);
             }
             self.cmd_done.wait(if self.has_irq.load(Ordering::Relaxed) { 50 } else { 2 });
@@ -342,7 +342,7 @@ impl Xhci {
         match self.command(trb)? {
             (CC_SUCCESS, slot) => Ok(slot),
             (code, _) => {
-                arcdrv::debug!("command {} failed with code {code}", trb[3] >> 10 & 0x3F);
+                justdrv::debug!("command {} failed with code {code}", trb[3] >> 10 & 0x3F);
                 Err(E_IO)
             }
         }
@@ -390,7 +390,7 @@ impl Xhci {
             }
             TRB_PORT_CHANGE => {
                 if let Some(bus) = *self.bus.lock() {
-                    arcusb::port_changed(bus);
+                    justusb::port_changed(bus);
                 }
             }
             TRB_TRANSFER_EVENT => {
@@ -426,7 +426,7 @@ impl Xhci {
     fn poll_done(&self, slot: &Slot, ep: &Endpoint, p: Poll, code: u8, residual: u32) {
         if code != CC_SUCCESS && code != CC_SHORT {
             if code != CC_STOPPED && code != CC_STOPPED_SHORT {
-                arcdrv::debug!("slot {} endpoint {}: polling stopped (code {code})", slot.id, ep.dci);
+                justdrv::debug!("slot {} endpoint {}: polling stopped (code {code})", slot.id, ep.dci);
             }
             *ep.poll.lock() = None;
             return;
@@ -457,7 +457,7 @@ impl Xhci {
     /// Waits for the completion of the TD made of `trbs`. Returns (code,
     /// the TRB it came from, residual) of the final event.
     fn wait_td(&self, slot: &Slot, ep: &Endpoint, trbs: &[u64], timeout_ms: u32, until_last: bool) -> Result<(u8, usize, u32), Status> {
-        let start = arcdrv::time_ms();
+        let start = justdrv::time_ms();
         loop {
             while let Some((p, code, residual)) = ep.completions.lock().pop_front() {
                 let Some(i) = trbs.iter().position(|&t| t == p) else { continue }; // stale
@@ -468,7 +468,7 @@ impl Xhci {
                     return Ok((code, i, residual));
                 }
             }
-            if arcdrv::time_ms() - start >= timeout_ms as u64 {
+            if justdrv::time_ms() - start >= timeout_ms as u64 {
                 self.cancel(slot, ep);
                 return Err(E_TIMEOUT);
             }
@@ -544,7 +544,7 @@ impl Xhci {
         }
         self.doorbell(slot.id, 1);
         let mut got = len;
-        let start = arcdrv::time_ms();
+        let start = justdrv::time_ms();
         let mut remaining = timeout_ms;
         loop {
             let (code, i, residual) = self.wait_td(slot, &ep, &trbs, remaining, false)?;
@@ -558,7 +558,7 @@ impl Xhci {
             if i == trbs.len() - 1 {
                 break;
             }
-            remaining = timeout_ms.saturating_sub((arcdrv::time_ms() - start) as u32).max(1);
+            remaining = timeout_ms.saturating_sub((justdrv::time_ms() - start) as u32).max(1);
         }
         if input && got > 0 {
             data[..got].copy_from_slice(&ep.buf.as_slice()[..got]);
@@ -675,13 +675,13 @@ impl Host for Xhci {
         }
         let reset = if usb3 { PORT_WPR } else { PORT_PR };
         self.set_portsc(port, (v & PORT_PRESERVE) | reset);
-        let ok = arcdrv::wait_until(500, || self.portsc(port) & PORT_PRC != 0);
+        let ok = justdrv::wait_until(500, || self.portsc(port) & PORT_PRC != 0);
         let v = self.portsc(port);
         self.set_portsc(port, (v & PORT_PRESERVE) | (v & PORT_CHANGES));
         if !ok || v & PORT_PED == 0 {
             return Err(E_IO);
         }
-        arcdrv::sleep_ms(10);
+        justdrv::sleep_ms(10);
         Ok(speed_from_port(v))
     }
 
@@ -813,7 +813,7 @@ impl Host for Xhci {
             let ring = ep.ring.lock().mem.phys();
             let mult = if slot.speed == SPEED_HIGH { ((e.max_packet >> 11) & 3) as u32 } else { 0 };
             let (interval, avg, esit) = if kind == EP_INTERRUPT {
-                (arcusb::interval_exponent(&e, slot.speed), mps, mps as u32 * (burst as u32 + 1) * (mult + 1))
+                (justusb::interval_exponent(&e, slot.speed), mps, mps as u32 * (burst as u32 + 1) * (mult + 1))
             } else {
                 (0, 3072, 0)
             };
@@ -892,7 +892,7 @@ impl Host for Xhci {
         // The driver may go away right after: never return while its
         // callback runs.
         while ep.in_callback.load(Ordering::Acquire) {
-            arcdrv::sleep_ms(1);
+            justdrv::sleep_ms(1);
         }
         if stopped {
             self.cancel(&slot, &ep);
@@ -923,7 +923,7 @@ impl Host for Xhci {
 
     fn stop(&self) {
         self.op_write(USBCMD, self.op_read(USBCMD) & !(CMD_RUN | CMD_INTE));
-        arcdrv::wait_until(100, || self.op_read(USBSTS) & STS_HALTED != 0);
+        justdrv::wait_until(100, || self.op_read(USBSTS) & STS_HALTED != 0);
     }
 
     fn restart(&self) -> Status {
@@ -966,8 +966,8 @@ impl Xhci {
         regs.write32(ir + 0x04, 160); // moderation: 40 µs
         regs.write32(ir, 0b11); // IMAN: clear pending, enable
         regs.write32(op + USBCMD, CMD_RUN | CMD_INTE);
-        if !arcdrv::wait_until(1000, || regs.read32(op + USBSTS) & STS_HALTED == 0) {
-            arcdrv::warn!("controller does not start");
+        if !justdrv::wait_until(1000, || regs.read32(op + USBSTS) & STS_HALTED == 0) {
+            justdrv::warn!("controller does not start");
             return E_IO;
         }
         // Power every port (a no-op where power is not switchable).
@@ -983,16 +983,16 @@ impl Xhci {
 
 /// Stops and resets the controller.
 fn reset(regs: &Mmio, op: usize) -> Status {
-    arcdrv::wait_until(1000, || regs.read32(op + USBSTS) & STS_CNR == 0);
+    justdrv::wait_until(1000, || regs.read32(op + USBSTS) & STS_CNR == 0);
     regs.write32(op + USBCMD, regs.read32(op + USBCMD) & !CMD_RUN);
-    if !arcdrv::wait_until(1000, || regs.read32(op + USBSTS) & STS_HALTED != 0) {
-        arcdrv::warn!("controller does not halt");
+    if !justdrv::wait_until(1000, || regs.read32(op + USBSTS) & STS_HALTED != 0) {
+        justdrv::warn!("controller does not halt");
         return E_IO;
     }
     regs.write32(op + USBCMD, CMD_RESET);
-    arcdrv::sleep_ms(1);
-    if !arcdrv::wait_until(1000, || regs.read32(op + USBCMD) & CMD_RESET == 0 && regs.read32(op + USBSTS) & STS_CNR == 0) {
-        arcdrv::warn!("controller reset timed out");
+    justdrv::sleep_ms(1);
+    if !justdrv::wait_until(1000, || regs.read32(op + USBCMD) & CMD_RESET == 0 && regs.read32(op + USBSTS) & STS_CNR == 0) {
+        justdrv::warn!("controller reset timed out");
         return E_TIMEOUT;
     }
     OK
@@ -1037,8 +1037,8 @@ fn take_ownership(regs: &Mmio, xecp: usize) -> Vec<(u8, u8, u8)> {
             1 => {
                 if v & (1 << 16) != 0 {
                     regs.write32(at, v | (1 << 24));
-                    if !arcdrv::wait_until(1000, || regs.read32(at) & (1 << 16) == 0) {
-                        arcdrv::warn!("the firmware did not release the controller; taking it anyway");
+                    if !justdrv::wait_until(1000, || regs.read32(at) & (1 << 16) == 0) {
+                        justdrv::warn!("the firmware did not release the controller; taking it anyway");
                         regs.write32(at, regs.read32(at) & !(1 << 16));
                     }
                 }
@@ -1073,7 +1073,7 @@ fn switchable(dev: &DeviceInfo) -> bool {
 fn route_intel_ports(pci: Pci) {
     pci.write32(0xD8, pci.read32(0xDC)); // USB 3 ports: SuperSpeed on
     pci.write32(0xD0, pci.read32(0xD4)); // USB 2 ports: to xHCI
-    arcdrv::debug!("USB ports switched over from EHCI");
+    justdrv::debug!("USB ports switched over from EHCI");
 }
 
 fn probe(dev: &DeviceInfo) -> Status {
@@ -1158,21 +1158,21 @@ fn probe(dev: &DeviceInfo) -> Status {
         switchable: switchable(dev),
     }));
     let ctx = x as *const Xhci as *mut c_void;
-    x.has_irq.store(arcdrv::irq_attach_any(dev, irq, ctx), Ordering::Relaxed);
-    arcdrv::spawn("xhci-events", event_thread, ctx);
+    x.has_irq.store(justdrv::irq_attach_any(dev, irq, ctx), Ordering::Relaxed);
+    justdrv::spawn("xhci-events", event_thread, ctx);
     let st = x.start();
     if st != OK {
         return st;
     }
     let usb3 = x.port_usb3.iter().filter(|&&u| u).count();
-    arcdrv::info!(
+    justdrv::info!(
         "{} ports ({} USB 3), {} slots, {}",
         ports,
         usb3,
         max_slots,
         if x.has_irq.load(Ordering::Relaxed) { "interrupts" } else { "polling" }
     );
-    let bus = arcusb::start(x, dev.id, "xhci-ports");
+    let bus = justusb::start(x, dev.id, "xhci-ports");
     *x.bus.lock() = Some(bus);
     OK
 }

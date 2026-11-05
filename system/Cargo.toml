@@ -11,21 +11,21 @@ authors = ["Matthias Peterlini"]
 [workspace.dependencies]
 arcc-core = { path = "libs/arcc-core" }
 arc-vm = { path = "libs/arc-vm" }
-arcdk = { path = "libs/arcdk" }
-arcfs = { path = "libs/arcfs" }
-arcgfx = { path = "libs/arcgfx" }
-arctls = { path = "libs/arctls" }
-arczip = { path = "libs/arczip" }
-arcjson = { path = "libs/arcjson" }
-arcweb = { path = "libs/arcweb" }
-arcjs = { path = "libs/arcjs" }
-arcui = { path = "libs/arcui" }
-arcdrv = { path = "libs/arcdrv" }
-arcrt = { path = "libs/arcrt" }
-arcusb = { path = "libs/arcusb" }
-arcvirtio = { path = "libs/arcvirtio" }
-arcdex = { path = "libs/arcdex" }
-arcaml = { path = "libs/arcaml" }
+justdk = { path = "libs/justdk" }
+justfs = { path = "libs/justfs" }
+justgfx = { path = "libs/justgfx" }
+justtls = { path = "libs/justtls" }
+justzip = { path = "libs/justzip" }
+justjson = { path = "libs/justjson" }
+justweb = { path = "libs/justweb" }
+justjs = { path = "libs/justjs" }
+justui = { path = "libs/justui" }
+justdrv = { path = "libs/justdrv" }
+justrt = { path = "libs/justrt" }
+justusb = { path = "libs/justusb" }
+justvirtio = { path = "libs/justvirtio" }
+justdex = { path = "libs/justdex" }
+justaml = { path = "libs/justaml" }
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }

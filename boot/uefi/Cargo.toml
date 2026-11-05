@@ -1,6 +1,6 @@
 [package]
-name = "arc-uefi"
-description = "arcOS boot loader for UEFI firmware"
+name = "just-uefi"
+description = "JustOS boot loader for UEFI firmware"
 version = "0.1.0"
 edition = "2021"
 publish = false

@@ -14,12 +14,12 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
-use arcdrv::usb::*;
-use arcdrv::{BlockDesc, DeviceInfo, IrqLock, Mutex, Status, BLOCK_READONLY, BLOCK_REMOVABLE, E_GONE, E_INVAL, E_IO, E_NODEV, E_STALL, OK};
+use justdrv::usb::*;
+use justdrv::{BlockDesc, DeviceInfo, IrqLock, Mutex, Status, BLOCK_READONLY, BLOCK_REMOVABLE, E_GONE, E_INVAL, E_IO, E_NODEV, E_STALL, OK};
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "usbstorage",
     version: "1.0.0",
     probe: probe,
@@ -184,7 +184,7 @@ impl Msd {
                     if key == 6 && attempt == 0 {
                         continue;
                     }
-                    arcdrv::warn!("command {:#04x} failed: sense key {key:#x}, code {asc:#04x}", cb[0]);
+                    justdrv::warn!("command {:#04x} failed: sense key {key:#x}, code {asc:#04x}", cb[0]);
                     return E_IO;
                 }
                 Err(Fail::Error(e)) => return e,
@@ -285,16 +285,16 @@ fn start_lun(dev: u32, m: &'static Msd, lun: u8) -> bool {
             Err(Fail::Check) => {
                 let (key, asc) = m.sense(lun);
                 if key == 2 && asc == 0x3A {
-                    arcdrv::info!("{model}: no medium");
+                    justdrv::info!("{model}: no medium");
                     return false;
                 }
             }
             Err(Fail::Error(_)) => return false,
         }
-        arcdrv::sleep_ms(200);
+        justdrv::sleep_ms(200);
     }
     if !ready {
-        arcdrv::warn!("{model}: not ready");
+        justdrv::warn!("{model}: not ready");
         return false;
     }
     let mut cap = [0u8; 32];
@@ -317,12 +317,12 @@ fn start_lun(dev: u32, m: &'static Msd, lun: u8) -> bool {
             }
         }
         _ => {
-            arcdrv::warn!("{model}: capacity unknown");
+            justdrv::warn!("{model}: capacity unknown");
             return false;
         }
     };
     if !(512..=4096).contains(&block_size) || !block_size.is_power_of_two() || blocks == 0 {
-        arcdrv::warn!("{model}: unsupported block size {block_size}");
+        justdrv::warn!("{model}: unsupported block size {block_size}");
         return false;
     }
     // Write protection: MODE SENSE header, byte 2 bit 7. Optional.
@@ -341,9 +341,9 @@ fn start_lun(dev: u32, m: &'static Msd, lun: u8) -> bool {
         read,
         write,
         flush: Some(flush),
-        model: arcdrv::model_name(&model),
+        model: justdrv::model_name(&model),
     }));
-    arcdrv::block_register(dev, desc) >= 0
+    justdrv::block_register(dev, desc) >= 0
 }
 
 static DEVICES: IrqLock<Vec<(u32, usize)>> = IrqLock::new(Vec::new());
@@ -377,7 +377,7 @@ fn probe(dev: &DeviceInfo) -> Status {
     }
     DEVICES.lock().push((dev.id, m as *const Msd as usize));
     if disks == 0 {
-        arcdrv::info!("no usable medium ({} unit{})", luns, if luns == 1 { "" } else { "s" });
+        justdrv::info!("no usable medium ({} unit{})", luns, if luns == 1 { "" } else { "s" });
     }
     OK
 }
@@ -394,6 +394,6 @@ fn remove(device: u32) {
     m.gone.store(true, Ordering::Release);
     // Calls in progress fail quickly now; wait until they have left.
     while m.busy.load(Ordering::Acquire) != 0 {
-        arcdrv::sleep_ms(5);
+        justdrv::sleep_ms(5);
     }
 }

@@ -1,12 +1,12 @@
-//! ArcBoot for UEFI firmware.
+//! JustBoot for UEFI firmware.
 //!
 //! The firmware starts this program from the EFI system partition
 //! (`\EFI\BOOT\BOOTX64.EFI`). It does what the BIOS stages do, with the
 //! firmware's services instead of the BIOS:
-//!   1. picks the system slot with `\ARCOS\BOOT.CTL` and reads the kernel
-//!      and the boot pack from `\ARCOS\SLOTA.BIN` or `SLOTB.BIN` on the same
-//!      partition (a live CD has no slots: `\ARCOS\KERNEL.BIN` and
-//!      `\ARCOS\BOOTPACK.IMG`);
+//!   1. picks the system slot with `\JUSTOS\BOOT.CTL` and reads the kernel
+//!      and the boot pack from `\JUSTOS\SLOTA.BIN` or `SLOTB.BIN` on the same
+//!      partition (a live CD has no slots: `\JUSTOS\KERNEL.BIN` and
+//!      `\JUSTOS\BOOTPACK.IMG`);
 //!   2. picks a 32-bit framebuffer mode through the Graphics Output Protocol;
 //!   3. finds the ACPI tables in the firmware's configuration table;
 //!   4. builds the initial page tables, takes the memory map and leaves the
@@ -45,10 +45,10 @@ const KERNEL_FILE_MAGIC: &[u8; 8] = b"ARCKERN1";
 const BOOT_MAGIC: &[u8; 8] = b"ARCBOOT1";
 const PREFERRED_MODE: (u32, u32) = (1024, 768);
 
-// System slots (see tools/arctool/src/slot.rs).
+// System slots (see tools/justtool/src/slot.rs).
 const CTL_MAGIC: &[u8; 8] = b"ARCCTL01";
 const SLOT_MAGIC: &[u8; 8] = b"ARCSLOT1";
-const SLOT_FILES: [&str; 2] = ["\\ARCOS\\SLOTA.BIN", "\\ARCOS\\SLOTB.BIN"];
+const SLOT_FILES: [&str; 2] = ["\\JUSTOS\\SLOTA.BIN", "\\JUSTOS\\SLOTB.BIN"];
 /// BootInfo slot flags: not yet known to work; the other slot should have
 /// started.
 const SLOT_TRIAL: u32 = 0x100;
@@ -174,7 +174,7 @@ macro_rules! print {
 
 /// Stops with a message; the firmware's watchdog restarts the machine.
 fn fail(what: &str, status: Status) -> ! {
-    print!("\narcOS cannot start: {what} (status {:#x})\n", status);
+    print!("\nJustOS cannot start: {what} (status {:#x})\n", status);
     loop {
         // SAFETY: plain firmware call.
         unsafe { (boot_services().stall)(1_000_000) };
@@ -321,13 +321,13 @@ fn place_kernel(memsz: u64) -> u64 {
 /// Loads `KERNEL.BIN`: a 32-byte header (magic, entry, memory size, file
 /// size) and the flat image. Returns (physical address, memory size, entry).
 fn load_kernel(vol: &Volume) -> (u64, u64, u64) {
-    let file = vol.open("\\ARCOS\\KERNEL.BIN");
+    let file = vol.open("\\JUSTOS\\KERNEL.BIN");
     let mut header = [0u8; 32];
     read_exact(file, header.as_mut_ptr(), 32, "kernel header");
     let word = |i: usize| u64::from_le_bytes(header[i * 8..i * 8 + 8].try_into().unwrap());
     let (entry, memsz, filesz) = (word(1), word(2), word(3));
     if &header[..8] != KERNEL_FILE_MAGIC || filesz > memsz || filesz + 32 > file_size(file) {
-        fail("KERNEL.BIN is not an arcOS kernel", 0);
+        fail("KERNEL.BIN is not an JustOS kernel", 0);
     }
     // SAFETY: back to the image after the size check.
     unsafe { ((*file).set_position)(file, 32) };
@@ -351,7 +351,7 @@ fn sector_ok(s: &[u8; SECTOR], magic: &[u8; 8]) -> bool {
 /// uses up one of its starts, written back at once; with none left, the
 /// other starts. A damaged BOOT.CTL starts slot A.
 fn choose_slot(vol: &Volume) -> Option<(usize, u32)> {
-    let file = vol.try_open_mode("\\ARCOS\\BOOT.CTL", FILE_MODE_READ | FILE_MODE_WRITE).or_else(|_| vol.try_open("\\ARCOS\\BOOT.CTL")).ok()?;
+    let file = vol.try_open_mode("\\JUSTOS\\BOOT.CTL", FILE_MODE_READ | FILE_MODE_WRITE).or_else(|_| vol.try_open("\\JUSTOS\\BOOT.CTL")).ok()?;
     let mut ctl = [0u8; SECTOR];
     if !try_read(file, 0, ctl.as_mut_ptr(), SECTOR as u64) || !sector_ok(&ctl, CTL_MAGIC) {
         close(file);
@@ -419,7 +419,7 @@ fn load_slot(vol: &Volume, slot: usize) -> Option<Loaded> {
 }
 
 fn load_boot_pack(vol: &Volume) -> (u64, u64) {
-    let file = vol.open("\\ARCOS\\BOOTPACK.IMG");
+    let file = vol.open("\\JUSTOS\\BOOTPACK.IMG");
     let size = file_size(file);
     let phys = allocate_pages(size.div_ceil(PAGE).max(1), "no memory for the boot pack");
     read_exact(file, phys as *mut u8, size, "cannot read the boot pack");
@@ -430,7 +430,7 @@ fn load_boot_pack(vol: &Volume) -> (u64, u64) {
 /// The system volume of a live CD, if this boot medium has one: the kernel
 /// mounts it from memory as `sys:`.
 fn load_system(vol: &Volume) -> (u64, u64) {
-    let Ok(file) = vol.try_open("\\ARCOS\\SYSTEM.IMG") else { return (0, 0) };
+    let Ok(file) = vol.try_open("\\JUSTOS\\SYSTEM.IMG") else { return (0, 0) };
     let size = file_size(file);
     let phys = allocate_pages(size.div_ceil(PAGE).max(1), "no memory for the system volume");
     read_exact(file, phys as *mut u8, size, "cannot read the system volume");
@@ -450,7 +450,7 @@ fn mask_channel(mask: u32) -> (u8, u8) {
 }
 
 /// Keeps the current mode when it is already large (on a real computer the
-/// firmware starts at the panel's native resolution, which arcOS cannot change
+/// firmware starts at the panel's native resolution, which JustOS cannot change
 /// later without a driver for the card); otherwise switches to the preferred
 /// mode if the display has it. Fills the framebuffer fields of the BootInfo.
 fn setup_screen(info: &mut BootInfo) {
@@ -734,7 +734,7 @@ extern "efiapi" fn efi_main(image: Handle, st: *mut SystemTable) -> Status {
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo<'_>) -> ! {
-    print!("\nArcBoot: {info}\n");
+    print!("\nJustBoot: {info}\n");
     loop {
         // SAFETY: halting with interrupts on just waits.
         unsafe { asm!("hlt") };

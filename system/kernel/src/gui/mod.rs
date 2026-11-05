@@ -20,7 +20,7 @@
 //! fonts rendered at twice the size ([`scale`]).
 
 pub mod gfx;
-pub use arcgfx::qoi;
+pub use justgfx::qoi;
 pub mod text;
 
 mod apps;
@@ -130,7 +130,7 @@ impl Display {
 
     /// Switches the screen to another resolution (through the display
     /// driver). The back buffer starts black at the new size.
-    pub fn set_mode(&mut self, mode: arcdk::DisplayMode) -> Result<(), &'static str> {
+    pub fn set_mode(&mut self, mode: justdk::DisplayMode) -> Result<(), &'static str> {
         let fb = crate::dev::display::set_mode(mode)?;
         let scale = scale_for(fb.width, fb.height, settings::get().scale);
         self.adopt(fb, scale);
@@ -180,8 +180,8 @@ impl Display {
     }
 
     /// The current resolution (in pixels).
-    pub fn mode(&self) -> arcdk::DisplayMode {
-        arcdk::DisplayMode { width: self.fb.width as u32, height: self.fb.height as u32 }
+    pub fn mode(&self) -> justdk::DisplayMode {
+        justdk::DisplayMode { width: self.fb.width as u32, height: self.fb.height as u32 }
     }
 
     fn convert(&self, p: u32) -> u32 {
@@ -281,8 +281,8 @@ pub fn panic_screen() -> bool {
         c.fill(Rect::new(0, y, PANIC_W, 1), gfx::mix(0xFF1A_1428, 0xFF2C_1F3F, t));
     }
     let cx = PANIC_W / 2;
-    splash::draw_logo(c, cx, 56, 30, 0xFFFF_FFFF);
-    text::draw_centered(c, text::Font::Title, cx, 104, "arcOS si è dovuto fermare", 0xFFF5_F2F8);
+    splash::draw_logo(c, cx, 56, 21, 0xFFF2_EFE6);
+    text::draw_centered(c, text::Font::Title, cx, 104, "JustOS si è dovuto fermare", 0xFFF5_F2F8);
     text::draw_centered(c, text::Font::Body, cx, 156, "Si è verificato un problema che il sistema non può risolvere da solo.", 0xB3F5_F2F8);
     text::draw_centered(c, text::Font::Body, cx, 184, "Spegni e riaccendi il computer.", 0xB3F5_F2F8);
     for y in 0..ch {
@@ -365,16 +365,16 @@ fn take_redraw() -> bool {
 }
 
 /// A resolution the user chose, applied by the interface thread.
-static MODE_REQUEST: IrqLock<Option<arcdk::DisplayMode>> = IrqLock::new(None);
+static MODE_REQUEST: IrqLock<Option<justdk::DisplayMode>> = IrqLock::new(None);
 
 /// Asks the interface to switch the screen to `mode`.
-pub fn request_mode(mode: arcdk::DisplayMode) {
+pub fn request_mode(mode: justdk::DisplayMode) {
     *MODE_REQUEST.lock() = Some(mode);
 }
 
 /// Changes the resolution and remembers it (from the shell or the
 /// settings).
-pub fn change_resolution(mode: arcdk::DisplayMode) -> Result<(), &'static str> {
+pub fn change_resolution(mode: justdk::DisplayMode) -> Result<(), &'static str> {
     if !active() {
         return Err("the resolution can change only with the graphical interface");
     }
@@ -409,7 +409,7 @@ pub fn change_volume(v: u32) {
     }
 }
 
-fn take_mode_request() -> Option<arcdk::DisplayMode> {
+fn take_mode_request() -> Option<justdk::DisplayMode> {
     MODE_REQUEST.lock().take()
 }
 
@@ -449,7 +449,7 @@ fn take_scale_request() -> bool {
 /// screen is not in it already.
 fn apply_saved_mode(d: &mut Display) {
     let Some((w, h)) = settings::get().resolution else { return };
-    let mode = arcdk::DisplayMode { width: w, height: h };
+    let mode = justdk::DisplayMode { width: w, height: h };
     if crate::dev::display::controller().is_some() && d.mode() != mode {
         if let Err(e) = d.set_mode(mode) {
             crate::warn!("gui", "{w}x{h}: {e}");

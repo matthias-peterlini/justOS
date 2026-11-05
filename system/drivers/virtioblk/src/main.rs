@@ -10,11 +10,11 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
-use arcdrv::{BlockDesc, DeviceInfo, Dma, Mutex, Status, BLOCK_READONLY, E_INVAL, E_IO, E_NODEV, E_NOMEM, E_TIMEOUT, OK};
-use arcvirtio::{Queue, Virtio, DESC_NEXT, DESC_WRITE};
+use justdrv::{BlockDesc, DeviceInfo, Dma, Mutex, Status, BLOCK_READONLY, E_INVAL, E_IO, E_NODEV, E_NOMEM, E_TIMEOUT, OK};
+use justvirtio::{Queue, Virtio, DESC_NEXT, DESC_WRITE};
 use core::ffi::c_void;
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "virtioblk",
     version: "1.1.0",
     probe: probe,
@@ -92,7 +92,7 @@ impl Device {
         q.publish(0);
         vio.notify(&self.queue);
         let mut done = false;
-        if !arcdrv::wait_until(5000, || {
+        if !justdrv::wait_until(5000, || {
             done = self.queue.take_used().is_some();
             done
         }) {
@@ -172,12 +172,12 @@ fn probe(dev: &DeviceInfo) -> Status {
         return E_NODEV;
     }
     let Some(vio) = Virtio::open(dev) else {
-        arcdrv::warn!("no usable virtio registers");
+        justdrv::warn!("no usable virtio registers");
         return E_IO;
     };
     let Some(accepted) = vio.negotiate(F_RO | F_FLUSH) else { return E_IO };
     let Some(queue) = vio.queue(0, 16) else {
-        vio.set_status(arcvirtio::STATUS_FAILED);
+        vio.set_status(justvirtio::STATUS_FAILED);
         return E_IO;
     };
     let (Some(req), Some(bounce)) = (Dma::new(64), Dma::new(MAX_SECTORS as usize * 512)) else {
@@ -198,12 +198,12 @@ fn probe(dev: &DeviceInfo) -> Status {
         read,
         write,
         flush: Some(flush),
-        model: arcdrv::model_name("virtio disk"),
+        model: justdrv::model_name("virtio disk"),
     }));
-    let n = arcdrv::block_register(dev.id, desc);
+    let n = justdrv::block_register(dev.id, desc);
     if n < 0 {
         return n;
     }
-    arcdrv::power_hooks(dev.id, disk as *const Disk as *mut c_void, Some(suspend), resume);
+    justdrv::power_hooks(dev.id, disk as *const Disk as *mut c_void, Some(suspend), resume);
     OK
 }

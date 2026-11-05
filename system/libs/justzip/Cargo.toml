@@ -1,0 +1,10 @@
+[package]
+name = "justzip"
+description = "Archives for JustOS: DEFLATE, gzip, zlib, tar and zip readers (no_std)"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true

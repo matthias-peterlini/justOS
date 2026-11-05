@@ -1,5 +1,5 @@
 fn main() {
-    // arcOS programs are self-contained position-independent images.
+    // JustOS programs are self-contained position-independent images.
     println!("cargo:rustc-link-arg-bins=-e");
     println!("cargo:rustc-link-arg-bins=_start");
     println!("cargo:rustc-link-arg-bins=--strip-all");

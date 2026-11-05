@@ -5,9 +5,9 @@ use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
-use arcdex::android::{view, ViewKind};
-use arcdex::{Ref, Throw, Vm};
-use arcui::{Event, Font, Fonts, Key, Rect, Window};
+use justdex::android::{view, ViewKind};
+use justdex::{Ref, Throw, Vm};
+use justui::{Event, Font, Fonts, Key, Rect, Window};
 
 const BG: u32 = 0xFFFA_FAFA;
 const PRIMARY: u32 = 0xFF62_00EE;
@@ -274,7 +274,7 @@ impl Screen {
             Err(Throw::Exit(code)) => Some(code),
             Err(Throw::Ex(ex)) => {
                 let s = vm.describe(&ex);
-                arcrt::eprintln!("dalvik: {s}");
+                justrt::eprintln!("dalvik: {s}");
                 self.error = Some(s);
                 vm.ui.dirty = true;
                 None
@@ -310,7 +310,7 @@ pub fn run(vm: &mut Vm, class: &str, name: &str) -> i32 {
     let win = match Window::resizable(name, 400, 680) {
         Ok(w) => w,
         Err(e) => {
-            arcrt::eprintln!("dalvik: no window: {}", e.as_str());
+            justrt::eprintln!("dalvik: no window: {}", e.as_str());
             return 1;
         }
     };
@@ -326,7 +326,7 @@ pub fn run(vm: &mut Vm, class: &str, name: &str) -> i32 {
         if vm.ui.finished {
             break;
         }
-        let now = arcrt::time::uptime_ms();
+        let now = justrt::time::uptime_ms();
         if let Some((t, ms)) = vm.ui.toasts.pop() {
             vm.ui.toasts.clear();
             s.toast = Some((t, now + ms));

@@ -5,7 +5,7 @@
 use crate::win;
 use alloc::format;
 use alloc::string::{String, ToString};
-use arcrt::sys;
+use justrt::sys;
 
 fn u16_at(b: &[u8], o: usize) -> Result<u16, String> {
     b.get(o..o + 2).map(|s| u16::from_le_bytes(s.try_into().unwrap())).ok_or_else(|| "truncated".to_string())

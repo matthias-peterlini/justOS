@@ -5,7 +5,7 @@ use super::keymap::{self, Layout};
 use crate::sync::IrqLock;
 use crate::task::WaitQueue;
 use alloc::collections::VecDeque;
-use arcdk::{INPUT_BUTTON, INPUT_KEY, INPUT_REL, KEY_RELEASED};
+use justdk::{INPUT_BUTTON, INPUT_KEY, INPUT_REL, KEY_RELEASED};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Key {
@@ -133,7 +133,7 @@ fn key(usage: u32, value: i32) {
             0xE2 => s.alt = pressed,
             0xE6 => s.altgr = pressed,
             0xE3 | 0xE7 => s.logo = pressed,
-            0x39 if value == arcdk::KEY_PRESSED => s.caps = !s.caps,
+            0x39 if value == justdk::KEY_PRESSED => s.caps = !s.caps,
             _ => {}
         }
         if !pressed || (0xE0..=0xE7).contains(&usage) {
@@ -192,23 +192,23 @@ pub fn driver_event(_device: u32, kind: u32, code: u32, value: i32) {
             let mut s = STATE.lock();
             s.pointer_seen = true;
             match code {
-                arcdk::AXIS_X => s.pointer.x = s.pointer.x.saturating_add(value),
-                arcdk::AXIS_Y => s.pointer.y = s.pointer.y.saturating_add(value),
-                arcdk::AXIS_WHEEL => s.pointer.wheel = s.pointer.wheel.saturating_add(value),
+                justdk::AXIS_X => s.pointer.x = s.pointer.x.saturating_add(value),
+                justdk::AXIS_Y => s.pointer.y = s.pointer.y.saturating_add(value),
+                justdk::AXIS_WHEEL => s.pointer.wheel = s.pointer.wheel.saturating_add(value),
                 _ => {}
             }
         }
-        arcdk::INPUT_ABS => {
+        justdk::INPUT_ABS => {
             // Absolute positions are scaled to the screen.
-            let full = arcdk::ABS_MAX as i64 + 1;
+            let full = justdk::ABS_MAX as i64 + 1;
             let (w, h) = crate::console::pixel_size().map(|(w, h)| (w as i64, h as i64)).unwrap_or((full, full));
-            let v = value.clamp(0, arcdk::ABS_MAX) as i64;
+            let v = value.clamp(0, justdk::ABS_MAX) as i64;
             let mut s = STATE.lock();
             s.pointer_seen = true;
             s.pointer.absolute = true;
             match code {
-                arcdk::AXIS_X => s.pointer.x = (v * w / full) as i32,
-                arcdk::AXIS_Y => s.pointer.y = (v * h / full) as i32,
+                justdk::AXIS_X => s.pointer.x = (v * w / full) as i32,
+                justdk::AXIS_Y => s.pointer.y = (v * h / full) as i32,
                 _ => {}
             }
         }

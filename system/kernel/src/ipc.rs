@@ -3,7 +3,7 @@
 //!
 //! A port is a queue of messages owned by one process, which alone receives
 //! from it. Others reach it through a handle: from `PORT_LOOKUP` for a named
-//! port (`arc.notify`), or handed to them with a message (the reply port of
+//! port (`just.notify`), or handed to them with a message (the reply port of
 //! a call). The kernel stamps every message with the sender's process id,
 //! so a service knows who asks; programs cannot forge it.
 //!
@@ -21,7 +21,7 @@ use crate::task::WaitQueue;
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::string::String;
 use alloc::vec::Vec;
-use arcdk::syscall::{self as sys, Error};
+use justdk::syscall::{self as sys, Error};
 
 /// A queued message.
 pub struct Message {
@@ -52,7 +52,7 @@ static CHANGED: WaitQueue = WaitQueue::new();
 /// How long a wait sleeps before looking whether its program was stopped.
 const SLICE_MS: u64 = 50;
 
-/// Names are lowercase words joined by dots: `arc.notify`, `org.example.chat`.
+/// Names are lowercase words joined by dots: `just.notify`, `org.example.chat`.
 fn valid_name(name: &str) -> bool {
     !name.is_empty() && name.len() <= 64 && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'-' | b'_'))
 }
@@ -200,15 +200,15 @@ pub fn list() -> Vec<(String, u32, usize)> {
 
 /// Starts the kernel's own services.
 pub fn start_services() {
-    if crate::task::spawn("arc.notify", notify_service).is_none() {
-        crate::warn!("ipc", "could not start arc.notify");
+    if crate::task::spawn("just.notify", notify_service).is_none() {
+        crate::warn!("ipc", "could not start just.notify");
     }
-    if crate::task::spawn("arc.permissions", permissions_service).is_none() {
-        crate::warn!("ipc", "could not start arc.permissions");
+    if crate::task::spawn("just.permissions", permissions_service).is_none() {
+        crate::warn!("ipc", "could not start just.permissions");
     }
 }
 
-/// `arc.permissions`, the sandbox's table ([`crate::sandbox`]):
+/// `just.permissions`, the sandbox's table ([`crate::sandbox`]):
 ///
 /// - `{"request": "camera"}`: may the sending app use it? Asks the user
 ///   the first time. `{"granted": true}`; programs without a sandbox may
@@ -221,11 +221,11 @@ pub fn start_services() {
 /// true | false | null}` and `{"forget": id}`.
 fn permissions_service() {
     use crate::sandbox;
-    use arcjson::Value;
-    let port = match create(0, Some("arc.permissions")) {
+    use justjson::Value;
+    let port = match create(0, Some("just.permissions")) {
         Ok(p) => p,
         Err(e) => {
-            crate::warn!("ipc", "arc.permissions: {}", e.as_str());
+            crate::warn!("ipc", "just.permissions: {}", e.as_str());
             return;
         }
     };
@@ -233,7 +233,7 @@ fn permissions_service() {
     loop {
         let Ok(m) = recv(port, 0, None, &|| false) else { continue };
         let app = crate::user::app_of(m.sender);
-        let v = arcjson::parse_bytes(&m.data).unwrap_or(Value::Null);
+        let v = justjson::parse_bytes(&m.data).unwrap_or(Value::Null);
         let answer = if let Some(perm) = v.get("request").as_str().or(v.get("check").as_str()) {
             if !sandbox::known(perm) {
                 error("permesso sconosciuto")
@@ -279,20 +279,20 @@ fn permissions_service() {
     }
 }
 
-/// `arc.notify`: `{"title": "…", "text": "…"}` shows a notification on the
+/// `just.notify`: `{"title": "…", "text": "…"}` shows a notification on the
 /// desktop, under the sending program's name if there is no title. Answers
 /// `{"ok":true}`, or `{"ok":false,"error":"…"}`.
 fn notify_service() {
-    let port = match create(0, Some("arc.notify")) {
+    let port = match create(0, Some("just.notify")) {
         Ok(p) => p,
         Err(e) => {
-            crate::warn!("ipc", "arc.notify: {}", e.as_str());
+            crate::warn!("ipc", "just.notify: {}", e.as_str());
             return;
         }
     };
     loop {
         let Ok(m) = recv(port, 0, None, &|| false) else { continue };
-        let answer = match arcjson::parse_bytes(&m.data) {
+        let answer = match justjson::parse_bytes(&m.data) {
             Some(v) if v.get("text").as_str().is_some() => {
                 let from = crate::user::app_of(m.sender).map(|a| a.name).or_else(|| crate::user::process_name(m.sender)).unwrap_or_default();
                 let title = v.get("title").as_str().filter(|t| !t.is_empty()).unwrap_or(&from);

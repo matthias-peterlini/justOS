@@ -1,5 +1,5 @@
 #!/bin/sh
-# Runs ArcScript on arcOS: the examples in sys:/home/arcscript, the notes
+# Runs ArcScript on JustOS: the examples in sys:/home/arcscript, the notes
 # program, a project built into a .arc package, and the test programs of
 # scripts/arcscript (copied into the image first), checking their output.
 #
@@ -9,14 +9,14 @@
 set -u
 IMAGE=${1:?usage: test-arcscript.sh <image>}
 HERE=$(dirname "$0")
-ARCTOOL=${ARCTOOL:-$HERE/../tools/target/release/arctool}
+JUSTTOOL=${JUSTTOOL:-$HERE/../tools/target/release/justtool}
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
-cp --sparse=always "$IMAGE" "$WORK/arcos.img" || exit 2
-"$ARCTOOL" fs "$WORK/arcos.img" mkdir /home/tests >/dev/null || exit 2
+cp --sparse=always "$IMAGE" "$WORK/justos.img" || exit 2
+"$JUSTTOOL" fs "$WORK/justos.img" mkdir /home/tests >/dev/null || exit 2
 for f in "$HERE"/arcscript/*.as; do
-    "$ARCTOOL" fs "$WORK/arcos.img" put "$f" "/home/tests/$(basename "$f")" >/dev/null || exit 2
+    "$JUSTTOOL" fs "$WORK/justos.img" put "$f" "/home/tests/$(basename "$f")" >/dev/null || exit 2
 done
 
 cat > "$WORK/session.txt" <<'EOT'
@@ -57,7 +57,7 @@ done: Buy milk
 [x]   1  Buy milk #home
 summary: {"available": 1, "lent": 1, "lent (long)": 1, "lost": 1}
 Finished library/build/release/library.arc
-compiler   arcc 0.5.0 (arcOS)
+compiler   arcc 0.5.0 (JustOS)
 == Todo — 1 open ==
 [x] Design ArcVM
 Created project `demo`
@@ -71,7 +71,7 @@ true true
 Ok(nil) false Ok(nil)
 a.tar.gz sys:/home ram:/y
 Hello from user mode!
-arcos ["one", "two words"] true 0
+justos ["one", "two words"] true 0
 arcc ended with code 3
 runtime error: index 5 out of bounds (length 2)
     at inner (line 3)
@@ -85,7 +85,7 @@ GetGlobal
 nothing.as: not found
 EOT
 
-STEP_WAIT=${STEP_WAIT:-2} "$HERE/test.sh" "$WORK/arcos.img" "$WORK/session.txt" > "$WORK/out.txt" 2>&1
+STEP_WAIT=${STEP_WAIT:-2} "$HERE/test.sh" "$WORK/justos.img" "$WORK/session.txt" > "$WORK/out.txt" 2>&1
 STATUS=$?
 FAILED=0
 while IFS= read -r pattern; do

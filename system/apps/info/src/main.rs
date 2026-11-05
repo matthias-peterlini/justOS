@@ -6,10 +6,10 @@
 extern crate alloc;
 
 use alloc::string::String;
-use arcrt::console::color::*;
-use arcrt::println;
+use justrt::console::color::*;
+use justrt::println;
 
-arcrt::main!(main);
+justrt::main!(main);
 
 fn size(bytes: u64) -> String {
     if bytes >= 1 << 30 {
@@ -30,11 +30,11 @@ fn bar(used: u64, total: u64, width: usize) -> String {
 }
 
 fn main(_: &str) -> i32 {
-    let i = arcrt::process::sysinfo();
+    let i = justrt::process::sysinfo();
     let used = i.memory_total - i.memory_free;
     let up = i.uptime_ms / 1000;
     println!();
-    println!("  {WHITE}arc{ACCENT}OS{RESET}   {DIM}system overview{RESET}");
+    println!("  {WHITE}JustOS{ACCENT}█{RESET}   {DIM}system overview{RESET}");
     println!();
     println!("  memory    {}  {} of {}", bar(used, i.memory_total, 30), size(used), size(i.memory_total));
     println!("  devices   {}  {} of {} with a driver", bar(i.devices_with_driver, i.devices, 30), i.devices_with_driver, i.devices);
@@ -42,8 +42,8 @@ fn main(_: &str) -> i32 {
     println!("  programs  {} running, {} threads", i.programs, i.threads);
     println!("  uptime    {}h {:02}m {:02}s", up / 3600, up / 60 % 60, up % 60);
     println!();
-    let (cols, rows) = arcrt::console::size();
-    println!("  {DIM}console {cols}x{rows} · folder {}{RESET}", arcrt::fs::current_dir());
+    let (cols, rows) = justrt::console::size();
+    println!("  {DIM}console {cols}x{rows} · folder {}{RESET}", justrt::fs::current_dir());
     println!();
     0
 }

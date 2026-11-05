@@ -1,6 +1,6 @@
-# Programmi per arcOS
+# Programmi per JustOS
 
-Un programma arcOS è un file `.app`: un eseguibile ELF64 che gira in
+Un programma JustOS è un file `.app`: un eseguibile ELF64 che gira in
 modalità utente (ring 3), nel suo spazio di indirizzi. Parla con il kernel
 solo attraverso le chiamate di sistema (`int 0x80`). Il kernel lo carica a
 `0x400000`, gli dà uno stack sotto `0x7FFF_FFF0_0000` e la memoria che
@@ -28,7 +28,7 @@ sorgenti `.as` e i pacchetti `.arc` attraverso `arcc`, e cerca anche
 questi in `sys:/apps` (`notes` è `sys:/apps/notes.as`). Vedi
 [arcscript.md](arcscript.md).
 
-Oltre ai programmi nativi, arcOS avvia anche **programmi Linux e Windows**
+Oltre ai programmi nativi, JustOS avvia anche **programmi Linux e Windows**
 per x86-64: un eseguibile ELF collegato staticamente è un programma Linux, un
 `.exe` è un programma Windows (avviato da `winrun`). Il comando `install` copia
 programmi liberi già pronti dal negozio `sys:/store` (per esempio BusyBox e
@@ -44,7 +44,7 @@ la copia nel volume di sistema come `sys:/apps/<nome>.app`.
 ```toml
 [package]
 name = "saluto"
-description = "arcOS program: saluto"
+description = "JustOS program: saluto"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true
@@ -57,7 +57,7 @@ test = false
 bench = false
 
 [dependencies]
-arcrt.workspace = true
+justrt.workspace = true
 
 [lints]
 workspace = true
@@ -83,10 +83,10 @@ fn main() {
 
 extern crate alloc;
 
-use arcrt::console::color::*;
-use arcrt::println;
+use justrt::console::color::*;
+use justrt::println;
 
-arcrt::main!(main);
+justrt::main!(main);
 
 /// `args` è il resto della riga di comando. Il valore restituito è il
 /// codice d'uscita.
@@ -98,7 +98,7 @@ fn main(args: &str) -> i32 {
     // File: percorsi con il volume ("sys:/home/...") o relativi alla
     // cartella corrente.
     let testo = alloc::format!("salutato {nome}\n");
-    if let Err(e) = arcrt::fs::write("sys:/home/saluti.txt", testo.as_bytes()) {
+    if let Err(e) = justrt::fs::write("sys:/home/saluti.txt", testo.as_bytes()) {
         println!("non riesco a scrivere: {e:?}");
         return 1;
     }
@@ -106,10 +106,10 @@ fn main(args: &str) -> i32 {
 }
 ```
 
-`arcrt` contiene anche l'allocatore (si possono usare `Vec`, `String`,
+`justrt` contiene anche l'allocatore (si possono usare `Vec`, `String`,
 `Box`) e il gestore dei panic.
 
-### La libreria `arcrt`
+### La libreria `justrt`
 
 | Modulo | Contenuto |
 |---|---|
@@ -124,7 +124,7 @@ fn main(args: &str) -> i32 {
 ### Le chiamate di sistema
 
 Numero in `rax`, argomenti in `rdi`, `rsi`, `rdx`, `r10`, `r8`; il
-risultato torna in `rax` (negativo = errore, vedi `arcdk::syscall::Error`).
+risultato torna in `rax` (negativo = errore, vedi `justdk::syscall::Error`).
 File e cartelle aperti sono **handle** numerici, non descrittori Unix.
 
 | N. | Nome | Cosa fa |
@@ -178,10 +178,10 @@ Due errori riguardano la sandbox: `Denied` (permesso negato) e `Cancelled`
 ## Messaggi tra programmi
 
 Un programma offre un servizio creando una porta con un nome; gli altri la
-trovano e le scrivono. `arcrt::ipc` lo nasconde:
+trovano e le scrivono. `justrt::ipc` lo nasconde:
 
 ```rust
-use arcrt::ipc::Port;
+use justrt::ipc::Port;
 
 // il servizio
 let porta = Port::create("org.esempio.eco")?;
@@ -196,7 +196,7 @@ let risposta = eco.call(b"ciao")?;      // b"CIAO"
 ```
 
 Il kernel dice a chi riceve il pid di chi ha scritto (`m.sender`), che un
-programma non può falsificare. Il sistema offre `arc.notify`: un messaggio
+programma non può falsificare. Il sistema offre `just.notify`: un messaggio
 `{"title": "…", "text": "…"}` mostra una notifica sulla scrivania. Dalla
 shell: `ipc notify Titolo testo`, `ipc call <porta> <testo>`, `ports`.
 
@@ -207,7 +207,7 @@ Un'app nella sandbox può creare solo porte con il proprio nome
 
 Un programma installato in `sys:/apps` con un `<nome>.info` di tipo `native`
 (come quelli del Negozio) è un'**app**: ha un `app_id`, dalla chiave
-`app_id=org.esempio.saluto` del `.info` o, se manca, `org.arcos.<nome>`. I
+`app_id=org.esempio.saluto` del `.info` o, se manca, `dev.justos.<nome>`. I
 pacchetti `.arc` lo prendono dal manifest. Gli strumenti di sistema
 (`sys:/apps/*.app` senza `.info`) non sono nella sandbox. I processi avviati
 da un'app restano nella sua sandbox.
@@ -215,7 +215,7 @@ da un'app restano nella sua sandbox.
 Un'app può:
 
 - leggere e scrivere nella propria cartella `sys:/home/.apps/<app_id>`, che è
-  anche la cartella di partenza (`arcrt::app::data_file("record")`);
+  anche la cartella di partenza (`justrt::app::data_file("record")`);
 - leggere le app, i caratteri, i certificati, i suoni e le icone di sistema;
 - usare le cartelle della home (`files:Immagini`, `files:Documenti`…) o un
   altro disco (`files:ram:`) dopo che l'utente ha detto sì: la prima volta
@@ -224,20 +224,20 @@ Un'app può:
   permessi:
 
 ```rust
-match arcrt::app::pick_save("Disegno.qoi") {
-    Ok(percorso) => arcrt::fs::write(&percorso, &dati)?,
+match justrt::app::pick_save("Disegno.qoi") {
+    Ok(percorso) => justrt::fs::write(&percorso, &dati)?,
     Err(Error::Cancelled) => {}            // l'utente ha annullato
     Err(e) => return Err(e),
 }
 ```
 
 Il resto restituisce `Denied`. Fotocamera, microfono, posizione e rete si
-chiedono al servizio `arc.permissions`: `arcrt::app::request("camera")`
+chiedono al servizio `just.permissions`: `justrt::app::request("camera")`
 restituisce `Ok(true)` se l'utente consente, `permission("camera")` dice la
 risposta già data senza chiedere. Le risposte stanno in
 `sys:/system/permissions.json`; si cambiano in *Impostazioni → Sistema →
 Privacy delle app* o con `perms` nel terminale (`perms allow
-org.arcos.disegno files:Immagini`, `perms forget <app>`). Per provare un
+dev.justos.disegno files:Immagini`, `perms forget <app>`). Per provare un
 programma nella sandbox: `sandbox run <app_id> <programma>`.
 
 I programmi Linux e Windows non sono (ancora) nella sandbox.
@@ -247,12 +247,12 @@ I programmi Linux e Windows non sono (ancora) nella sandbox.
 Un programma può aprire una o più finestre sulla scrivania, che si comportano
 come quelle delle app di sistema: titolo, pulsanti, dock, Alt+Tab, animazioni.
 Il programma disegna il contenuto nella propria memoria, con la stessa
-libreria di disegno del sistema (`arcgfx`: forme, testo nei caratteri di
+libreria di disegno del sistema (`justgfx`: forme, testo nei caratteri di
 sistema, immagini QOI), e lo consegna fotogramma per fotogramma; il kernel lo
 compone sopra il vetro smerigliato della finestra. Le parti lasciate
 trasparenti mostrano il vetro.
 
-La libreria `arcui` fa tutto questo:
+La libreria `justui` fa tutto questo:
 
 ```rust
 #![no_std]
@@ -260,9 +260,9 @@ La libreria `arcui` fa tutto questo:
 
 extern crate alloc;
 
-use arcui::{ui, Event, Font, Key, Rect, Window};
+use justui::{ui, Event, Font, Key, Rect, Window};
 
-arcrt::main!(main);
+justrt::main!(main);
 
 fn main(_args: &str) -> i32 {
     let Ok(mut win) = Window::new("Contatore", 320, 200) else { return 1 };
@@ -283,12 +283,12 @@ fn main(_args: &str) -> i32 {
 }
 ```
 
-| `arcui` | |
+| `justui` | |
 |---|---|
 | `Window::new`, `Window::resizable` | apre una finestra con l'area del contenuto di quella misura |
 | `Window::with_flags(…, RESIZABLE \| DROPS)` | con le opzioni scelte; `DROPS`: accetta i file trascinati |
 | `win.dropped()` | i percorsi dell'ultimo `Event::Drop` |
-| `win.canvas` | dove si disegna (`arcgfx::Canvas`: `fill`, `fill_round`, `line`, `arc`, `triangle`, `draw_image`, `blit`…) |
+| `win.canvas` | dove si disegna (`justgfx::Canvas`: `fill`, `fill_round`, `line`, `arc`, `triangle`, `draw_image`, `blit`…) |
 | `win.text`, `win.text_centered`, `win.fonts` | testo nei caratteri di sistema |
 | `win.present()` | mostra il fotogramma |
 | `win.wait()`, `win.event(ms)` | il prossimo evento, con o senza limite di tempo |
@@ -315,7 +315,7 @@ sandbox può leggere quei file (non scriverli: per salvare usa
 `pick_save`). Le cartelle non arrivano. Disegno apre così le immagini:
 
 ```rust
-let mut win = Window::with_flags("Disegno", 640, 480, arcui::DROPS)?;
+let mut win = Window::with_flags("Disegno", 640, 480, justui::DROPS)?;
 // ...
 Event::Drop { .. } => {
     if let Some(p) = win.dropped().into_iter().find(|p| p.ends_with(".qoi")) {
@@ -334,7 +334,7 @@ chiedere: il Negozio li mostra nella sua pagina.
 
 ### Aggiornamenti delle app
 
-Il servizio `arc.updates` (`kernel/src/appupdate.rs`) controlla una volta al
+Il servizio `just.updates` (`kernel/src/appupdate.rs`) controlla una volta al
 giorno un indice firmato con Ed25519, scarica in background le versioni
 nuove delle app installate e le mette al posto delle vecchie appena sono
 chiuse. Se un aggiornamento chiede permessi nuovi, aspetta che l'utente lo
@@ -349,16 +349,16 @@ make updates                    # build/updates: index.json, la firma, le app
 scripts/publish-updates.sh      # le mette sul ramo updates del repository
 ```
 
-La chiave privata sta fuori dal repository (`~/.arcos-keys/updates.key`,
+La chiave privata sta fuori dal repository (`~/.justos-keys/updates.key`,
 32 byte in esadecimale; `UPDATES_KEY=` per un'altra) e la pubblica è in
-`appupdate.rs` (`arctool pubkey <chiave>` la stampa). Ogni indice ha un
-numero di serie che cresce: arcOS rifiuta un indice firmato male o più
+`appupdate.rs` (`justtool pubkey <chiave>` la stampa). Ogni indice ha un
+numero di serie che cresce: JustOS rifiuta un indice firmato male o più
 vecchio dell'ultimo visto.
 
 ### Copiare un programma su un'immagine esistente
 
 ```sh
 cd system && cargo build --release -p saluto && cd ..
-tools/target/release/arctool fs build/arcos.img put \
+tools/target/release/justtool fs build/justos.img put \
     system/target/x86_64-unknown-none/release/saluto /apps/saluto.app
 ```

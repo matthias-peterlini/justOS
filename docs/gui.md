@@ -1,10 +1,10 @@
 # L'interfaccia grafica
 
-Quando il loader trova uno schermo grafico di almeno 800x600, arcOS si avvia
+Quando il loader trova uno schermo grafico di almeno 800x600, JustOS si avvia
 in modalità grafica. Sullo schermo non compare mai testo tecnico: il kernel
 scrive i suoi messaggi solo sulla porta seriale e nel giornale di sistema, e
 le righe di comando si vedono soltanto aprendo il Terminale. Anche un errore
-fatale mostra una schermata semplice («arcOS si è dovuto fermare»), con i
+fatale mostra una schermata semplice («JustOS si è dovuto fermare»), con i
 dettagli solo sulla porta seriale.
 
 ## Avvio
@@ -26,7 +26,7 @@ conserva nulla, quindi mostra la configurazione ogni volta.
 
 Presa a modello da macOS:
 
-- **Barra in alto**: il logo (menu con *Info su arcOS*, *Impostazioni di
+- **Barra in alto**: il logo (menu con *Info su JustOS*, *Impostazioni di
   sistema*, *Negozio*, *Monitor attività*, *Schermata*, *Blocca schermo*,
   *Sospendi* quando il computer può, *Riavvia*, *Spegni*), il nome
   dell'app in primo piano, ora e data al centro, il **centro di controllo**
@@ -88,18 +88,18 @@ Presa a modello da macOS:
   che Foto apre subito.
 - **Blocco**: **logo+L** o *Blocca schermo* nel menu del logo coprono tutto
   con l'ora sullo sfondo sfocato. Con una password (*Impostazioni →
-  Password*) arcOS si avvia bloccato, si blocca da solo dopo 2, 5 o 15
+  Password*) JustOS si avvia bloccato, si blocca da solo dopo 2, 5 o 15
   minuti senza usarlo e prima di ogni sospensione, così al risveglio chiede
   la password; senza password basta Invio. La password non è salvata
   in chiaro: nelle impostazioni c'è un sale casuale e 20 000 passaggi di
   SHA-256.
-- **Aggiornamenti**: con la rete, all'avvio e una volta al giorno arcOS
+- **Aggiornamenti**: con la rete, all'avvio e una volta al giorno JustOS
   legge l'indice firmato degli aggiornamenti. Una versione nuova si
   scarica e si scrive nell'altro slot di sistema; con gli aggiornamenti
   automatici succede da sola, poi una notifica chiede di riavviare. In
   *Info sistema* il pulsante passa da *Cerca aggiornamenti* a *Installa*,
   *Scarico…*, *Installo…* e *Riavvia*. Accanto ci sono *Annulla* e *Torna a
-  <versione precedente>*. Se la versione nuova non parte, arcOS torna da
+  <versione precedente>*. Se la versione nuova non parte, JustOS torna da
   solo alla precedente e lo dice. Una release su GitHub che l'indice non ha
   ancora è solo annunciata.
 
@@ -148,7 +148,7 @@ si ridisegna a ogni fotogramma.
 | Impostazioni | nome, tastiera, sfondo, risoluzione dello schermo, volume e suono all'avvio, configurazione iniziale |
 | Monitor attività | i programmi in esecuzione, il processore e la memoria nell'ultimo minuto; un programma si può terminare |
 | Info sistema | panoramica, dispositivi con i loro driver, dischi con lo spazio libero |
-| Terminale | la shell di arcOS: l'unico posto dove si vedono le righe di comando |
+| Terminale | la shell di JustOS: l'unico posto dove si vedono le righe di comando |
 
 L'account ticly per ora vive solo su questo computer: «Crea un account»
 (nome, e-mail, password) lo salva in `sys:/system/ticly/accounts.json`, con
@@ -158,17 +158,17 @@ usa la rete.
 
 ### Il motore web
 
-Le pagine del ticly browser le disegna `arcweb` (`system/libs/arcweb`),
+Le pagine del ticly browser le disegna `justweb` (`system/libs/justweb`),
 scritto da zero come il resto: tokenizer e albero HTML con le regole di
 chiusura implicita, CSS con selettori, media query, `@import`, `@supports`,
 annidamento, variabili, `calc()`/`min()`/`max()`/`clamp()`; layout a blocchi
 e in linea, float, flexbox, grid, tabelle, liste, campi dei moduli; immagini
 PNG, JPEG (anche progressive) e GIF.
 
-JavaScript lo esegue `arcjs` (`system/libs/arcjs`), un interprete ad albero
+JavaScript lo esegue `justjs` (`system/libs/justjs`), un interprete ad albero
 scritto da zero in Rust `no_std`: ES2020 circa (classi, closure,
 destrutturazione, spread, template, generatori, `async`/`await`, Promise,
-Map/Set, espressioni regolari, JSON, Date, Intl essenziale). `arcweb`
+Map/Set, espressioni regolari, JSON, Date, Intl essenziale). `justweb`
 (`script.rs`) gli dà la pagina: `document` e i nodi (alberi, selettori,
 `innerHTML`, `classList`, `style`, `dataset`), eventi con cattura e
 propagazione, timer, `location`/`history`, `localStorage`, `fetch` e
@@ -187,7 +187,7 @@ Flex in varie misure, normale e grassetto, e DejaVu Sans Mono) sono in
 
 ```sh
 cd system && cargo run --release --target x86_64-unknown-linux-gnu \
-    -p arcweb --example render -- pagina.html 1024 pagina.ppm
+    -p justweb --example render -- pagina.html 1024 pagina.ppm
 ```
 
 ## Il Negozio e le app installabili
@@ -216,7 +216,7 @@ Terminale: `install`, `install <nome>`, `uninstall <nome>`.
 
 Con un driver video (`bochsvga`, `vmsvga`, `virtiogpu`: le schede delle
 macchine virtuali) *Impostazioni → Schermo* elenca le risoluzioni comuni
-che lo schermo offre; un clic la cambia subito, e arcOS la riprende a ogni
+che lo schermo offre; un clic la cambia subito, e JustOS la riprende a ogni
 avvio. Senza driver resta la risoluzione scelta dal firmware. Dal
 Terminale: `display` elenca, `display 1920x1080` cambia.
 
@@ -238,12 +238,12 @@ controllo e dalle Impostazioni, e Musica e Orologio suonano. Dal Terminale:
 ## Com'è fatta
 
 L'interfaccia è nel kernel, in `system/kernel/src/gui`; il disegno è una
-libreria condivisa con i programmi, `system/libs/arcgfx`. Niente librerie
+libreria condivisa con i programmi, `system/libs/justgfx`. Niente librerie
 esterne.
 
 | File | Contenuto |
 |---|---|
-| `arcgfx` (`gfx.rs`, `font.rs`, `qoi.rs`) | superfici e disegno: rettangoli arrotondati antialiasati, trasparenze (anche su livelli trasparenti), sfumature, ombre, sfocatura, linee, archi, ridimensionamento; il testo dall'atlante dei glifi; le immagini QOI (lettura e scrittura). Solo aritmetica intera |
+| `justgfx` (`gfx.rs`, `font.rs`, `qoi.rs`) | superfici e disegno: rettangoli arrotondati antialiasati, trasparenze (anche su livelli trasparenti), sfumature, ombre, sfocatura, linee, archi, ridimensionamento; il testo dall'atlante dei glifi; le immagini QOI (lettura e scrittura). Solo aritmetica intera |
 | `text.rs`, `res.rs` | i caratteri e le icone di sistema, gli sfondi |
 | `splash.rs`, `setup.rs`, `desktop.rs` | avvio, configurazione guidata, scrivania con dock, Applicazioni, notifiche, centro di controllo e animazioni |
 | `wm.rs` | le finestre e l'interfaccia `App` delle app |
@@ -269,7 +269,7 @@ shell solo quando il Terminale è in primo piano.
 ## Le risorse
 
 Caratteri, icone, sfondi e suoni sono generati in fase di sviluppo da script
-Python (`tools/assets/`) e salvati nel repository; per ricostruire arcOS non
+Python (`tools/assets/`) e salvati nel repository; per ricostruire JustOS non
 servono.
 
 - `gen_fonts.py` → `system/kernel/assets/fonts.bin`: Inter e DejaVu Sans
@@ -278,10 +278,13 @@ servono.
   caratteri al doppio della misura (`fonts@2x.bin.gz`, per gli schermi ad
   alta densità; i programmi lo trovano in `sys:/system/fonts@2x.bin`).
 - `gen_icons.py` → `rootfs/system/gui/icons.qoi`: oltre 70 icone, disegnate
-  da zero nello stile arc (squircle con sfumatura e simbolo); con `--store`
+  da zero nello stile JustOS (squircle con sfumatura e simbolo); con `--store`
   le icone delle app del Negozio.
-- `gen_wallpapers.py` → `rootfs/system/gui/wallpapers/`: tre sfondi
-  (Dolomiti, Alba, Notte) dipinti con rumore e sfumature.
+- `gen_pixel.py` → `rootfs/system/gui/wallpapers/pixel.qoi`: lo sfondo
+  predefinito, le Dolomiti al tramonto in grandi pixel con il retino
+  ordinato (Bayer) nei colori caldi di JustOS; basta Pillow.
+- `gen_wallpapers.py` → `rootfs/system/gui/wallpapers/`: due sfondi
+  (Tramonto, Notte) dipinti con rumore e sfumature.
 - `gen_sounds.py` → `rootfs/system/sounds/avvio.wav`, il suono d'avvio, e i
   tre brani di `rootfs/home/Musica`, composti e sintetizzati dallo script.
 
@@ -289,7 +292,7 @@ servono.
 
 ## Provarla
 
-`make run` apre arcOS in una finestra di QEMU. `make shots` avvia arcOS senza
+`make run` apre JustOS in una finestra di QEMU. `make shots` avvia JustOS senza
 schermo, lo guida con mouse e tastiera (`scripts/gui-shots.py`, attraverso
 QMP) lungo `scripts/gui/tour.txt` (configurazione, ogni app, il Negozio che
 installa e avvia un gioco) e salva le schermate in `build/shots/`; con

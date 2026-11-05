@@ -16,7 +16,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use arcjson::Value;
+use justjson::Value;
 
 const SIDEBAR: i32 = 286;
 const DIR: &str = "sys:/home/.ticly/ai";
@@ -69,7 +69,7 @@ fn load_chats() -> Vec<Chat> {
         .filter_map(|(e, _)| {
             let id = e.name.strip_suffix(".json")?.to_string();
             let b = fs::read_file(&dir.join(&e.name)).ok()?;
-            let j = arcjson::parse_bytes(&b)?;
+            let j = justjson::parse_bytes(&b)?;
             Some(Chat {
                 id,
                 title: j.get("title").str().to_string(),
@@ -265,7 +265,7 @@ impl TiclyAi {
         chat.time = crate::time::now();
         chat.model = self.model.id.clone();
         let mut history: Vec<(String, String)> = chat.messages[..chat.messages.len() - 1].to_vec();
-        history.insert(0, (String::from("system"), String::from("Sei ticly AI, l'assistente dell'ecosistema ticly, dentro arcOS. Rispondi in italiano, in modo chiaro.")));
+        history.insert(0, (String::from("system"), String::from("Sei ticly AI, l'assistente dell'ecosistema ticly, dentro JustOS. Rispondi in italiano, in modo chiaro.")));
         // Keep the request under the gateway's 8000 characters.
         while history.len() > 2 && Value::Arr(history.iter().map(|(r, t)| Value::object(alloc::vec![("role", Value::string(r)), ("content", Value::string(t))])).collect()).to_string().len() > 7000 {
             history.remove(1);

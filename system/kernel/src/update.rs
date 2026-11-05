@@ -1,6 +1,6 @@
 //! System updates: what is new, and getting it.
 //!
-//! The signed index of [`crate::appupdate`] may offer a newer arcOS as a
+//! The signed index of [`crate::appupdate`] may offer a newer JustOS as a
 //! system image: it downloads (checked against the index), goes into the
 //! slot that is not running ([`crate::sysupdate`]) and starts at the next
 //! restart. With automatic updates that happens by itself, else Info
@@ -15,8 +15,8 @@ use crate::sync::IrqLock;
 use alloc::format;
 use alloc::string::String;
 
-/// Where arcOS is released.
-pub const REPO: &str = "matthias-peterlini/ArcOs";
+/// Where JustOS is released.
+pub const REPO: &str = "matthias-peterlini/justos";
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum State {
@@ -100,7 +100,7 @@ pub fn check_now(announce: bool) -> State {
         Err(e) => State::Failed(indexed.err().unwrap_or(e)),
     };
     if let (true, State::Released(v)) = (announce, &result) {
-        notify("Aggiornamento disponibile", &format!("È uscito arcOS {v}: lo trovi nelle release su GitHub."));
+        notify("Aggiornamento disponibile", &format!("È uscito JustOS {v}: lo trovi nelle release su GitHub."));
     }
     set(result);
     state()
@@ -120,7 +120,7 @@ pub fn check(announce: bool) {
     }
 }
 
-/// The index offers a newer arcOS: with automatic updates it installs, else
+/// The index offers a newer JustOS: with automatic updates it installs, else
 /// it waits for the user (announced if `announce`).
 pub fn offered(o: SystemOffer, announce: bool) {
     let v = o.version.clone();
@@ -133,7 +133,7 @@ pub fn offered(o: SystemOffer, announce: bool) {
     set(State::Available(v.clone()));
     if !crate::sysupdate::supported() {
         if announce {
-            notify("Aggiornamento disponibile", &format!("È uscito arcOS {v}: questo computer non è partito da un disco con gli slot, va installato a mano."));
+            notify("Aggiornamento disponibile", &format!("È uscito JustOS {v}: questo computer non è partito da un disco con gli slot, va installato a mano."));
         }
         return;
     }
@@ -141,11 +141,11 @@ pub fn offered(o: SystemOffer, announce: bool) {
     if crate::appupdate::auto() && !crate::sysupdate::on_trial() {
         let _ = install();
     } else if announce {
-        notify("Aggiornamento disponibile", &format!("arcOS {v} è pronto da installare: trovalo in Info sistema."));
+        notify("Aggiornamento disponibile", &format!("JustOS {v} è pronto da installare: trovalo in Info sistema."));
     }
 }
 
-/// Downloads the offered arcOS and writes it into the other slot (in this
+/// Downloads the offered JustOS and writes it into the other slot (in this
 /// thread). Returns its version.
 pub fn install() -> Result<String, String> {
     let o = OFFER.lock().clone().ok_or_else(|| String::from("nessun aggiornamento di sistema"))?;
@@ -168,11 +168,11 @@ pub fn install() -> Result<String, String> {
     match result {
         Ok(version) => {
             set(State::Staged(version.clone()));
-            notify(&format!("arcOS {version} è pronto"), "Parte al prossimo riavvio: riavvia quando vuoi.");
+            notify(&format!("JustOS {version} è pronto"), "Parte al prossimo riavvio: riavvia quando vuoi.");
             Ok(version)
         }
         Err(e) => {
-            crate::warn!("update", "arcOS {v}: {e}");
+            crate::warn!("update", "JustOS {v}: {e}");
             set(State::Failed(e.clone()));
             notify("Aggiornamento di sistema non riuscito", &e);
             Err(e)

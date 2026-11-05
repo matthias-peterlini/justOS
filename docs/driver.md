@@ -1,6 +1,6 @@
-# I driver di arcOS
+# I driver di JustOS
 
-In arcOS un driver è un **pacchetto**: un file `.adp` che contiene un
+In JustOS un driver è un **pacchetto**: un file `.adp` che contiene un
 manifesto di testo e il modulo compilato. Il kernel legge i manifesti, li
 confronta con l'hardware e carica da solo il driver giusto. Installarne uno
 vuol dire solo mettere il pacchetto dove il kernel lo trova.
@@ -72,7 +72,7 @@ Dal computer di sviluppo si può mettere un pacchetto nell'inbox di
 un'immagine senza avviarla:
 
 ```sh
-tools/target/release/arctool fs build/arcos.img put mio.adp /inbox/
+tools/target/release/justtool fs build/justos.img put mio.adp /inbox/
 ```
 
 ## Il manifesto
@@ -87,7 +87,7 @@ name        = e1000                 # obbligatorio: nome unico del driver
 version     = 1.0.0                 # obbligatorio: major.minor.patch
 class       = network               # storage, input, network, display, other
 description = Intel PRO/1000 Ethernet
-author      = arcOS
+author      = JustOS
 boot        = no                    # yes: va nel pacchetto di avvio
 match       = pci 8086:100e         # vendor:device (esadecimale)
 match       = pci 8086:10d3
@@ -104,12 +104,12 @@ Le regole `match` possibili:
 | `platform <id>` | `platform ps2-mouse` | un dispositivo di piattaforma |
 
 Un manifesto senza regole è valido, ma il driver non verrà mai scelto
-automaticamente (`arctool pack` lo segnala).
+automaticamente (`justtool pack` lo segnala).
 
 ## Scrivere un driver
 
 Un driver è un crate Rust `no_std` nella cartella `system/drivers/<nome>/`,
-che usa la libreria `arcdrv`. Il `Makefile` trova da solo ogni cartella
+che usa la libreria `justdrv`. Il `Makefile` trova da solo ogni cartella
 lì dentro, la compila, ne fa un pacchetto e lo mette nel magazzino
 dell'immagine (e nel pacchetto di avvio se il manifesto dice `boot = yes`).
 
@@ -126,7 +126,7 @@ system/drivers/esempio/
 ```toml
 [package]
 name = "esempio"
-description = "arcOS driver: esempio"
+description = "JustOS driver: esempio"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true
@@ -139,19 +139,19 @@ test = false
 bench = false
 
 [dependencies]
-arcdrv.workspace = true
+justdrv.workspace = true
 
 [lints]
 workspace = true
 ```
 
 `build.rs` (uguale per tutti i driver: un'immagine indipendente dalla
-posizione, con il punto d'ingresso `arc_driver_entry`):
+posizione, con il punto d'ingresso `just_driver_entry`):
 
 ```rust
 fn main() {
     println!("cargo:rustc-link-arg-bins=-e");
-    println!("cargo:rustc-link-arg-bins=arc_driver_entry");
+    println!("cargo:rustc-link-arg-bins=just_driver_entry");
     println!("cargo:rustc-link-arg-bins=--strip-all");
     println!("cargo:rustc-link-arg-bins=-z");
     println!("cargo:rustc-link-arg-bins=max-page-size=4096");
@@ -164,10 +164,10 @@ fn main() {
 #![no_std]
 #![no_main]
 
-use arcdrv::{DeviceInfo, IrqLock, Mmio, Pci, Status, E_NODEV, OK};
+use justdrv::{DeviceInfo, IrqLock, Mmio, Pci, Status, E_NODEV, OK};
 use core::ffi::c_void;
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "esempio",
     version: "1.0.0",
     probe: probe,
@@ -186,11 +186,11 @@ fn probe(dev: &DeviceInfo) -> Status {
     Pci(dev.id).enable(false, true, true); // memoria e bus master
     let version = regs.read32(0);
     *REGS.lock() = Some(regs);
-    let status = arcdrv::irq_attach(dev.id, dev.irq, irq, core::ptr::null_mut());
+    let status = justdrv::irq_attach(dev.id, dev.irq, irq, core::ptr::null_mut());
     if status != OK {
         return status;
     }
-    arcdrv::info!("versione {version:#x}, IRQ {}", dev.irq);
+    justdrv::info!("versione {version:#x}, IRQ {}", dev.irq);
     OK
 }
 
@@ -201,7 +201,7 @@ unsafe extern "C" fn irq(_ctx: *mut c_void) {
 }
 
 fn remove(device: u32) {
-    arcdrv::irq_detach(device, 0);
+    justdrv::irq_detach(device, 0);
     REGS.lock().take();
 }
 ```
@@ -212,10 +212,10 @@ I driver in `system/drivers/` sono esempi completi, dal più semplice,
 ### Cosa offre il kernel
 
 Un modulo non vede il kernel: riceve solo una tabella di funzioni
-(`KernelApi`, in `system/libs/arcdk/src/abi.rs`), che `arcdrv` avvolge in
+(`KernelApi`, in `system/libs/justdk/src/abi.rs`), che `justdrv` avvolge in
 funzioni sicure:
 
-| Servizio | In `arcdrv` |
+| Servizio | In `justdrv` |
 |---|---|
 | giornale | `info!`, `warn!`, `error!`, `debug!` (il prefisso col nome del driver è automatico) |
 | memoria | allocatore globale: `alloc::vec::Vec`, `Box`, `String` funzionano |
@@ -245,7 +245,7 @@ video della versione 0.4 chiedono un kernel 0.4).
 Il kernel converte ogni suono al formato dell'uscita (frequenza, canali) e
 applica il volume da sé: un driver audio dichiara un solo formato e lascia
 il guadagno dell'hardware fisso. Un driver video descrive il framebuffer
-di ogni modo; se il dispositivo non legge da solo la memoria che arcOS
+di ogni modo; se il dispositivo non legge da solo la memoria che JustOS
 disegna (virtio-gpu, VMware SVGA), fornisce anche `flush`, che il kernel
 chiama per ogni rettangolo cambiato.
 
@@ -272,7 +272,7 @@ dispositivi no: al risveglio ogni registro è tornato al valore di reset.
 Un driver dice come il suo dispositivo si ferma e riparte, in `probe`:
 
 ```rust
-arcdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
+justdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
 
 unsafe extern "C" fn suspend(ctx: *mut c_void) -> Status { /* ... */ OK }
 unsafe extern "C" fn resume(ctx: *mut c_void) -> Status { /* ... */ OK }
@@ -321,10 +321,10 @@ macchina prima di ogni prova; `make test-display` ha i casi `*-sleep`,
 I driver USB sono di due tipi.
 
 **Driver di controller** (`xhci`, `ehci`, `uhci`, `ohci`): parlano con il
-controller e implementano il trait `arcusb::Host`. Il trait chiede le
+controller e implementano il trait `justusb::Host`. Il trait chiede le
 operazioni proprie del controller: stato, reset e indirizzo delle porte,
 trasferimenti di controllo, bulk e interrupt, e la configurazione degli
-endpoint. Il resto lo fa la libreria `arcusb`, uguale per tutti:
+endpoint. Il resto lo fa la libreria `justusb`, uguale per tutti:
 
 - controlla le porte ogni 250 ms e a ogni cambiamento segnalato dal
   controller;
@@ -347,17 +347,17 @@ puntatore a `UsbInterface`, che contiene:
   `clear_halt`.
 
 Non sanno su quale controller si trovano. Le funzioni per leggere i
-descrittori sono in `arcdrv::usb`.
+descrittori sono in `justdrv::usb`.
 
 Per la sospensione un driver di controller dichiara `const SLEEPS: bool =
 true` e implementa `Host::stop` (il controller si ferma) e `Host::restart`
-(reset e avvio come all'inizio, senza dispositivi). `arcusb` fa il resto:
+(reset e avvio come all'inizio, senza dispositivi). `justusb` fa il resto:
 prima della sospensione toglie tutti i dispositivi collegati, al risveglio
 li trova di nuovo e li enumera, e i driver di classe ripartono con `probe`.
 
 ## Driver virtio
 
-`arcvirtio` è la parte comune ai driver virtio (`virtioblk`, `virtionet`).
+`justvirtio` è la parte comune ai driver virtio (`virtioblk`, `virtionet`).
 Trova l'interfaccia moderna (virtio 1.0, con le capability PCI) o quella
 legacy (porte I/O), negozia le funzioni e prepara le code. Offre anche le
 interruzioni MSI-X o la linea classica. Un driver virtio nuovo deve solo
@@ -379,7 +379,7 @@ collegamento a caldo. Gli altri id elencati nei manifesti sono
 chip della stessa famiglia che usano la stessa interfaccia.
 
 "Provato su modello" vuol dire provato su un modello del chip scritto per
-arcOS, perché QEMU non lo emula: il sorgente è in `tools/qemu/` e
+JustOS, perché QEMU non lo emula: il sorgente è in `tools/qemu/` e
 `scripts/build-qemu.sh` costruisce un QEMU che lo contiene. Il modello è
 severo: segnala (con `-d guest_errors`, righe che iniziano con il nome del
 chip) ciò che il chip vero rifiuterebbe o ignorerebbe, e `make
@@ -441,12 +441,12 @@ Con `make` i pacchetti si creano da soli in `build/drivers/`. A mano:
 
 ```sh
 cd system && cargo build --release -p esempio
-tools/target/release/arctool pack system/drivers/esempio/driver.manifest \
+tools/target/release/justtool pack system/drivers/esempio/driver.manifest \
     system/target/x86_64-unknown-none/release/esempio esempio.adp
-tools/target/release/arctool inspect esempio.adp
+tools/target/release/justtool inspect esempio.adp
 ```
 
-`arctool pack` controlla il manifesto e che il modulo sia un'immagine
+`justtool pack` controlla il manifesto e che il modulo sia un'immagine
 caricabile: ELF64, indipendente dalla posizione, con le sole rilocazioni
 relative e il punto d'ingresso giusto.
 

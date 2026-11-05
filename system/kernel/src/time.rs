@@ -1,6 +1,6 @@
 //! Time: the 1 kHz system tick and the battery-backed real-time clock.
 //!
-//! Wall-clock time is kept as seconds since 2000-01-01 00:00 (the "Arc
+//! Wall-clock time is kept as seconds since 2000-01-01 00:00 (the "JustOS
 //! epoch"), read from the CMOS clock at boot and advanced by the tick.
 
 use crate::arch::cpu::{inb, outb};
@@ -95,7 +95,7 @@ fn write_cmos(reg: u8, v: u8) {
     outb(0x71, v);
 }
 
-/// The CMOS clock, in seconds since the Arc epoch.
+/// The CMOS clock, in seconds since the JustOS epoch.
 fn read_rtc() -> u64 {
     // Read twice until stable: the clock may tick between register reads.
     let mut v = read_rtc_raw();

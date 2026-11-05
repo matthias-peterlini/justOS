@@ -13,10 +13,10 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use arcrt::Error;
-use arcui::{qoi, ui, Canvas, Event, Font, Key, Rect, Window};
+use justrt::Error;
+use justui::{qoi, ui, Canvas, Event, Font, Key, Rect, Window};
 
-arcrt::main!(main);
+justrt::main!(main);
 
 const PICTURES: &str = "sys:/home/Immagini";
 
@@ -180,7 +180,7 @@ impl App {
             }
             Tool::Circle => {
                 let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-                let rad = arcui::gfx::isqrt((dx * dx + dy * dy) as u32) as i32;
+                let rad = justui::gfx::isqrt((dx * dx + dy * dy) as u32) as i32;
                 self.paper.arc(a.0, a.1, rad, w.max(1), 1000, ink);
             }
             _ => {}
@@ -227,13 +227,13 @@ impl App {
     /// A new name in Immagini; None if Disegno may not use the folder (the
     /// system asks the user the first time).
     fn next_in_pictures() -> Option<String> {
-        if arcrt::fs::make_dir(PICTURES) == Err(Error::Denied) {
+        if justrt::fs::make_dir(PICTURES) == Err(Error::Denied) {
             return None;
         }
         let mut n = 1;
         loop {
             let p = format!("{PICTURES}/Disegno {n}.qoi");
-            match arcrt::fs::File::open(&p) {
+            match justrt::fs::File::open(&p) {
                 Ok(_) => n += 1,
                 Err(Error::Denied) => return None,
                 Err(_) => return Some(p),
@@ -251,13 +251,13 @@ impl App {
         };
         let path = match path {
             Some(p) => p,
-            None => match arcrt::app::pick_save("Disegno.qoi") {
+            None => match justrt::app::pick_save("Disegno.qoi") {
                 Ok(p) => p,
                 Err(_) => return,
             },
         };
         let data = qoi::encode(&self.paper);
-        self.note = match arcrt::fs::write(&path, &data) {
+        self.note = match justrt::fs::write(&path, &data) {
             Ok(()) => {
                 let name = String::from(path.rsplit('/').next().unwrap_or(&path));
                 let place = if path.starts_with(PICTURES) { " in Immagini" } else { "" };
@@ -266,12 +266,12 @@ impl App {
             }
             Err(e) => format!("Non salvato: {}", e.as_str()),
         };
-        self.note_until = arcui::now_ms() + 3000;
+        self.note_until = justui::now_ms() + 3000;
     }
 
     /// Opens a picture the user chooses in the system's file picker.
     fn open(&mut self) {
-        let Ok(path) = arcrt::app::pick_open() else { return };
+        let Ok(path) = justrt::app::pick_open() else { return };
         self.load(path, true);
     }
 
@@ -279,7 +279,7 @@ impl App {
     /// so saving goes back to it; a dropped one may only be read, so saving
     /// makes a new picture.
     fn load(&mut self, path: String, own: bool) {
-        match arcrt::fs::read(&path).ok().and_then(|d| qoi::decode(&d)) {
+        match justrt::fs::read(&path).ok().and_then(|d| qoi::decode(&d)) {
             Some(img) => {
                 self.remember();
                 self.paper.px.fill(0xFFFF_FFFF);
@@ -288,13 +288,13 @@ impl App {
                 if !own {
                     let name = path.rsplit('/').next().unwrap_or(&path);
                     self.note = format!("Aperto «{name}»");
-                    self.note_until = arcui::now_ms() + 3000;
+                    self.note_until = justui::now_ms() + 3000;
                 }
                 self.saved_as = own.then_some(path);
             }
             None => {
                 self.note = String::from("Non è un'immagine QOI");
-                self.note_until = arcui::now_ms() + 3000;
+                self.note_until = justui::now_ms() + 3000;
             }
         }
     }
@@ -335,7 +335,7 @@ impl App {
             c.fill_round(tip, 8, 0xE61E_1626);
             f.draw(c, Font::Small, tip.x + 8, tip.y + 3, label, ui::TEXT);
         }
-        if !self.note.is_empty() && arcui::now_ms() < self.note_until {
+        if !self.note.is_empty() && justui::now_ms() < self.note_until {
             let w = f.width(Font::Body, &self.note) + 32;
             let r = Rect::new(p.x + (p.w - w) / 2, p.bottom() - 52, w, 36);
             c.fill_round(r, 18, 0xE61E_1626);
@@ -350,7 +350,7 @@ impl App {
 }
 
 fn main(_args: &str) -> i32 {
-    let Ok(mut win) = Window::with_flags("Disegno", W, H, arcui::DROPS) else { return 1 };
+    let Ok(mut win) = Window::with_flags("Disegno", W, H, justui::DROPS) else { return 1 };
     let mut app = App::new();
     let mut dirty = true;
     loop {
@@ -358,8 +358,8 @@ fn main(_args: &str) -> i32 {
             app.draw(&mut win);
             win.present();
         }
-        let waiting_note = !app.note.is_empty() && arcui::now_ms() < app.note_until;
-        let ev = if waiting_note { win.event(app.note_until - arcui::now_ms()) } else { Some(win.wait()) };
+        let waiting_note = !app.note.is_empty() && justui::now_ms() < app.note_until;
+        let ev = if waiting_note { win.event(app.note_until - justui::now_ms()) } else { Some(win.wait()) };
         dirty = true;
         let Some(ev) = ev else {
             app.note.clear();
@@ -446,7 +446,7 @@ fn main(_args: &str) -> i32 {
                 Some(path) => app.load(path, false),
                 None => {
                     app.note = String::from("Disegno apre le immagini QOI");
-                    app.note_until = arcui::now_ms() + 3000;
+                    app.note_until = justui::now_ms() + 3000;
                 }
             },
             _ => dirty = false,

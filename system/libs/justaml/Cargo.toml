@@ -1,0 +1,10 @@
+[package]
+name = "justaml"
+description = "An interpreter of ACPI Machine Language (AML) for JustOS (no_std)"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true

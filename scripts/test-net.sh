@@ -1,9 +1,9 @@
 #!/bin/sh
-# Checks TCP, HTTP and HTTPS. Servers run on this machine; arcOS reaches
+# Checks TCP, HTTP and HTTPS. Servers run on this machine; JustOS reaches
 # them at 10.0.2.2 through QEMU's user network:
 #
 #   - an HTTP server with a 3 MiB file (TCP windows, many segments), checked
-#     with sha256 on arcOS
+#     with sha256 on JustOS
 #   - an HTTPS server speaking TLS 1.3 and one limited to TLS 1.2, with a
 #     test authority that is added to the image (sys:/system/certs)
 #   - a server whose certificate names another host (must be refused)
@@ -16,17 +16,17 @@
 set -u
 IMAGE=$(realpath "${1:?usage: test-net.sh <image>}")
 HERE=$(cd "$(dirname "$0")" && pwd)
-ARCTOOL=${ARCTOOL:-$HERE/../tools/target/release/arctool}
+JUSTTOOL=${JUSTTOOL:-$HERE/../tools/target/release/justtool}
 WORK=$(mktemp -d)
 PIDS=
 cleanup() { for p in $PIDS; do kill "$p" 2>/dev/null; done; rm -rf "$WORK"; }
 trap cleanup EXIT
-cp --sparse=always "$IMAGE" "$WORK/arcos.img" || exit 2
+cp --sparse=always "$IMAGE" "$WORK/justos.img" || exit 2
 cd "$WORK"
 
 # A test authority and a certificate for 10.0.2.2.
 openssl ecparam -name prime256v1 -genkey -noout -out ca.key 2>/dev/null
-openssl req -x509 -new -key ca.key -days 30 -subj "/CN=arcOS Test CA" -addext "basicConstraints=critical,CA:TRUE" -out ca.pem 2>/dev/null
+openssl req -x509 -new -key ca.key -days 30 -subj "/CN=JustOS Test CA" -addext "basicConstraints=critical,CA:TRUE" -out ca.pem 2>/dev/null
 openssl x509 -in ca.pem -outform der -out ca.der
 openssl ecparam -name prime256v1 -genkey -noout -out srv.key 2>/dev/null
 openssl req -new -key srv.key -subj "/CN=10.0.2.2" -out srv.csr 2>/dev/null
@@ -49,13 +49,13 @@ openssl s_server -accept "$P_TLS12" -www -quiet -tls1_2 -cert srv.pem -key srv.k
 openssl s_server -accept "$P_BAD" -www -quiet -cert other.pem -key srv.key >/dev/null 2>&1 & PIDS="$PIDS $!"
 sleep 1
 
-"$ARCTOOL" fs arcos.img mkdir /system/certs >/dev/null 2>&1
-"$ARCTOOL" fs arcos.img put ca.der /system/certs/test-ca.der >/dev/null || exit 2
+"$JUSTTOOL" fs justos.img mkdir /system/certs >/dev/null 2>&1
+"$JUSTTOOL" fs justos.img put ca.der /system/certs/test-ca.der >/dev/null || exit 2
 
 WEB=0
 PROXY=$(echo "${HTTPS_PROXY:-}" | sed -E 's#^https?://##; s#.*@##; s#/$##')
 if [ -n "$PROXY" ] && [ -f /root/.ccr/ca-bundle.crt ]; then
-    # The proxy listens on this machine; arcOS reaches it at 10.0.2.2.
+    # The proxy listens on this machine; JustOS reaches it at 10.0.2.2.
     PPORT=${PROXY##*:}
     echo "10.0.2.2:$PPORT" > proxy
     # The bundle may hold several authorities: each becomes a file.
@@ -90,17 +90,17 @@ fi
     echo 'connection refused'
 } > expect.txt
 
-STEP_WAIT=${STEP_WAIT:-2} "$HERE/test.sh" arcos.img session.txt > out.txt 2>&1
+STEP_WAIT=${STEP_WAIT:-2} "$HERE/test.sh" justos.img session.txt > out.txt 2>&1
 STATUS=$?
 
 if [ $WEB = 1 ]; then
     cp --sparse=always "$IMAGE" web.img
-    "$ARCTOOL" fs web.img mkdir /system/certs >/dev/null 2>&1
-    for f in proxy-ca-*.der; do "$ARCTOOL" fs web.img put "$f" "/system/certs/$f" >/dev/null; done
-    "$ARCTOOL" fs web.img put proxy /system/proxy >/dev/null
-    printf '@sleep 2\nfetch https://api.github.com/repos/matthias-peterlini/ArcOs\n@sleep 6\nshutdown\n' > web.txt
+    "$JUSTTOOL" fs web.img mkdir /system/certs >/dev/null 2>&1
+    for f in proxy-ca-*.der; do "$JUSTTOOL" fs web.img put "$f" "/system/certs/$f" >/dev/null; done
+    "$JUSTTOOL" fs web.img put proxy /system/proxy >/dev/null
+    printf '@sleep 2\nfetch https://api.github.com/repos/matthias-peterlini/justos\n@sleep 6\nshutdown\n' > web.txt
     STEP_WAIT=2 "$HERE/test.sh" web.img web.txt >> out.txt 2>&1
-    echo '200 https://api.github.com/repos/matthias-peterlini/ArcOs' >> expect.txt
+    echo '200 https://api.github.com/repos/matthias-peterlini/justos' >> expect.txt
 fi
 
 FAILED=0

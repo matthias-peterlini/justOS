@@ -8,9 +8,9 @@ extern crate alloc;
 
 use alloc::format;
 use alloc::vec::Vec;
-use arcui::{ui, Event, Font, Key, Rect, Rng, Window};
+use justui::{ui, Event, Font, Key, Rect, Rng, Window};
 
-arcrt::main!(main);
+justrt::main!(main);
 
 const N: usize = 4;
 const CELL: i32 = 96;
@@ -22,7 +22,7 @@ const SLIDE_MS: u64 = 110;
 
 /// Where the best score is kept.
 fn best_file() -> alloc::string::String {
-    arcrt::app::data_file("best")
+    justrt::app::data_file("best")
 }
 
 /// A tile moving from one cell to another (for the animation).
@@ -92,7 +92,7 @@ impl Game {
         };
         g.spawn();
         g.spawn();
-        g.since = arcui::now_ms();
+        g.since = justui::now_ms();
         g
     }
 
@@ -164,10 +164,10 @@ impl Game {
             self.moves = moves;
             self.popped = popped;
             self.spawn();
-            self.since = arcui::now_ms();
+            self.since = justui::now_ms();
             if self.score > self.best {
                 self.best = self.score;
-                let _ = arcrt::fs::write(&best_file(), format!("{}", self.best).as_bytes());
+                let _ = justrt::fs::write(&best_file(), format!("{}", self.best).as_bytes());
             }
             self.over = !self.can_move();
         }
@@ -187,7 +187,7 @@ impl Game {
     }
 
     fn animating(&self) -> bool {
-        arcui::now_ms() - self.since < SLIDE_MS * 2 + 40
+        justui::now_ms() - self.since < SLIDE_MS * 2 + 40
     }
 
     fn draw(&self, win: &mut Window) {
@@ -209,7 +209,7 @@ impl Game {
                 win.canvas.fill_round(cell_rect(r, c), 8, 0x26FF_FFFF);
             }
         }
-        let el = arcui::now_ms() - self.since;
+        let el = justui::now_ms() - self.since;
         let sliding = el < SLIDE_MS && !self.moves.is_empty();
         if sliding {
             // Tiles on their way: drawn between the two cells.
@@ -270,7 +270,7 @@ impl Game {
 }
 
 fn main(_args: &str) -> i32 {
-    let best = arcrt::fs::read_to_string(&best_file()).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+    let best = justrt::fs::read_to_string(&best_file()).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
     let Ok(mut win) = Window::new("2048", W, H) else { return 1 };
     let mut game = Game::new(best);
     loop {

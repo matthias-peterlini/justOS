@@ -6,30 +6,14 @@ version = 4
 name = "ac97"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
+ "justdrv",
 ]
 
 [[package]]
 name = "ahci"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
-]
-
-[[package]]
-name = "arc-kernel"
-version = "0.6.0"
-dependencies = [
- "arc-vm",
- "arcaml",
- "arcc-core",
- "arcdk",
- "arcfs",
- "arcgfx",
- "arcjson",
- "arctls",
- "arcweb",
- "arczip",
+ "justdrv",
 ]
 
 [[package]]
@@ -40,16 +24,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "arcaml"
-version = "0.6.0"
-
-[[package]]
 name = "arcc"
 version = "0.5.0"
 dependencies = [
  "arc-vm",
  "arcc-core",
- "arcrt",
+ "justrt",
 ]
 
 [[package]]
@@ -57,361 +37,381 @@ name = "arcc-core"
 version = "0.5.0"
 
 [[package]]
-name = "arcdex"
-version = "1.0.0"
-dependencies = [
- "arcc-core",
- "arczip",
-]
-
-[[package]]
-name = "arcdk"
-version = "0.6.0"
-
-[[package]]
-name = "arcdrv"
-version = "0.6.0"
-dependencies = [
- "arcdk",
-]
-
-[[package]]
-name = "arcfs"
-version = "0.6.0"
-
-[[package]]
-name = "arcgfx"
-version = "0.6.0"
-
-[[package]]
-name = "arcjs"
-version = "0.6.0"
-dependencies = [
- "arcc-core",
-]
-
-[[package]]
-name = "arcjson"
-version = "0.6.0"
-
-[[package]]
-name = "arcrt"
-version = "0.6.0"
-dependencies = [
- "arcdk",
-]
-
-[[package]]
-name = "arctls"
-version = "0.6.0"
-
-[[package]]
-name = "arcui"
-version = "0.6.0"
-dependencies = [
- "arcdk",
- "arcgfx",
- "arcrt",
-]
-
-[[package]]
-name = "arcusb"
-version = "0.6.0"
-dependencies = [
- "arcdrv",
-]
-
-[[package]]
-name = "arcvirtio"
-version = "0.6.0"
-dependencies = [
- "arcdrv",
-]
-
-[[package]]
-name = "arcweb"
-version = "0.6.0"
-dependencies = [
- "arcgfx",
- "arcjs",
- "arczip",
-]
-
-[[package]]
-name = "arczip"
-version = "0.6.0"
-
-[[package]]
 name = "ata"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
+ "justdrv",
 ]
 
 [[package]]
 name = "bochsvga"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
+ "justdrv",
 ]
 
 [[package]]
 name = "calc"
 version = "1.0.0"
 dependencies = [
- "arcrt",
+ "justrt",
 ]
 
 [[package]]
 name = "campominato"
 version = "1.0.0"
 dependencies = [
- "arcrt",
- "arcui",
+ "justrt",
+ "justui",
 ]
 
 [[package]]
 name = "cirrus"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
+ "justdrv",
 ]
 
 [[package]]
 name = "dalvik"
 version = "1.0.0"
 dependencies = [
- "arcdex",
- "arcrt",
- "arcui",
+ "justdex",
+ "justrt",
+ "justui",
 ]
 
 [[package]]
 name = "disegno"
 version = "1.0.0"
 dependencies = [
- "arcrt",
- "arcui",
+ "justrt",
+ "justui",
 ]
 
 [[package]]
 name = "e1000"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
+ "justdrv",
 ]
 
 [[package]]
 name = "edit"
 version = "1.0.0"
 dependencies = [
- "arcrt",
+ "justrt",
 ]
 
 [[package]]
 name = "ehci"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
- "arcusb",
+ "justdrv",
+ "justusb",
 ]
 
 [[package]]
 name = "fbgeneric"
 version = "1.0.0"
 dependencies = [
- "arcdrv",
+ "justdrv",
 ]
 
 [[package]]
 name = "gioco2048"
 version = "1.0.0"
 dependencies = [
- "arcrt",
- "arcui",
+ "justrt",
+ "justui",
 ]
 
 [[package]]
 name = "hda"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
+ "justdrv",
 ]
 
 [[package]]
 name = "hello"
 version = "1.0.0"
 dependencies = [
- "arcrt",
+ "justrt",
 ]
 
 [[package]]
 name = "igb"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
+ "justdrv",
 ]
 
 [[package]]
 name = "info"
 version = "1.0.0"
 dependencies = [
- "arcrt",
+ "justrt",
 ]
 
 [[package]]
 name = "ipc"
 version = "1.0.0"
 dependencies = [
- "arcrt",
+ "justrt",
 ]
+
+[[package]]
+name = "just-kernel"
+version = "0.6.0"
+dependencies = [
+ "arc-vm",
+ "arcc-core",
+ "justaml",
+ "justdk",
+ "justfs",
+ "justgfx",
+ "justjson",
+ "justtls",
+ "justweb",
+ "justzip",
+]
+
+[[package]]
+name = "justaml"
+version = "0.6.0"
+
+[[package]]
+name = "justdex"
+version = "1.0.0"
+dependencies = [
+ "arcc-core",
+ "justzip",
+]
+
+[[package]]
+name = "justdk"
+version = "0.6.0"
+
+[[package]]
+name = "justdrv"
+version = "0.6.0"
+dependencies = [
+ "justdk",
+]
+
+[[package]]
+name = "justfs"
+version = "0.6.0"
+
+[[package]]
+name = "justgfx"
+version = "0.6.0"
+
+[[package]]
+name = "justjs"
+version = "0.6.0"
+dependencies = [
+ "arcc-core",
+]
+
+[[package]]
+name = "justjson"
+version = "0.6.0"
+
+[[package]]
+name = "justrt"
+version = "0.6.0"
+dependencies = [
+ "justdk",
+]
+
+[[package]]
+name = "justtls"
+version = "0.6.0"
+
+[[package]]
+name = "justui"
+version = "0.6.0"
+dependencies = [
+ "justdk",
+ "justgfx",
+ "justrt",
+]
+
+[[package]]
+name = "justusb"
+version = "0.6.0"
+dependencies = [
+ "justdrv",
+]
+
+[[package]]
+name = "justvirtio"
+version = "0.6.0"
+dependencies = [
+ "justdrv",
+]
+
+[[package]]
+name = "justweb"
+version = "0.6.0"
+dependencies = [
+ "justgfx",
+ "justjs",
+ "justzip",
+]
+
+[[package]]
+name = "justzip"
+version = "0.6.0"
 
 [[package]]
 name = "nvme"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
+ "justdrv",
 ]
 
 [[package]]
 name = "ohci"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
- "arcusb",
+ "justdrv",
+ "justusb",
 ]
 
 [[package]]
 name = "pcnet"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
+ "justdrv",
 ]
 
 [[package]]
 name = "ps2kbd"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
+ "justdrv",
 ]
 
 [[package]]
 name = "ps2mouse"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
+ "justdrv",
 ]
 
 [[package]]
 name = "rtl8139"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
+ "justdrv",
 ]
 
 [[package]]
 name = "rtl8169"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
+ "justdrv",
 ]
 
 [[package]]
 name = "sandbox"
 version = "1.0.0"
 dependencies = [
- "arcrt",
+ "justrt",
 ]
 
 [[package]]
 name = "sdhci"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
+ "justdrv",
 ]
 
 [[package]]
 name = "serpente"
 version = "1.0.0"
 dependencies = [
- "arcrt",
- "arcui",
+ "justrt",
+ "justui",
 ]
 
 [[package]]
 name = "snake"
 version = "1.0.0"
 dependencies = [
- "arcrt",
+ "justrt",
 ]
 
 [[package]]
 name = "sudoku"
 version = "1.0.0"
 dependencies = [
- "arcrt",
- "arcui",
+ "justrt",
+ "justui",
 ]
 
 [[package]]
 name = "tris"
 version = "1.0.0"
 dependencies = [
- "arcrt",
- "arcui",
+ "justrt",
+ "justui",
 ]
 
 [[package]]
 name = "uhci"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
- "arcusb",
+ "justdrv",
+ "justusb",
 ]
 
 [[package]]
 name = "usbhid"
 version = "1.0.0"
 dependencies = [
- "arcdrv",
+ "justdrv",
 ]
 
 [[package]]
 name = "usbstorage"
 version = "1.0.0"
 dependencies = [
- "arcdrv",
+ "justdrv",
 ]
 
 [[package]]
 name = "virtioblk"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
- "arcvirtio",
+ "justdrv",
+ "justvirtio",
 ]
 
 [[package]]
 name = "virtiogpu"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
- "arcvirtio",
+ "justdrv",
+ "justvirtio",
 ]
 
 [[package]]
 name = "virtionet"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
- "arcvirtio",
+ "justdrv",
+ "justvirtio",
 ]
 
 [[package]]
 name = "vmsvga"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
+ "justdrv",
 ]
 
 [[package]]
@@ -419,14 +419,14 @@ name = "winrun"
 version = "1.0.0"
 dependencies = [
  "arcc-core",
- "arcrt",
- "arcui",
+ "justrt",
+ "justui",
 ]
 
 [[package]]
 name = "xhci"
 version = "1.1.0"
 dependencies = [
- "arcdrv",
- "arcusb",
+ "justdrv",
+ "justusb",
 ]

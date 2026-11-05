@@ -3,6 +3,6 @@ name        = ohci
 version     = 1.1.0
 class       = usb
 description = USB host controller (OHCI)
-author      = arcOS
+author      = JustOS
 boot        = yes
 match       = pci-class 0c:03:10

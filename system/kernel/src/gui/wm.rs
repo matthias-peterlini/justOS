@@ -1,4 +1,4 @@
-//! Windows, as in the arc design: a frame of light frosted glass with the
+//! Windows, as in the JustOS design: a frame of light frosted glass with the
 //! app's name at the top left and three round dark buttons (minimise,
 //! maximise, close) on a pill at the top right; the content sits on a darker
 //! pane inside the frame. Their content is an [`App`].

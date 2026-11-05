@@ -1,4 +1,4 @@
-# Checks arcOS's own f64 functions (arcc-core/src/float.rs) against the
+# Checks JustOS's own f64 functions (arcc-core/src/float.rs) against the
 # values of the C library; prints how many agree.
 import math
 

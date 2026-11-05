@@ -11,11 +11,11 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
-use arcdrv::{port, DeviceInfo, Dma, IrqLock, NetDesc, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, OK};
+use justdrv::{port, DeviceInfo, Dma, IrqLock, NetDesc, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, OK};
 use core::ffi::c_void;
 use core::sync::atomic::{fence, AtomicBool, AtomicI32, Ordering};
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "pcnet",
     version: "1.1.0",
     probe: probe,
@@ -79,7 +79,7 @@ const TX_RING: usize = RX_RING + RX_COUNT * 16;
 fn reset(io: u16) {
     port::inl(io + RESET);
     port::inw(io + RESET16);
-    arcdrv::sleep_ms(2);
+    justdrv::sleep_ms(2);
 }
 
 impl Nic {
@@ -118,8 +118,8 @@ impl Nic {
         self.set_csr(3, 1 << 10);
         self.set_csr(4, self.csr(4) | (1 << 11));
         self.set_csr(0, CSR0_INIT);
-        if !arcdrv::wait_until(100, || self.csr(0) & CSR0_IDON != 0) {
-            arcdrv::warn!("the card does not take its settings");
+        if !justdrv::wait_until(100, || self.csr(0) & CSR0_IDON != 0) {
+            justdrv::warn!("the card does not take its settings");
             return E_IO;
         }
         self.set_csr(0, CSR0_IDON);
@@ -178,7 +178,7 @@ impl Nic {
             let len = (self.rings.read::<u32>(at + 8) & 0xFFF) as usize;
             let whole = flags & (STP | ENP) == STP | ENP;
             if flags & ERR == 0 && whole && (64..=MAX_FRAME).contains(&len) && iface >= 0 {
-                arcdrv::net_receive(iface as u32, &self.rx_bufs.as_slice()[i * BUF..i * BUF + len - 4]);
+                justdrv::net_receive(iface as u32, &self.rx_bufs.as_slice()[i * BUF..i * BUF + len - 4]);
             }
             self.give_rx(i);
             st.rx_next = (i + 1) % RX_COUNT;
@@ -192,7 +192,7 @@ impl Nic {
         if self.paused.load(Ordering::Acquire) {
             return E_IO;
         }
-        let start = arcdrv::time_ms();
+        let start = justdrv::time_ms();
         let mut st = loop {
             let st = self.state.lock();
             let at = TX_RING + st.tx_next * 16;
@@ -200,10 +200,10 @@ impl Nic {
                 break st;
             }
             drop(st);
-            if arcdrv::time_ms() - start > 100 {
+            if justdrv::time_ms() - start > 100 {
                 return E_IO;
             }
-            arcdrv::yield_now();
+            justdrv::yield_now();
         };
         let i = st.tx_next;
         let at = TX_RING + i * 16;
@@ -255,7 +255,7 @@ unsafe extern "C" fn poller(ctx: *mut c_void) {
     let nic = unsafe { &*(ctx as *const Nic) };
     loop {
         nic.receive();
-        arcdrv::sleep_ms(if nic.has_irq.load(Ordering::Relaxed) { 50 } else { 5 });
+        justdrv::sleep_ms(if nic.has_irq.load(Ordering::Relaxed) { 50 } else { 5 });
     }
 }
 
@@ -285,7 +285,7 @@ unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
 
 fn probe(dev: &DeviceInfo) -> Status {
     let Some(io) = dev.io(0) else { return E_NODEV };
-    arcdrv::Pci(dev.id).enable(true, false, true);
+    justdrv::Pci(dev.id).enable(true, false, true);
 
     reset(io);
     // The address PROM can be read byte by byte only in 16-bit mode.
@@ -316,18 +316,18 @@ fn probe(dev: &DeviceInfo) -> Status {
 
     let ctx = nic as *const Nic as *mut c_void;
     let desc: &'static NetDesc = Box::leak(Box::new(NetDesc { ctx, mac, _pad: [0; 2], mtu: 1500, send }));
-    let iface = arcdrv::net_register(dev.id, desc);
+    let iface = justdrv::net_register(dev.id, desc);
     if iface < 0 {
         nic.set_csr(0, CSR0_STOP);
         return iface;
     }
     nic.iface.store(iface, Ordering::Relaxed);
-    let has_irq = arcdrv::irq_attach_any(dev, irq, ctx);
+    let has_irq = justdrv::irq_attach_any(dev, irq, ctx);
     nic.has_irq.store(has_irq, Ordering::Relaxed);
     nic.start();
     // Interrupt routing can be wrong on some boards; poll as a safety net.
-    arcdrv::spawn("pcnet-rx", poller, ctx);
-    arcdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
-    arcdrv::info!("link {}, {}", if nic.link_up() { "up" } else { "down" }, if has_irq { "interrupts" } else { "polling" });
+    justdrv::spawn("pcnet-rx", poller, ctx);
+    justdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
+    justdrv::info!("link {}, {}", if nic.link_up() { "up" } else { "down" }, if has_irq { "interrupts" } else { "polling" });
     OK
 }

@@ -1,13 +1,13 @@
 //! Running Linux programs.
 //!
-//! arcOS loads statically linked Linux executables (built against musl or
+//! JustOS loads statically linked Linux executables (built against musl or
 //! glibc, or by the Go and Rust toolchains) and serves the Linux system
 //! calls they make. Programs arrive on the `syscall` instruction (see
 //! [`crate::arch::syscall`]) with the call number in `rax` and arguments in
 //! `rdi, rsi, rdx, r10, r8, r9`, as on Linux for x86-64.
 //!
 //! What is there: files and folders (the Linux file tree is a view of the
-//! process's arcOS volume), the console as a terminal ([`tty`]), memory with
+//! process's JustOS volume), the console as a terminal ([`tty`]), memory with
 //! demand paging ([`mm`]), threads and futexes ([`thread`]), pipes and
 //! eventfds ([`fd`]), TCP and UDP sockets ([`sock`]), poll, select and epoll
 //! ([`poll`]), clocks and randomness. What is not: new processes (fork,
@@ -30,9 +30,9 @@ use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use arcdk::syscall::Error as ArcError;
+use justdk::syscall::Error as JustError;
 
-/// Seconds between the Unix epoch (1970) and arcOS's epoch (2000).
+/// Seconds between the Unix epoch (1970) and JustOS's epoch (2000).
 pub const UNIX_2000: u64 = 946_684_800;
 
 // ----------------------------------------------------------------------------
@@ -77,28 +77,28 @@ pub mod err {
     pub const EINPROGRESS: i64 = 115;
 }
 
-pub fn errno(e: ArcError) -> i64 {
+pub fn errno(e: JustError) -> i64 {
     match e {
-        ArcError::NotFound => err::ENOENT,
-        ArcError::Exists => err::EEXIST,
-        ArcError::NotDir => err::ENOTDIR,
-        ArcError::IsDir => err::EISDIR,
-        ArcError::NotEmpty => err::ENOTEMPTY,
-        ArcError::NoSpace => err::ENOSPC,
-        ArcError::InvalidName => err::EINVAL,
-        ArcError::ReadOnly => err::EACCES,
-        ArcError::Io => err::EACCES,
-        ArcError::BadHandle => err::EBADF,
-        ArcError::BadAddress => err::EFAULT,
-        ArcError::NoMemory => err::ENOMEM,
-        ArcError::BadProgram => err::ENOENT,
-        ArcError::Unknown => err::EINVAL,
-        ArcError::Timeout => err::ETIMEDOUT,
-        ArcError::Closed => err::EPIPE,
-        ArcError::Full => err::EAGAIN,
-        ArcError::TooLarge => err::EINVAL,
-        ArcError::Denied => err::EACCES,
-        ArcError::Cancelled => err::EINTR,
+        JustError::NotFound => err::ENOENT,
+        JustError::Exists => err::EEXIST,
+        JustError::NotDir => err::ENOTDIR,
+        JustError::IsDir => err::EISDIR,
+        JustError::NotEmpty => err::ENOTEMPTY,
+        JustError::NoSpace => err::ENOSPC,
+        JustError::InvalidName => err::EINVAL,
+        JustError::ReadOnly => err::EACCES,
+        JustError::Io => err::EACCES,
+        JustError::BadHandle => err::EBADF,
+        JustError::BadAddress => err::EFAULT,
+        JustError::NoMemory => err::ENOMEM,
+        JustError::BadProgram => err::ENOENT,
+        JustError::Unknown => err::EINVAL,
+        JustError::Timeout => err::ETIMEDOUT,
+        JustError::Closed => err::EPIPE,
+        JustError::Full => err::EAGAIN,
+        JustError::TooLarge => err::EINVAL,
+        JustError::Denied => err::EACCES,
+        JustError::Cancelled => err::EINTR,
     }
 }
 
@@ -175,7 +175,7 @@ pub fn exe_path() -> String {
 }
 
 // ----------------------------------------------------------------------------
-// Paths: a Linux path names a place in the running process's arcOS volume.
+// Paths: a Linux path names a place in the running process's JustOS volume.
 
 pub fn linux_path(text: &str) -> Result<Path, i64> {
     let cwd = user::cwd().map_err(errno)?;
@@ -185,7 +185,7 @@ pub fn linux_path(text: &str) -> Result<Path, i64> {
     Path::parse(text, &base).map_err(|e| errno(user::fs_error(e)))
 }
 
-/// Turns an arcOS path back into the Linux path a program sees ("/a/b").
+/// Turns an JustOS path back into the Linux path a program sees ("/a/b").
 pub fn show_path(path: &Path) -> String {
     path.inner.clone()
 }
@@ -201,13 +201,13 @@ pub fn user_bytes<'a>(ptr: u64, len: u64) -> Result<&'a mut [u8], i64> {
 /// its entry point and the initial stack pointer. The stack holds argc, the
 /// argument and environment pointers and the auxiliary vector, as the System
 /// V ABI lays them out.
-pub fn load(elf: &[u8], name: &str, args: &str, exe: &str) -> Result<(u64, u64), ArcError> {
+pub fn load(elf: &[u8], name: &str, args: &str, exe: &str) -> Result<(u64, u64), JustError> {
     if needs_interpreter(elf) {
-        crate::println!("\x1b[91m{name}: this program needs Linux shared libraries; arcOS runs static programs only\x1b[0m");
-        return Err(ArcError::BadProgram);
+        crate::println!("\x1b[91m{name}: this program needs Linux shared libraries; JustOS runs static programs only\x1b[0m");
+        return Err(JustError::BadProgram);
     }
-    let info = map_segments(elf).map_err(|_| ArcError::BadProgram)?;
-    let argv = core::iter::once(name.to_string()).chain(arcrt_split(args)).collect::<Vec<_>>();
+    let info = map_segments(elf).map_err(|_| JustError::BadProgram)?;
+    let argv = core::iter::once(name.to_string()).chain(justrt_split(args)).collect::<Vec<_>>();
     // The Linux view of the program's path ("/apps/rg").
     let exe_linux = match exe.split_once(':') {
         Some((_, rest)) => rest.to_string(),
@@ -327,7 +327,7 @@ fn map_segments(elf: &[u8]) -> Result<Loaded, ()> {
 
 /// Maps pages for a range, skipping any page already present (segments can
 /// share a page at their boundary).
-fn map_maybe(addr: u64, len: u64) -> Result<(), ArcError> {
+fn map_maybe(addr: u64, len: u64) -> Result<(), JustError> {
     let mut page = addr;
     let end = addr + len;
     while page < end {
@@ -339,8 +339,8 @@ fn map_maybe(addr: u64, len: u64) -> Result<(), ArcError> {
     Ok(())
 }
 
-fn arcrt_split(args: &str) -> Vec<String> {
-    // The same splitting arcrt::split_args does, kept here to avoid a cycle.
+fn justrt_split(args: &str) -> Vec<String> {
+    // The same splitting justrt::split_args does, kept here to avoid a cycle.
     let mut out = Vec::new();
     let mut cur = String::new();
     let mut quote = None;
@@ -390,9 +390,9 @@ const AT_EXECFN: u64 = 31;
 
 /// Builds the initial stack: argc, argv, envp, the auxiliary vector and the
 /// strings they point at. Returns the stack pointer to start the program on.
-fn build_stack(info: &Loaded, argv: &[String], exe: &str) -> Result<u64, ArcError> {
+fn build_stack(info: &Loaded, argv: &[String], exe: &str) -> Result<u64, JustError> {
     const PAGES: u64 = 64;
-    let top = arcdk::syscall::USER_STACK_TOP;
+    let top = justdk::syscall::USER_STACK_TOP;
     let bottom = top - PAGES * PAGE_SIZE;
     user::map_fixed(bottom, PAGES * PAGE_SIZE)?;
     // The rest of an 8 MiB stack comes page by page as it is used.
@@ -677,8 +677,8 @@ const ARCH_GET_FS: u64 = 0x1003;
 
 fn sys_arch_prctl(code: u64, addr: u64) -> i64 {
     let which = match code {
-        ARCH_SET_FS => arcdk::syscall::TLS_FS,
-        ARCH_SET_GS => arcdk::syscall::TLS_GS,
+        ARCH_SET_FS => justdk::syscall::TLS_FS,
+        ARCH_SET_GS => justdk::syscall::TLS_GS,
         ARCH_GET_FS => {
             let fs = crate::arch::syscall::user_bases().0;
             return match user_bytes(addr, 8) {
@@ -913,7 +913,7 @@ fn sys_uname(buf: u64) -> i64 {
         Err(e) => return e,
     };
     out.fill(0);
-    let fields = ["Linux", "arcos", "6.1.0-arcos", "#1 SMP arcOS", "x86_64", "(none)"];
+    let fields = ["Linux", "justos", "6.1.0-justos", "#1 SMP JustOS", "x86_64", "(none)"];
     for (i, f) in fields.iter().enumerate() {
         let at = i * 65;
         out[at..at + f.len()].copy_from_slice(f.as_bytes());

@@ -38,10 +38,10 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist
-          cp build/arcos.iso dist/arcos.iso
+          cp build/justos.iso dist/justos.iso
           # The disk image is mostly empty: compressed it is a few MiB.
-          (cd build && zip -9 ../dist/arcos-img.zip arcos.img)
-          (cd dist && sha256sum arcos.iso arcos-img.zip > SHA256SUMS)
+          (cd build && zip -9 ../dist/justos-img.zip justos.img)
+          (cd dist && sha256sum justos.iso justos-img.zip > SHA256SUMS)
           ls -l dist
 
       - name: Publish
@@ -53,5 +53,5 @@ jobs:
             gh release upload "$TAG" dist/* --clobber
           else
             gh release create "$TAG" dist/* --target "$GITHUB_SHA" \
-              --title "arcOS $TAG" --notes-file .github/release-notes.md
+              --title "JustOS $TAG" --notes-file .github/release-notes.md
           fi

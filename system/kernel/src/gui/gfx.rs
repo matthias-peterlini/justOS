@@ -1,3 +1,3 @@
-//! Drawing: the shared [`arcgfx`] library.
+//! Drawing: the shared [`justgfx`] library.
 
-pub use arcgfx::gfx::*;
+pub use justgfx::gfx::*;

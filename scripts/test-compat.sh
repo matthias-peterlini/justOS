@@ -2,8 +2,8 @@
 # Builds a small Linux program and three Windows programs (scripts/compat:
 # console, files and keyboard, and one with a window), puts them on a copy of
 # the image together with the store programs and two Java programs (a DEX
-# file and an Android app, already built: system/libs/arcdex/tests), boots
-# arcOS and checks that they run: the Linux ABI, the Windows loader (winrun),
+# file and an Android app, already built: system/libs/justdex/tests), boots
+# JustOS and checks that they run: the Linux ABI, the Windows loader (winrun),
 # the Dalvik interpreter, `install` and the BusyBox applets.
 #
 # Needs musl-gcc (musl-tools) and x86_64-w64-mingw32-gcc (mingw-w64). If either
@@ -16,11 +16,11 @@
 set -u
 IMAGE=${1:?usage: test-compat.sh <image>}
 HERE=$(dirname "$0")
-ARCTOOL=${ARCTOOL:-$HERE/../tools/target/release/arctool}
+JUSTTOOL=${JUSTTOOL:-$HERE/../tools/target/release/justtool}
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
-cp --sparse=always "$IMAGE" "$WORK/arcos.img" || exit 2
-"$ARCTOOL" fs "$WORK/arcos.img" mkdir /home/compat >/dev/null 2>&1
+cp --sparse=always "$IMAGE" "$WORK/justos.img" || exit 2
+"$JUSTTOOL" fs "$WORK/justos.img" mkdir /home/compat >/dev/null 2>&1
 
 have_linux=0
 have_windows=0
@@ -50,14 +50,14 @@ int main(int argc, char **argv) {
 EOF
     if musl-gcc -static -Os -o "$WORK/lhello" "$WORK/hello.c" 2>/dev/null; then
         strip "$WORK/lhello" 2>/dev/null
-        "$ARCTOOL" fs "$WORK/arcos.img" put "$WORK/lhello" /home/compat/lhello >/dev/null && have_linux=1
+        "$JUSTTOOL" fs "$WORK/justos.img" put "$WORK/lhello" /home/compat/lhello >/dev/null && have_linux=1
         # The same program in a Debian package, for `install <file>.deb`.
         mkdir -p "$WORK/deb/usr/bin" && cp "$WORK/lhello" "$WORK/deb/usr/bin/debhello"
         printf '2.0\n' > "$WORK/debian-binary"
         tar -czf "$WORK/control.tar.gz" -C "$WORK" debian-binary
         tar -czf "$WORK/data.tar.gz" -C "$WORK/deb" ./usr
         (cd "$WORK" && ar rc debhello_1.0_amd64.deb debian-binary control.tar.gz data.tar.gz) &&
-            "$ARCTOOL" fs "$WORK/arcos.img" put "$WORK/debhello_1.0_amd64.deb" /home/compat/debhello_1.0_amd64.deb >/dev/null
+            "$JUSTTOOL" fs "$WORK/justos.img" put "$WORK/debhello_1.0_amd64.deb" /home/compat/debhello_1.0_amd64.deb >/dev/null
     fi
 fi
 [ $have_linux = 0 ] && echo "  note: musl-gcc not available, skipping the Linux program"
@@ -81,7 +81,7 @@ EOF
         x86_64-w64-mingw32-gcc -O2 -o "$WORK/wtest.exe" "$HERE/compat/wtest.c" 2>/dev/null &&
         x86_64-w64-mingw32-gcc -O2 -mwindows -o "$WORK/wgui.exe" "$HERE/compat/wgui.c" 2>/dev/null; then
         for p in whello wtest wgui; do
-            "$ARCTOOL" fs "$WORK/arcos.img" put "$WORK/$p.exe" /home/compat/$p.exe >/dev/null || break
+            "$JUSTTOOL" fs "$WORK/justos.img" put "$WORK/$p.exe" /home/compat/$p.exe >/dev/null || break
         done && have_windows=1
     fi
 fi
@@ -94,10 +94,10 @@ for i = 1, 100 do s = s + i end
 print("lua: sum 1..100 = " .. s)
 print(string.format("lua: float=%.3f", 1.0 / 3.0))
 EOF
-"$ARCTOOL" fs "$WORK/arcos.img" put "$WORK/t.lua" /home/compat/t.lua >/dev/null
-DEX=$HERE/../system/libs/arcdex/tests
-"$ARCTOOL" fs "$WORK/arcos.img" put "$DEX/Basics.dex" /home/compat/Basics.dex >/dev/null
-"$ARCTOOL" fs "$WORK/arcos.img" put "$DEX/SelfTest.apk" /home/compat/SelfTest.apk >/dev/null
+"$JUSTTOOL" fs "$WORK/justos.img" put "$WORK/t.lua" /home/compat/t.lua >/dev/null
+DEX=$HERE/../system/libs/justdex/tests
+"$JUSTTOOL" fs "$WORK/justos.img" put "$DEX/Basics.dex" /home/compat/Basics.dex >/dev/null
+"$JUSTTOOL" fs "$WORK/justos.img" put "$DEX/SelfTest.apk" /home/compat/SelfTest.apk >/dev/null
 
 # Build the session depending on what is available.
 {
@@ -139,7 +139,7 @@ wtest: first line 'line one'
 wtest: scanned 42 word 3.50
 wtest: size 22
 wtest: sorted 1 3 5 7 9
-wtest: HELLO, ARCOS 12
+wtest: HELLO, JUSTOS 13
 wtest: sqrt2=1.4142 sin1=0.841 pow=1024 neg=-17
 wtest: strtol 31 atoi -250
 wtest: 00042|ab  |ff
@@ -154,7 +154,7 @@ wgui: quit 7
 EOF
 } > "$WORK/expect.txt"
 
-STEP_WAIT=${STEP_WAIT:-2} "$HERE/test.sh" "$WORK/arcos.img" "$WORK/session.txt" > "$WORK/out.txt" 2>&1
+STEP_WAIT=${STEP_WAIT:-2} "$HERE/test.sh" "$WORK/justos.img" "$WORK/session.txt" > "$WORK/out.txt" 2>&1
 STATUS=$?
 FAILED=0
 while IFS= read -r pattern; do

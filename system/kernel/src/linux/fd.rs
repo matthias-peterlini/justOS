@@ -1,4 +1,4 @@
-//! File descriptors of Linux processes: files and folders of the arcOS
+//! File descriptors of Linux processes: files and folders of the JustOS
 //! volume, the console, pipes, eventfds, sockets ([`super::sock`]) and epoll
 //! sets ([`super::poll`]), plus the few virtual files programs expect
 //! (`/dev/null`, `/dev/urandom`, `/etc/resolv.conf`, `/proc/self/...`).
@@ -128,7 +128,7 @@ pub fn install_from(d: Arc<Desc>, cloexec: bool, min: i32) -> i64 {
     })
 }
 
-/// The arcOS path behind a file descriptor (for `mmap` of a file).
+/// The JustOS path behind a file descriptor (for `mmap` of a file).
 pub fn file_path(fd: i32) -> Option<Path> {
     match &get(fd)?.kind {
         Kind::File { path, .. } => Some(path.clone()),
@@ -217,7 +217,7 @@ fn virtual_file(text: &str) -> Option<Kind> {
             data(s)
         }
         "/proc/self/cmdline" => data(alloc::format!("{}\0", user::current_name())),
-        "/proc/cpuinfo" => data(String::from("processor\t: 0\nmodel name\t: arcOS virtual CPU\ncpu cores\t: 1\n\n")),
+        "/proc/cpuinfo" => data(String::from("processor\t: 0\nmodel name\t: JustOS virtual CPU\ncpu cores\t: 1\n\n")),
         "/proc/meminfo" => {
             let (free, total) = crate::mem::frame::stats();
             data(alloc::format!("MemTotal: {} kB\nMemFree: {} kB\nMemAvailable: {} kB\n", total / 1024, free / 1024, free / 1024))
@@ -262,7 +262,7 @@ fn open_path(path: &Path, text: &str, flags: u32) -> i64 {
     }
     let writable = flags & (O_WRONLY | O_RDWR) != 0;
     match fs::stat(path) {
-        Ok(st) if st.kind == arcfs::Kind::Dir => {
+        Ok(st) if st.kind == justfs::Kind::Dir => {
             if writable {
                 return -err::EISDIR;
             }
@@ -554,7 +554,7 @@ pub struct StatInfo {
 pub fn stat_of_path(path: &Path) -> Result<StatInfo, i64> {
     let st = fs::stat(path).map_err(|e| -errno(user::fs_error(e)))?;
     // Names without an extension are programs (Linux ones are).
-    let mode = if st.kind == arcfs::Kind::Dir {
+    let mode = if st.kind == justfs::Kind::Dir {
         0o040755
     } else if path.name().contains('.') {
         0o100644
@@ -703,7 +703,7 @@ pub fn sys_getdents64(fd: i32, ptr: u64, cap: u64) -> i64 {
             Err(e) => return -errno(user::fs_error(e)),
         };
         let mut v = vec![(String::from("."), true), (String::from(".."), true)];
-        v.extend(list.into_iter().map(|(e, st)| (e.name, st.kind == arcfs::Kind::Dir)));
+        v.extend(list.into_iter().map(|(e, st)| (e.name, st.kind == justfs::Kind::Dir)));
         *names.lock() = Some(v);
     }
     let buf = match user_bytes(ptr, cap) {
@@ -776,7 +776,7 @@ pub fn sys_readlinkat(dirfd: i32, path_ptr: u64, buf: u64, cap: u64) -> i64 {
             let n: i32 = t[14..].parse().unwrap_or(-1);
             match get(n).map(|d| match &d.kind {
                 Kind::File { path, .. } | Kind::Dir { path, .. } => show_path(path),
-                _ => String::from("anon_inode:[arcos]"),
+                _ => String::from("anon_inode:[justos]"),
             }) {
                 Some(s) => s,
                 None => return -err::ENOENT,

@@ -5,5 +5,5 @@ name        = fbgeneric
 version     = 1.0.0
 class       = display
 description = Any graphics card (firmware framebuffer)
-author      = arcOS
+author      = JustOS
 match       = pci-class 03

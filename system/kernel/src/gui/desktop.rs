@@ -1187,7 +1187,7 @@ impl Desktop {
     fn spawn(&mut self, l: &mut Looper, path: &str) {
         let name = apps::program_name(path);
         let home = fs::abs("sys:/home").unwrap_or_else(|_| Path::root("sys"));
-        match fs::abs(path).map_err(|_| arcdk::syscall::Error::NotFound).and_then(|p| crate::user::spawn(&p, "", home)) {
+        match fs::abs(path).map_err(|_| justdk::syscall::Error::NotFound).and_then(|p| crate::user::spawn(&p, "", home)) {
             Ok(_) => self.bounce = Some((format!("@{path}"), Anim::new(900))),
             Err(e) => self.notify(l, name, format!("Non si è potuto avviare: {}", e.as_str()), String::from("window")),
         }
@@ -1356,7 +1356,7 @@ impl Desktop {
         }
     }
 
-    // The control centre, as in the arc design: a card of switches and
+    // The control centre, as in the JustOS design: a card of switches and
     // sliders, a card with the account and the power buttons, and a pill to
     // change the widgets.
 
@@ -1565,7 +1565,7 @@ impl Desktop {
         if self.logo_btn().contains(x, y) {
             let b = self.logo_btn();
             let mut items = alloc::vec![
-                ("Info su arcOS", Some(MenuAct::About)),
+                ("Info su JustOS", Some(MenuAct::About)),
                 ("", None),
                 ("Impostazioni di sistema…", Some(MenuAct::Settings)),
                 ("Negozio…", Some(MenuAct::Store)),
@@ -2664,7 +2664,7 @@ impl Desktop {
         c.fill(c.clip(), (t * 255 / 1000) << 24);
         if t > 300 {
             let o = (t - 300) * 255 / 700;
-            draw_logo(c, self.w / 2, self.h / 2 - 20, 48, (o << 24) | 0xFF_FFFF);
+            draw_logo(c, self.w / 2, self.h / 2 - 20, 35, (o << 24) | 0xF2_EFE6);
         }
     }
 }
@@ -2880,7 +2880,7 @@ impl Desktop {
                         ("Cambia sfondo", Some(MenuAct::NextWallpaper)),
                         ("Impostazioni Schermo…", Some(MenuAct::Display)),
                         ("", None),
-                        ("Info su arcOS", Some(MenuAct::About)),
+                        ("Info su JustOS", Some(MenuAct::About)),
                     ],
                     self.w,
                 );

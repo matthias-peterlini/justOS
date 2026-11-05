@@ -11,12 +11,12 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
-use arcdrv::{DeviceInfo, Dma, IrqLock, NetDesc, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, OK};
-use arcvirtio::{Queue, Virtio, DESC_WRITE};
+use justdrv::{DeviceInfo, Dma, IrqLock, NetDesc, Status, E_INVAL, E_IO, E_NODEV, E_NOMEM, OK};
+use justvirtio::{Queue, Virtio, DESC_WRITE};
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "virtionet",
     version: "1.1.0",
     probe: probe,
@@ -76,7 +76,7 @@ impl Net {
             let len = (len as usize).min(BUF);
             if iface >= 0 && len > self.header {
                 let at = id as usize * BUF;
-                arcdrv::net_receive(iface as u32, &self.rx_bufs.as_slice()[at + self.header..at + len]);
+                justdrv::net_receive(iface as u32, &self.rx_bufs.as_slice()[at + self.header..at + len]);
             }
             rx.publish(id);
             returned = true;
@@ -101,7 +101,7 @@ impl Net {
         if self.paused.load(Ordering::Acquire) {
             return E_IO;
         }
-        let start = arcdrv::time_ms();
+        let start = justdrv::time_ms();
         let mut tx = loop {
             let mut tx = self.tx.lock();
             Self::reclaim(&mut tx);
@@ -109,10 +109,10 @@ impl Net {
                 break tx;
             }
             drop(tx);
-            if arcdrv::time_ms() - start > 100 {
+            if justdrv::time_ms() - start > 100 {
                 return E_IO;
             }
-            arcdrv::yield_now();
+            justdrv::yield_now();
         };
         let slot = tx.next;
         tx.next = (slot + 1) % tx.count;
@@ -149,7 +149,7 @@ unsafe extern "C" fn poller(ctx: *mut c_void) {
     loop {
         net.receive();
         // Interrupts can be routed wrongly on some machines: poll anyway.
-        arcdrv::sleep_ms(if net.has_irq.load(Ordering::Relaxed) { 50 } else { 5 });
+        justdrv::sleep_ms(if net.has_irq.load(Ordering::Relaxed) { 50 } else { 5 });
     }
 }
 
@@ -196,13 +196,13 @@ fn probe(dev: &DeviceInfo) -> Status {
         return E_NODEV;
     }
     let Some(vio) = Virtio::open(dev) else {
-        arcdrv::warn!("no usable virtio registers");
+        justdrv::warn!("no usable virtio registers");
         return E_IO;
     };
     let Some(features) = vio.negotiate(F_MAC) else { return E_IO };
     let header = if vio.is_modern() { 12 } else { 10 };
     let (Some(rx), Some(tx)) = (vio.queue(0, MAX_RX), vio.queue(1, MAX_TX)) else {
-        vio.set_status(arcvirtio::STATUS_FAILED);
+        vio.set_status(justvirtio::STATUS_FAILED);
         return E_IO;
     };
     let rx_count = rx.size.min(MAX_RX);
@@ -240,14 +240,14 @@ fn probe(dev: &DeviceInfo) -> Status {
     net.vio.notify(&net.rx.lock());
 
     let desc: &'static NetDesc = Box::leak(Box::new(NetDesc { ctx, mac, _pad: [0; 2], mtu: 1500, send }));
-    let iface = arcdrv::net_register(dev.id, desc);
+    let iface = justdrv::net_register(dev.id, desc);
     if iface < 0 {
         return iface;
     }
     net.iface.store(iface, Ordering::Relaxed);
-    arcdrv::spawn("virtionet-rx", poller, ctx);
-    arcdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
-    arcdrv::info!(
+    justdrv::spawn("virtionet-rx", poller, ctx);
+    justdrv::power_hooks(dev.id, ctx, Some(suspend), resume);
+    justdrv::info!(
         "{} interface, {}",
         if net.vio.is_modern() { "modern" } else { "legacy" },
         if net.has_irq.load(Ordering::Relaxed) { "interrupts" } else { "polling" }

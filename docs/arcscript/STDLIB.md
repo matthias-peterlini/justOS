@@ -310,7 +310,7 @@ match os.run("git", ["log", "-1", "--format=%s"])
 
 `os.notify` uses the freedesktop notification service on the D-Bus session
 bus (Linux). The notification carries the app's title as its sender and the
-app id (`org.arcos.<name>`, see [ARC_DESKTOP.md](ARC_DESKTOP.md)) as its
+app id (`dev.justos.<name>`, see [ARC_DESKTOP.md](ARC_DESKTOP.md)) as its
 icon and `desktop-entry`, so the notification center groups it with the
 app. Elsewhere, or without a notification service, it returns `Err`:
 

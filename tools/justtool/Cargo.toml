@@ -1,0 +1,13 @@
+[package]
+name = "justtool"
+description = "Host tool for JustOS: driver packages, disk images, JustFS volumes and the signed index of app updates"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[dependencies]
+justdk = { path = "../../system/libs/justdk" }
+justfs = { path = "../../system/libs/justfs" }
+justjson = { path = "../../system/libs/justjson" }
+justtls = { path = "../../system/libs/justtls" }

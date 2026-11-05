@@ -3,7 +3,7 @@
 //! A program is a position-independent ELF image (`.app`). Each process has
 //! its own address space (the kernel half is shared), one thread, a table of
 //! handles and a current folder. System calls arrive through `int 0x80`; see
-//! `arcdk::syscall` for the interface.
+//! `justdk::syscall` for the interface.
 //!
 //! Two other kinds of program run here too: Linux programs (any other ELF
 //! file), which talk to [`crate::linux`] through `syscall`, and Windows
@@ -24,7 +24,7 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use arcdk::syscall::{self as sys, Error};
+use justdk::syscall::{self as sys, Error};
 use core::ffi::c_void;
 
 const STACK_PAGES: u64 = 64;
@@ -117,11 +117,11 @@ pub fn find_program(name: &str, cwd: &Path) -> Option<Path> {
     let lower = name.to_ascii_lowercase();
     if name.contains(':') || name.contains('/') || lower.ends_with(".app") || lower.ends_with(".exe") || is_script(name) || is_android(name) {
         let p = Path::parse(name, cwd).ok()?;
-        return fs::stat(&p).ok().filter(|s| s.kind == arcfs::Kind::File).map(|_| p);
+        return fs::stat(&p).ok().filter(|s| s.kind == justfs::Kind::File).map(|_| p);
     }
     [".app", ".arc", ".as", ".exe", ".apk", ""].iter().find_map(|ext| {
         let p = fs::abs(&alloc::format!("sys:/apps/{lower}{ext}")).ok()?;
-        fs::stat(&p).ok().filter(|s| s.kind == arcfs::Kind::File).map(|_| p)
+        fs::stat(&p).ok().filter(|s| s.kind == justfs::Kind::File).map(|_| p)
     })
 }
 
@@ -283,7 +283,7 @@ unsafe extern "C" fn user_start(arg: *mut c_void) {
     unsafe { enter_user(entry, rsp, rdi, rsi) }
 }
 
-/// Loads an arcOS program; returns its entry, stack and the two arguments
+/// Loads an JustOS program; returns its entry, stack and the two arguments
 /// of its entry function (the argument text and its length).
 fn native_image(start: &Start) -> (u64, u64, u64, u64) {
     let loaded = crate::driver::elf::load_with(&start.image, |pages| map_user(sys::USER_BASE, pages).map(|_| sys::USER_BASE), |_| {});
@@ -890,7 +890,7 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
             let mode = a[2];
             crate::sandbox::check(&path, mode != sys::MODE_READ)?;
             match fs::stat(&path) {
-                Ok(st) if st.kind == arcfs::Kind::Dir => return Err(Error::IsDir),
+                Ok(st) if st.kind == justfs::Kind::Dir => return Err(Error::IsDir),
                 Ok(_) => {
                     if mode == sys::MODE_WRITE {
                         fs::write_file(&path, &[]).map_err(fs_error)?;
@@ -1017,7 +1017,7 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
             crate::sandbox::check(&path, false)?;
             let mut text = String::new();
             for (e, st) in fs::list_dir(&path).map_err(fs_error)? {
-                let kind = if st.kind == arcfs::Kind::Dir { 'd' } else { 'f' };
+                let kind = if st.kind == justfs::Kind::Dir { 'd' } else { 'f' };
                 text.push_str(&alloc::format!("{}\t{}\t{}\n", e.name, kind, st.size));
             }
             let buf = user_slice(a[2], a[3])?;

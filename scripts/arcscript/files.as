@@ -1,4 +1,4 @@
-# The fs, path, os and time modules on arcOS.
+# The fs, path, os and time modules on JustOS.
 import fs
 import os
 import path

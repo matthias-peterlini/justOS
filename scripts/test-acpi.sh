@@ -1,10 +1,10 @@
 #!/bin/sh
-# Boots an arcOS image on a classic PC (PIIX4) and on a modern one (Q35),
-# presses the power button through QMP and checks that arcOS turns itself
+# Boots an JustOS image on a classic PC (PIIX4) and on a modern one (Q35),
+# presses the power button through QMP and checks that JustOS turns itself
 # off cleanly. Then boots a "laptop": Q35 with the battery, adapter, lid
-# and thermal zone of scripts/acpi/laptop.aml, checks that arcOS reads
+# and thermal zone of scripts/acpi/laptop.aml, checks that JustOS reads
 # them through the firmware's AML, empties the battery and checks that
-# arcOS turns itself off.
+# JustOS turns itself off.
 # The sleep cases put the machine to sleep (S3) for a few seconds, on two
 # processors, and check that the disk, the file system and the network
 # work after it wakes up: sleep-pc (PIIX4, IDE), sleep-q35 (AHCI) and

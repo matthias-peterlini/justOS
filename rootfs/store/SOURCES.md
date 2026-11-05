@@ -4,10 +4,10 @@ Ogni programma è in una cartella: `app` (il programma), `info` (la scheda
 del Negozio) e, se c'è, `icon.qoi`.
 
 Le app con finestra (2048, Campo minato, Serpente, Sudoku, Tris, Disegno) sono
-programmi arcOS di questo repository, in `system/store/`.
+programmi JustOS di questo repository, in `system/store/`.
 
 BusyBox e Lua sono programmi liberi compilati dai sorgenti ufficiali, collegati staticamente con
-[musl](https://musl.libc.org/) per x86-64 Linux. arcOS li esegue con il suo
+[musl](https://musl.libc.org/) per x86-64 Linux. JustOS li esegue con il suo
 livello di compatibilità Linux (`kernel/src/linux.rs`). Nessuna modifica ai
 sorgenti.
 

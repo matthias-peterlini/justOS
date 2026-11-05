@@ -1,6 +1,6 @@
 [package]
 name = "gioco2048"
-description = "arcOS store program: 2048 game"
+description = "JustOS store program: 2048 game"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true
@@ -13,8 +13,8 @@ test = false
 bench = false
 
 [dependencies]
-arcrt.workspace = true
-arcui.workspace = true
+justrt.workspace = true
+justui.workspace = true
 
 [lints]
 workspace = true

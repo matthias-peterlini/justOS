@@ -115,7 +115,7 @@ fn home_files() -> Vec<Item> {
                 continue;
             }
             let path = format!("{dir}/{}", e.name);
-            let dir = st.kind == arcfs::Kind::Dir;
+            let dir = st.kind == justfs::Kind::Dir;
             if dir {
                 queue.push(path.clone());
             }

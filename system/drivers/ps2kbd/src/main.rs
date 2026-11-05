@@ -7,11 +7,11 @@
 #![no_std]
 #![no_main]
 
-use arcdrv::port;
-use arcdrv::{DeviceInfo, Status, E_NODEV, KEY_PRESSED, KEY_RELEASED, KEY_REPEAT, OK};
+use justdrv::port;
+use justdrv::{DeviceInfo, Status, E_NODEV, KEY_PRESSED, KEY_RELEASED, KEY_REPEAT, OK};
 use core::ffi::c_void;
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "ps2kbd",
     version: "1.1.0",
     probe: probe,
@@ -62,7 +62,7 @@ struct State {
     pressed: [u64; 4],
 }
 
-static STATE: arcdrv::IrqLock<State> = arcdrv::IrqLock::new(State { device: 0, prefix: false, pressed: [0; 4] });
+static STATE: justdrv::IrqLock<State> = justdrv::IrqLock::new(State { device: 0, prefix: false, pressed: [0; 4] });
 
 fn handle(code: u8) {
     let mut s = STATE.lock();
@@ -91,7 +91,7 @@ fn handle(code: u8) {
     };
     let device = s.device;
     drop(s);
-    arcdrv::input_event(device, arcdrv::INPUT_KEY, usage as u32, value);
+    justdrv::input_event(device, justdrv::INPUT_KEY, usage as u32, value);
 }
 
 unsafe extern "C" fn irq(_: *mut c_void) {
@@ -109,11 +109,11 @@ unsafe extern "C" fn irq(_: *mut c_void) {
 }
 
 fn send(byte: u8) -> bool {
-    if !arcdrv::wait_until(50, || port::inb(STATUS) & 2 == 0) {
+    if !justdrv::wait_until(50, || port::inb(STATUS) & 2 == 0) {
         return false;
     }
     port::outb(DATA, byte);
-    arcdrv::wait_until(100, || port::inb(STATUS) & 1 != 0) && port::inb(DATA) == 0xFA
+    justdrv::wait_until(100, || port::inb(STATUS) & 1 != 0) && port::inb(DATA) == 0xFA
 }
 
 fn probe(dev: &DeviceInfo) -> Status {
@@ -126,15 +126,15 @@ fn probe(dev: &DeviceInfo) -> Status {
     // Enable scanning; a missing acknowledgement is not fatal (some
     // emulated controllers stay silent) but is worth a note.
     if !send(0xF4) {
-        arcdrv::log(arcdrv::LOG_DEBUG, format_args!("no acknowledgement from the keyboard"));
+        justdrv::log(justdrv::LOG_DEBUG, format_args!("no acknowledgement from the keyboard"));
     }
     STATE.lock().device = dev.id;
-    let st = arcdrv::irq_attach(dev.id, dev.irq, irq, core::ptr::null_mut());
+    let st = justdrv::irq_attach(dev.id, dev.irq, irq, core::ptr::null_mut());
     if st != OK {
         return st;
     }
-    arcdrv::power_hooks(dev.id, core::ptr::null_mut(), None, resume);
-    arcdrv::info!("keyboard ready on IRQ {}", dev.irq);
+    justdrv::power_hooks(dev.id, core::ptr::null_mut(), None, resume);
+    justdrv::info!("keyboard ready on IRQ {}", dev.irq);
     OK
 }
 
@@ -150,20 +150,20 @@ unsafe extern "C" fn resume(_: *mut c_void) -> Status {
     for (word, bits) in held.iter().enumerate() {
         for bit in 0..64 {
             if bits & (1 << bit) != 0 {
-                arcdrv::input_event(device, arcdrv::INPUT_KEY, (word * 64 + bit) as u32, KEY_RELEASED);
+                justdrv::input_event(device, justdrv::INPUT_KEY, (word * 64 + bit) as u32, KEY_RELEASED);
             }
         }
     }
     // The answers must not reach the interrupt handler.
-    arcdrv::irq_detach(device, 1);
+    justdrv::irq_detach(device, 1);
     while port::inb(STATUS) & 1 != 0 {
         port::inb(DATA);
     }
     send(0xF4);
-    arcdrv::irq_attach(device, 1, irq, core::ptr::null_mut());
+    justdrv::irq_attach(device, 1, irq, core::ptr::null_mut());
     OK
 }
 
 fn remove(device: u32) {
-    arcdrv::irq_detach(device, 1);
+    justdrv::irq_detach(device, 1);
 }

@@ -3,7 +3,7 @@
 use crate::dev;
 use crate::mem::{self, frame, paging, region, PAGE_SIZE};
 use alloc::alloc::Layout;
-use arcdk::*;
+use justdk::*;
 use core::ffi::c_void;
 
 unsafe extern "C" fn api_log(level: u32, msg: *const u8, len: usize) {

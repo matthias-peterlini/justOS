@@ -4,5 +4,5 @@ name        = cirrus
 version     = 1.1.0
 class       = display
 description = Cirrus Logic GD5446 display
-author      = arcOS
+author      = JustOS
 match       = pci 1013:00b8     # GD5446

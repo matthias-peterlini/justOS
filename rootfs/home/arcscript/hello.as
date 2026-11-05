@@ -1,6 +1,6 @@
 # hello.as — the basics of ArcScript
 
-let name = "arcOS"
+let name = "JustOS"
 print("Hello, {name}!")
 
 fn fib(n)

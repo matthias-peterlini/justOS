@@ -1,0 +1,15 @@
+[package]
+name = "justweb"
+description = "A web engine for JustOS: HTML, CSS, layout, PNG, JPEG and GIF (no_std)"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[dependencies]
+justgfx = { workspace = true }
+justjs = { workspace = true }
+justzip = { workspace = true }
+
+[lints]
+workspace = true

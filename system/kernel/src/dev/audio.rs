@@ -9,7 +9,7 @@ use crate::sync::{IrqLock, Mutex};
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use arcdk::{AudioDesc, Status, E_INVAL};
+use justdk::{AudioDesc, Status, E_INVAL};
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 pub struct Output {

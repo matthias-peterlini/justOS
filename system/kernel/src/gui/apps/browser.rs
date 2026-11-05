@@ -1,10 +1,10 @@
-//! ticly browser: tabs, an address bar and web pages drawn by [`arcweb`]
+//! ticly browser: tabs, an address bar and web pages drawn by [`justweb`]
 //! (HTML and CSS, PNG, JPEG and GIF pictures, JavaScript), in the look of
 //! the ticly browser. A page loads on a thread of its own: the page, its
 //! stylesheets, then its pictures four at a time; the page is laid out
 //! again as they come in and when the window changes size. Its scripts run
 //! on another thread, which then hands them the page's events and timers.
-//! Cookies are kept while arcOS runs. The start page searches with
+//! Cookies are kept while JustOS runs. The start page searches with
 //! DuckDuckGo and leads into ticly.
 
 use super::ticly as tui;
@@ -22,10 +22,10 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use arcweb::document::Script;
-use arcweb::dom::NodeId;
-use arcweb::script::Scripts;
-use arcweb::{Document, Hit, WebFonts};
+use justweb::document::Script;
+use justweb::dom::NodeId;
+use justweb::script::Scripts;
+use justweb::{Document, Hit, WebFonts};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 const TABS_H: i32 = 46;
@@ -59,8 +59,8 @@ fn web_fonts() -> Option<&'static WebFonts> {
     let mut g = WEB_FONTS.lock();
     if g.is_none() {
         let raw = fs::abs("sys:/system/webfonts.bin").and_then(|p| fs::read_file(&p)).ok()?;
-        let data: &'static [u8] = Box::leak(arczip::gunzip(&raw)?.into_boxed_slice());
-        let mut fonts = arcgfx::Fonts::parse(data)?;
+        let data: &'static [u8] = Box::leak(justzip::gunzip(&raw)?.into_boxed_slice());
+        let mut fonts = justgfx::Fonts::parse(data)?;
         // On a high-density screen a 14-pixel face is drawn with the 28.
         fonts.double_sizes();
         *g = Some(Box::leak(Box::new(WebFonts::new(fonts))));
@@ -185,7 +185,7 @@ fn fetch(address: &str, method: &str, body: Option<&str>, accept: &str) -> Resul
         keep_cookies(&u, &r.headers);
         if matches!(r.status, 301 | 302 | 303 | 307 | 308) {
             if let Some(loc) = r.header("location") {
-                url = arcweb::url::join(&url, loc);
+                url = justweb::url::join(&url, loc);
                 if r.status == 303 || (matches!(r.status, 301 | 302) && method == "POST") {
                     method = String::from("GET");
                     body = None;
@@ -196,9 +196,9 @@ fn fetch(address: &str, method: &str, body: Option<&str>, accept: &str) -> Resul
         let encoding = r.header("content-encoding").map(|e| e.to_ascii_lowercase()).unwrap_or_default();
         let content_type = String::from(r.header("content-type").unwrap_or(""));
         let data = if encoding.contains("gzip") {
-            arczip::gunzip(&r.body).ok_or("dati compressi non validi")?
+            justzip::gunzip(&r.body).ok_or("dati compressi non validi")?
         } else if encoding.contains("deflate") {
-            arczip::zlib(&r.body).or_else(|| arczip::inflate_raw(&r.body).map(|d| d.0)).ok_or("dati compressi non validi")?
+            justzip::zlib(&r.body).or_else(|| justzip::inflate_raw(&r.body).map(|d| d.0)).ok_or("dati compressi non validi")?
         } else {
             r.body
         };
@@ -211,7 +211,7 @@ fn fetch(address: &str, method: &str, body: Option<&str>, accept: &str) -> Resul
 fn viewable(ct: &str, body: &[u8]) -> bool {
     let ct = ct.to_ascii_lowercase();
     if ct.is_empty() {
-        return !body.iter().take(512).any(|&b| b == 0) || arcweb::image::size(body).is_some();
+        return !body.iter().take(512).any(|&b| b == 0) || justweb::image::size(body).is_some();
     }
     ct.starts_with("text/") || ct.contains("html") || ct.contains("xml") || ct.contains("json") || ct.contains("javascript") || matches!(ct.split(';').next().unwrap_or(""), "image/png" | "image/jpeg" | "image/jpg" | "image/gif")
 }
@@ -219,7 +219,7 @@ fn viewable(ct: &str, body: &[u8]) -> bool {
 /// Saves a download in the Downloads folder; returns its path.
 fn save_download(url: &str, body: &[u8]) -> Result<String, String> {
     let last = url.split(['?', '#']).next().unwrap_or("").rsplit('/').next().unwrap_or("");
-    let name = arcweb::url::percent_decode(last);
+    let name = justweb::url::percent_decode(last);
     let name: String = name.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '\0')).collect();
     let name = if name.is_empty() { String::from("download") } else { name };
     let dir = fs::abs("sys:/home/Scaricati").map_err(|e| format!("{e:?}"))?;
@@ -409,7 +409,7 @@ fn picture_worker(page: &Shared, queue: &IrqLock<Vec<String>>) {
         let canvas = fetch(&u, "GET", None, "image/png,image/jpeg,image/gif,image/*;q=0.8,*/*;q=0.5")
             .ok()
             .filter(|g| g.status < 400)
-            .and_then(|g| arcweb::image::decode(&g.body));
+            .and_then(|g| justweb::image::decode(&g.body));
         let mut p = page.lock();
         if let Some(d) = p.doc.as_mut() {
             d.add_picture(&u, canvas);
@@ -529,11 +529,11 @@ fn resolve(input: &str) -> String {
         let local = host == "localhost" || host.split('.').count() == 4 && host.split('.').all(|p| p.parse::<u8>().is_ok());
         return format!("{}://{t}", if local { "http" } else { "https" });
     }
-    format!("{SEARCH}{}", arcweb::url::form_encode(t))
+    format!("{SEARCH}{}", justweb::url::form_encode(t))
 }
 
 fn host_of(url: &str) -> String {
-    let h = arcweb::url::host(url);
+    let h = justweb::url::host(url);
     String::from(h.strip_prefix("www.").unwrap_or(h))
 }
 
@@ -1046,13 +1046,13 @@ impl Browser {
             y += 44;
         }
         y += 14;
-        let lead = "Un unico browser per la tua identità ticly: musica, chat, intelligenza artificiale e il tuo workspace, su un motore web scritto da zero per arcOS.";
+        let lead = "Un unico browser per la tua identità ticly: musica, chat, intelligenza artificiale e il tuo workspace, su un motore web scritto da zero per JustOS.";
         for line in text::wrap(Font::Body, lead, l.w - 72).iter().take(4) {
             text::draw(c, Font::Body, l.x + 36, y, line, TEXT_DIM);
             y += 22;
         }
         let rows = [
-            (false, "Motore arcweb", "HTML e CSS in Rust, nel kernel di arcOS, senza Chromium"),
+            (false, "Motore justweb", "HTML e CSS in Rust, nel kernel di JustOS, senza Chromium"),
             (true, "Single Sign-On Ecosistema", "Una sessione attiva su tutti i servizi ticly"),
         ];
         let mut ry = (y + 22).max(l.bottom() - 186);

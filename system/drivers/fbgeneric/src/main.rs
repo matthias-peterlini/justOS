@@ -3,7 +3,7 @@
 //! server chips, and any other PCI display controller.
 //!
 //! It keeps the framebuffer the firmware (UEFI GOP or VESA) set up before
-//! arcOS started, at the resolution the loader picked; without a native
+//! JustOS started, at the resolution the loader picked; without a native
 //! driver the card cannot change it. What the driver adds is the card itself:
 //! the screen belongs to a named device, so Settings and `display` show the
 //! real card, and the screen keeps working when a better driver is missing.
@@ -18,10 +18,10 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::format;
-use arcdrv::{DeviceInfo, DisplayDesc, DisplayMode, Framebuffer, Status, E_INVAL, E_NODEV, OK, RES_MEMORY};
+use justdrv::{DeviceInfo, DisplayDesc, DisplayMode, Framebuffer, Status, E_INVAL, E_NODEV, OK, RES_MEMORY};
 use core::ffi::c_void;
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "fbgeneric",
     version: "1.0.0",
     probe: probe,
@@ -76,8 +76,8 @@ unsafe extern "C" fn set_mode(ctx: *mut c_void, mode: DisplayMode, out: *mut Fra
 }
 
 fn probe(dev: &DeviceInfo) -> Status {
-    let Some(fb) = arcdrv::boot_framebuffer() else {
-        arcdrv::info!("the firmware left no framebuffer");
+    let Some(fb) = justdrv::boot_framebuffer() else {
+        justdrv::info!("the firmware left no framebuffer");
         return E_NODEV;
     };
     // With two cards (a laptop's integrated and dedicated graphics), only
@@ -86,7 +86,7 @@ fn probe(dev: &DeviceInfo) -> Status {
     let holds = dev.resources.iter().any(|r| r.kind == RES_MEMORY && fb.phys >= r.base && fb.phys + size <= r.base + r.size);
     let has_memory = dev.resources.iter().any(|r| r.kind == RES_MEMORY && r.size >= size);
     if !holds && has_memory {
-        arcdrv::info!("{:04x}:{:04x} is not the card on the screen", dev.vendor, dev.device);
+        justdrv::info!("{:04x}:{:04x} is not the card on the screen", dev.vendor, dev.device);
         return E_NODEV;
     }
     let vendor = vendor_name(dev.vendor);
@@ -95,16 +95,16 @@ fn probe(dev: &DeviceInfo) -> Status {
     } else {
         format!("{vendor} graphics {:04x}", dev.device)
     };
-    arcdrv::info!("{name}: firmware framebuffer {}x{}", fb.width, fb.height);
+    justdrv::info!("{name}: firmware framebuffer {}x{}", fb.width, fb.height);
     let fb: &'static Framebuffer = Box::leak(Box::new(fb));
     let desc: &'static DisplayDesc = Box::leak(Box::new(DisplayDesc {
         ctx: fb as *const Framebuffer as *mut c_void,
         modes,
         set_mode,
         flush: None,
-        name: arcdrv::model_name(&name),
+        name: justdrv::model_name(&name),
     }));
-    let n = arcdrv::display_register(dev.id, desc);
+    let n = justdrv::display_register(dev.id, desc);
     if n < 0 {
         return n;
     }

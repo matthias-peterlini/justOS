@@ -1,28 +1,28 @@
 [package]
-name = "arc-kernel"
-description = "The arcOS kernel"
+name = "just-kernel"
+description = "The JustOS kernel"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
 authors.workspace = true
 
 [[bin]]
-name = "arc-kernel"
+name = "just-kernel"
 path = "src/main.rs"
 test = false
 bench = false
 
 [dependencies]
-arcdk.workspace = true
-arcfs.workspace = true
-arcgfx.workspace = true
-arctls.workspace = true
-arczip.workspace = true
-arcjson.workspace = true
-arcweb.workspace = true
+justdk.workspace = true
+justfs.workspace = true
+justgfx.workspace = true
+justtls.workspace = true
+justzip.workspace = true
+justjson.workspace = true
+justweb.workspace = true
 arcc-core.workspace = true
 arc-vm.workspace = true
-arcaml.workspace = true
+justaml.workspace = true
 
 [lints]
 workspace = true

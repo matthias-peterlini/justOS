@@ -14,7 +14,7 @@ use crate::sandbox::Grants;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use arcdk::DisplayMode;
+use justdk::DisplayMode;
 
 /// Resolutions offered when the display has them, in this order.
 const COMMON_MODES: &[(u32, u32)] = &[

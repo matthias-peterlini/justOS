@@ -1,4 +1,4 @@
-//! Arc Shell: the system console's command interpreter.
+//! The JustOS shell: the system console's command interpreter.
 
 use crate::dev::input::{self, Key};
 use crate::fs::{self, Path};
@@ -22,7 +22,7 @@ pub fn banner(boot: &crate::boot::BootInfo) {
         crate::console::fill_rect_px(0, 0, w, 3, 0xC9A7FF);
     }
     println!();
-    println!("  {BOLD}arc{ACCENT}OS{RESET} {DIM}{}{RESET}", crate::VERSION);
+    println!("  {BOLD}JustOS{ACCENT}█{RESET} {DIM}{}{RESET}", crate::VERSION);
     let mut brand = [0u8; 48];
     let cpu = crate::arch::cpu::brand(&mut brand);
     let screen = match boot.fb_kind {
@@ -53,7 +53,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("cp", "<from> <to>", "copy a file"),
     ("vol", "", "list mounted volumes"),
     ("disks", "", "list disks and partitions"),
-    ("format", "<disk> <label>", "create an ArcFS volume on a disk"),
+    ("format", "<disk> <label>", "create an JustFS volume on a disk"),
     ("check", "<volume>", "check a volume for errors"),
     ("unmount", "<volume>", "detach a volume (before removing its disk)"),
     ("dev", "[id | scan]", "list devices and their drivers"),
@@ -65,7 +65,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("ports", "", "named message ports and who owns them"),
     ("perms", "[allow|deny|ask <app> <perm>]", "what apps may use outside their sandbox"),
     ("updates", "[check|install <app>|all|auto on|off]", "updates of the installed apps"),
-    ("sysupdate", "[check|install [file]|rollback|cancel]", "arcOS updates: the two system slots"),
+    ("sysupdate", "[check|install [file]|rollback|cancel]", "JustOS updates: the two system slots"),
     ("dnd", "test", "check moving and copying files the way a drop does"),
     ("run", "<program> [args]", "start a program (also just: <program>)"),
     ("irq", "", "interrupt lines and message interrupts"),
@@ -93,7 +93,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("display", "[WxH | scale auto|1|2]", "screen resolutions, switch to one, or the interface size"),
 ];
 
-/// The BusyBox applets arcOS exposes as commands once `busybox` is installed.
+/// The BusyBox applets JustOS exposes as commands once `busybox` is installed.
 /// Running one loads `sys:/apps/busybox` with that name as `argv[0]`.
 const BUSYBOX_APPLETS: &[&str] = &[
     "ash",
@@ -326,7 +326,7 @@ impl Shell {
                 if let Ok(list) = fs::list_dir(&dir) {
                     for (e, st) in list {
                         if e.name.to_lowercase().starts_with(&prefix.to_lowercase()) {
-                            let slash = if st.kind == arcfs::Kind::Dir { "/" } else { "" };
+                            let slash = if st.kind == justfs::Kind::Dir { "/" } else { "" };
                             options.push(alloc::format!("{dir_text}{}{slash}", e.name));
                         }
                     }
@@ -731,7 +731,7 @@ impl Shell {
                 if need(1, "<file>") {
                     match fs::abs(rest[0]).and_then(|p| fs::read_file(&p)) {
                         Ok(data) => {
-                            let d = arctls::sha2::Sha256::digest(&data);
+                            let d = justtls::sha2::Sha256::digest(&data);
                             let hex: String = d.iter().map(|b| alloc::format!("{b:02x}")).collect();
                             println!("{hex}  {}", rest[0]);
                         }
@@ -877,15 +877,15 @@ impl Shell {
                         Err(e) => println!("{ERR}sysupdate: {e}{RESET}"),
                     },
                     (Some("check"), None, _) => match crate::update::check_now(false) {
-                        State::UpToDate => println!("arcOS is up to date"),
-                        State::Available(v) => println!("arcOS {v} is available: sysupdate install"),
-                        State::Released(v) => println!("arcOS {v} is released on GitHub (not in the update index yet)"),
-                        State::Staged(v) => println!("arcOS {v} starts at the next restart"),
+                        State::UpToDate => println!("JustOS is up to date"),
+                        State::Available(v) => println!("JustOS {v} is available: sysupdate install"),
+                        State::Released(v) => println!("JustOS {v} is released on GitHub (not in the update index yet)"),
+                        State::Staged(v) => println!("JustOS {v} starts at the next restart"),
                         State::Failed(e) => println!("{ERR}sysupdate: {e}{RESET}"),
                         _ => println!("already busy"),
                     },
                     (Some("install"), None, _) => match crate::update::install() {
-                        Ok(v) => println!("arcOS {v} is installed in the other slot: it starts at the next restart"),
+                        Ok(v) => println!("JustOS {v} is installed in the other slot: it starts at the next restart"),
                         Err(e) => println!("{ERR}sysupdate: {e}{RESET}"),
                     },
                     (Some("install"), Some(a), b) if (a == "--unsigned") == b.is_some() => {
@@ -905,12 +905,12 @@ impl Shell {
                             su::install(&data, &mut |_, _| {})
                         });
                         match result {
-                            Ok(v) => println!("arcOS {v} is installed in the other slot: it starts at the next restart"),
+                            Ok(v) => println!("JustOS {v} is installed in the other slot: it starts at the next restart"),
                             Err(e) => println!("{ERR}sysupdate: {e}{RESET}"),
                         }
                     }
                     (Some("rollback"), None, _) => match su::rollback() {
-                        Ok(v) => println!("arcOS {v} starts at the next restart"),
+                        Ok(v) => println!("JustOS {v} starts at the next restart"),
                         Err(e) => println!("{ERR}sysupdate: {e}{RESET}"),
                     },
                     (Some("cancel"), None, _) => match su::cancel() {
@@ -1053,7 +1053,7 @@ impl Shell {
         self.report(applet, crate::user::run_applet_foreground(&busybox, applet, args, self.cwd.clone()));
     }
 
-    fn report(&self, name: &str, result: Result<i64, arcdk::syscall::Error>) {
+    fn report(&self, name: &str, result: Result<i64, justdk::syscall::Error>) {
         match result {
             Ok(0) => {}
             Ok(-130) => println!("{DIM}^C{RESET}"),
@@ -1223,7 +1223,7 @@ impl Shell {
             }
             return;
         }
-        let mode = arg.split_once('x').and_then(|(w, h)| Some(arcdk::DisplayMode { width: w.parse().ok()?, height: h.parse().ok()? }));
+        let mode = arg.split_once('x').and_then(|(w, h)| Some(justdk::DisplayMode { width: w.parse().ok()?, height: h.parse().ok()? }));
         let Some(mode) = mode else {
             println!("{ERR}usage: display [WxH | scale auto|1|2]{RESET}");
             return;
@@ -1268,7 +1268,7 @@ impl Shell {
         match fs::list_dir(&p) {
             Ok(list) => {
                 for (e, st) in &list {
-                    if st.kind == arcfs::Kind::Dir {
+                    if st.kind == justfs::Kind::Dir {
                         println!("  {DIM}{}{RESET}  {:>10}  {ACCENT}{}/{RESET}", fmt_time(st.modified), "", e.name);
                     } else {
                         println!("  {DIM}{}{RESET}  {:>10}  {}", fmt_time(st.modified), Size(st.size).to_string(), e.name);
@@ -1329,20 +1329,20 @@ impl Shell {
             };
             let i = &d.info;
             println!("{BOLD}{}{RESET}  {}", d.description(), d.location());
-            if i.bus == arcdk::BUS_PCI {
+            if i.bus == justdk::BUS_PCI {
                 println!(
                     "  id        {:04x}:{:04x}  (subsystem {:04x}:{:04x}, revision {:02x})",
                     i.vendor, i.device, i.subsystem_vendor, i.subsystem, i.revision
                 );
                 println!("  class     {:02x}:{:02x}:{:02x}", i.class, i.subclass, i.prog_if);
             }
-            if i.irq != arcdk::IRQ_NONE {
+            if i.irq != justdk::IRQ_NONE {
                 println!("  IRQ       {}", i.irq);
             }
             for (n, r) in i.resources.iter().enumerate() {
                 match r.kind {
-                    arcdk::RES_MEMORY => println!("  [{n}]       memory {:#x} ({})", r.base, Size(r.size)),
-                    arcdk::RES_IO => println!("  [{n}]       ports  {:#x}", r.base),
+                    justdk::RES_MEMORY => println!("  [{n}]       memory {:#x} ({})", r.base, Size(r.size)),
+                    justdk::RES_IO => println!("  [{n}]       ports  {:#x}", r.base),
                     _ => {}
                 }
             }
@@ -1464,7 +1464,7 @@ impl Shell {
 
     fn sysinfo(&self) {
         let mut brand = [0u8; 48];
-        println!("{BOLD}arcOS{RESET} {}", crate::VERSION);
+        println!("{BOLD}JustOS{RESET} {}", crate::VERSION);
         println!("  processor  {} ({} running)", crate::arch::cpu::brand(&mut brand), crate::arch::smp::count());
         let (_, usable) = mem::frame::stats();
         println!("  memory     {}", Size(usable));

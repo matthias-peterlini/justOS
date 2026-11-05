@@ -6,7 +6,7 @@ use super::aml::Aml;
 use crate::sync::IrqLock;
 use alloc::string::String;
 use alloc::vec::Vec;
-use arcaml::{NodeId, ObjectType, Value};
+use justaml::{NodeId, ObjectType, Value};
 
 #[derive(Clone, Debug, Default)]
 pub struct Battery {

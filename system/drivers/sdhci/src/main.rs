@@ -17,14 +17,14 @@ use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use arcdrv::{
+use justdrv::{
     BlockDesc, DeviceInfo, Mmio, Mutex, Pci, Status, BLOCK_READONLY, BLOCK_REMOVABLE, BUS_SD, DEVICE_OWNED, E_GONE, E_IO, E_NODEV,
     E_TIMEOUT, OK, RES_MEMORY,
 };
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "sdhci",
     version: "1.1.0",
     probe: probe,
@@ -97,8 +97,8 @@ enum Mode {
 
 /// The bounce buffer and, for ADMA2, its descriptor table.
 struct DmaBuffers {
-    data: arcdrv::Dma,
-    table: arcdrv::Dma,
+    data: justdrv::Dma,
+    table: justdrv::Dma,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -196,8 +196,8 @@ unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
     let c = unsafe { &*(ctx as *const Controller) };
     for s in &c.slots {
         s.regs.write8(RESET, RESET_ALL);
-        if !arcdrv::wait_until(100, || s.regs.read8(RESET) & RESET_ALL == 0) {
-            arcdrv::warn!("{}: the controller does not come out of reset", s.name);
+        if !justdrv::wait_until(100, || s.regs.read8(RESET) & RESET_ALL == 0) {
+            justdrv::warn!("{}: the controller does not come out of reset", s.name);
         }
         enable_status(&s.regs);
         let card = s.card.load(Ordering::Acquire);
@@ -209,7 +209,7 @@ unsafe extern "C" fn resume(ctx: *mut c_void) -> Status {
                 matches!(identify(s), Ok(id) if id.cid == card.cid && id.block_addressing == card.block_addressing)
             };
             if !same {
-                arcdrv::warn!("{}: the card is not the one there before sleep", s.name);
+                justdrv::warn!("{}: the card is not the one there before sleep", s.name);
                 card.gone.store(true, Ordering::Release);
                 s.power_off();
             }
@@ -226,7 +226,7 @@ impl Slot {
 
     fn reset(&self, what: u8) {
         self.regs.write8(RESET, what);
-        arcdrv::wait_until(100, || self.regs.read8(RESET) & what == 0);
+        justdrv::wait_until(100, || self.regs.read8(RESET) & what == 0);
     }
 
     /// Clears the errors and resets the lines after a failed command.
@@ -242,7 +242,7 @@ impl Slot {
     /// wait: the lines are reset and the error returned.
     fn wait_int(&self, bits: u16, timeout_ms: u64) -> Result<(), Status> {
         let mut status = 0;
-        let done = arcdrv::wait_until(timeout_ms, || {
+        let done = justdrv::wait_until(timeout_ms, || {
             status = self.int_status();
             status & (bits | INT_ERROR) != 0
         });
@@ -265,7 +265,7 @@ impl Slot {
         if data.is_some() || resp == Resp::R1b {
             inhibit |= DAT_INHIBIT;
         }
-        if !arcdrv::wait_until(1000, || self.regs.read32(PRESENT) & inhibit == 0) {
+        if !justdrv::wait_until(1000, || self.regs.read32(PRESENT) & inhibit == 0) {
             self.recover();
             return Err(E_TIMEOUT);
         }
@@ -360,7 +360,7 @@ impl Slot {
         let mut next = bufs.data.phys() + SDMA_BOUNDARY as u64;
         loop {
             let mut status = 0;
-            let done = arcdrv::wait_until(timeout_ms, || {
+            let done = justdrv::wait_until(timeout_ms, || {
                 status = self.int_status();
                 status & (INT_TRANSFER | INT_DMA | INT_ERROR) != 0
             });
@@ -399,12 +399,12 @@ impl Slot {
         };
         let mut v = ((div & 0xFF) << 8 | ((div >> 8) & 3) << 6) as u16 | 1;
         self.regs.write16(CLOCK, v);
-        if !arcdrv::wait_until(150, || self.regs.read16(CLOCK) & 2 != 0) {
-            arcdrv::warn!("{}: the clock does not settle", self.name);
+        if !justdrv::wait_until(150, || self.regs.read16(CLOCK) & 2 != 0) {
+            justdrv::warn!("{}: the clock does not settle", self.name);
         }
         v |= 4;
         self.regs.write16(CLOCK, v);
-        arcdrv::sleep_ms(2);
+        justdrv::sleep_ms(2);
     }
 
     fn power_on(&self) {
@@ -418,7 +418,7 @@ impl Slot {
         };
         self.regs.write8(POWER, volts << 1);
         self.regs.write8(POWER, volts << 1 | 1);
-        arcdrv::sleep_ms(10);
+        justdrv::sleep_ms(10);
     }
 
     fn power_off(&self) {
@@ -492,7 +492,7 @@ fn identify(s: &Slot) -> Result<Identity, Status> {
     s.power_on();
     s.set_clock(400);
     s.regs.write8(TIMEOUT, 0x0E);
-    arcdrv::sleep_ms(2);
+    justdrv::sleep_ms(2);
 
     s.command(0, 0, Resp::None, None)?;
     // SD 2.0 cards answer CMD8 with the check pattern.
@@ -500,7 +500,7 @@ fn identify(s: &Slot) -> Result<Identity, Status> {
 
     let mut mmc = false;
     let mut ocr = 0;
-    let start = arcdrv::time_ms();
+    let start = justdrv::time_ms();
     // SD: ACMD41 until the card is ready.
     loop {
         match s.app_command(0, 41, if v2 { 1 << 30 } else { 0 } | 0x00FF_8000, Resp::R3) {
@@ -516,23 +516,23 @@ fn identify(s: &Slot) -> Result<Identity, Status> {
                 break;
             }
         }
-        if arcdrv::time_ms() - start > 1500 {
+        if justdrv::time_ms() - start > 1500 {
             return Err(E_TIMEOUT);
         }
-        arcdrv::sleep_ms(10);
+        justdrv::sleep_ms(10);
     }
     if mmc {
         s.command(0, 0, Resp::None, None)?;
-        let start = arcdrv::time_ms();
+        let start = justdrv::time_ms();
         loop {
             ocr = s.command(1, 0x40FF_8000, Resp::R3, None)?[0];
             if ocr & (1 << 31) != 0 {
                 break;
             }
-            if arcdrv::time_ms() - start > 1500 {
+            if justdrv::time_ms() - start > 1500 {
                 return Err(E_TIMEOUT);
             }
-            arcdrv::sleep_ms(10);
+            justdrv::sleep_ms(10);
         }
     }
     let block_addressing = ocr & (1 << 30) != 0;
@@ -622,7 +622,7 @@ fn transfer(card: &Card, lba: u64, count: u32, buf: *mut u8, write: bool) -> Sta
             None => s.command(index, arg, Resp::R1, Some(data)).and_then(|_| s.read_data(chunk)),
         };
         if let Err(e) = result {
-            arcdrv::warn!("{}: {} of sector {at} failed: {}", s.name, if write { "write" } else { "read" }, arcdrv::status_name(e));
+            justdrv::warn!("{}: {} of sector {at} failed: {}", s.name, if write { "write" } else { "read" }, justdrv::status_name(e));
             return e;
         }
         done += n;
@@ -648,7 +648,7 @@ fn insert(s: &'static Slot) -> Option<(&'static Card, u32)> {
         match identify(s) {
             Ok(id) => id,
             Err(e) => {
-                arcdrv::warn!("{}: the card does not answer ({})", s.name, arcdrv::status_name(e));
+                justdrv::warn!("{}: the card does not answer ({})", s.name, justdrv::status_name(e));
                 s.power_off();
                 return None;
             }
@@ -658,7 +658,7 @@ fn insert(s: &'static Slot) -> Option<(&'static Card, u32)> {
     let mut info = DeviceInfo::empty();
     info.bus = BUS_SD;
     info.set_name(&s.name);
-    let device = arcdrv::device_add(s.parent, &info, &id.description, DEVICE_OWNED);
+    let device = justdrv::device_add(s.parent, &info, &id.description, DEVICE_OWNED);
     if device < 0 {
         return None;
     }
@@ -672,10 +672,10 @@ fn insert(s: &'static Slot) -> Option<(&'static Card, u32)> {
         read,
         write,
         flush: None,
-        model: arcdrv::model_name(&id.description),
+        model: justdrv::model_name(&id.description),
     }));
-    arcdrv::info!("{}: {}{}", s.name, id.description, if readonly { ", write-protected" } else { "" });
-    arcdrv::block_register(device as u32, desc);
+    justdrv::info!("{}: {}{}", s.name, id.description, if readonly { ", write-protected" } else { "" });
+    justdrv::block_register(device as u32, desc);
     s.card.store(card as *const Card as *mut Card, Ordering::Release);
     Some((card, device as u32))
 }
@@ -689,13 +689,13 @@ unsafe extern "C" fn watch(ctx: *mut c_void) {
     let mut failed = false;
     loop {
         if s.paused.load(Ordering::Acquire) {
-            arcdrv::sleep_ms(300);
+            justdrv::sleep_ms(300);
             continue;
         }
         let present = s.card_present();
         match card {
             None if present && !failed => {
-                arcdrv::sleep_ms(100); // let the contacts settle
+                justdrv::sleep_ms(100); // let the contacts settle
                 card = insert(s);
                 failed = card.is_none();
             }
@@ -703,9 +703,9 @@ unsafe extern "C" fn watch(ctx: *mut c_void) {
                 c.gone.store(true, Ordering::Release);
                 s.card.store(core::ptr::null_mut(), Ordering::Release);
                 drop(s.io.lock()); // the transfer in progress has ended
-                arcdrv::device_remove(device);
+                justdrv::device_remove(device);
                 s.power_off();
-                arcdrv::info!("{}: card removed", s.name);
+                justdrv::info!("{}: card removed", s.name);
                 card = None;
                 // A card that stopped answering is not retried until it is
                 // taken out.
@@ -714,7 +714,7 @@ unsafe extern "C" fn watch(ctx: *mut c_void) {
             None if !present => failed = false,
             _ => {}
         }
-        arcdrv::sleep_ms(300);
+        justdrv::sleep_ms(300);
     }
 }
 
@@ -737,8 +737,8 @@ fn probe(dev: &DeviceInfo) -> Status {
             continue; // nothing sensible there
         }
         regs.write8(RESET, RESET_ALL);
-        if !arcdrv::wait_until(100, || regs.read8(RESET) & RESET_ALL == 0) {
-            arcdrv::warn!("slot {i}: the controller does not come out of reset");
+        if !justdrv::wait_until(100, || regs.read8(RESET) & RESET_ALL == 0) {
+            justdrv::warn!("slot {i}: the controller does not come out of reset");
             continue;
         }
         let caps = regs.read32(CAPABILITIES);
@@ -753,7 +753,7 @@ fn probe(dev: &DeviceInfo) -> Status {
         } else {
             Mode::Pio
         };
-        let bufs = match (arcdrv::Dma::new(DMA_SIZE), arcdrv::Dma::new(4096)) {
+        let bufs = match (justdrv::Dma::new(DMA_SIZE), justdrv::Dma::new(4096)) {
             (Some(data), Some(table)) if mode != Mode::Pio => Some(DmaBuffers { data, table }),
             _ => {
                 mode = Mode::Pio;
@@ -772,7 +772,7 @@ fn probe(dev: &DeviceInfo) -> Status {
             paused: AtomicBool::new(false),
             card: AtomicPtr::new(core::ptr::null_mut()),
         }));
-        arcdrv::spawn("sdhci", watch, slot as *const Slot as *mut c_void);
+        justdrv::spawn("sdhci", watch, slot as *const Slot as *mut c_void);
         list.push(slot);
         slots += 1;
         spec = version;
@@ -782,12 +782,12 @@ fn probe(dev: &DeviceInfo) -> Status {
         return E_NODEV;
     }
     let c: &'static Controller = Box::leak(Box::new(Controller { slots: list }));
-    arcdrv::power_hooks(dev.id, c as *const Controller as *mut c_void, Some(suspend), resume);
+    justdrv::power_hooks(dev.id, c as *const Controller as *mut c_void, Some(suspend), resume);
     let how = match dma {
         Mode::Adma2 => "ADMA2",
         Mode::Sdma => "SDMA",
         Mode::Pio => "no DMA",
     };
-    arcdrv::info!("{slots} slot{}, specification {}.00, {how}", if slots == 1 { "" } else { "s" }, spec + 1);
+    justdrv::info!("{slots} slot{}, specification {}.00, {how}", if slots == 1 { "" } else { "s" }, spec + 1);
     OK
 }

@@ -1,21 +1,21 @@
 <div align="center">
 
-# arcOS
+# JustOS
 
 **Un sistema operativo per PC x86-64 scritto da zero.**
 
 Boot loader, kernel, file system, driver, interfaccia grafica e linguaggio
 di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 
-[**Scarica l'ultima versione**](https://github.com/matthias-peterlini/ArcOs/releases/latest) ·
+[**Scarica l'ultima versione**](https://github.com/matthias-peterlini/justos/releases/latest) ·
 [Documentazione](docs/) ·
 [Architettura](docs/architettura.md) ·
 [Compatibilità](docs/compat.md) ·
 [Roadmap](docs/roadmap.md)
 
-[![Build](https://github.com/matthias-peterlini/ArcOs/actions/workflows/build.yml/badge.svg)](https://github.com/matthias-peterlini/ArcOs/actions/workflows/build.yml)
+[![Build](https://github.com/matthias-peterlini/justos/actions/workflows/build.yml/badge.svg)](https://github.com/matthias-peterlini/justos/actions/workflows/build.yml)
 
-![La scrivania di arcOS](docs/screenshots/scrivania.jpg)
+![La scrivania di JustOS](docs/screenshots/scrivania.jpg)
 
 </div>
 
@@ -32,12 +32,12 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
   volume, luminosità, account) e il centro notifiche con il calendario. A
   schermo intero (F11) la barra si aggancia in alto e porta con sé il nome
   dell'app e i suoi pulsanti. Il carattere è Google Sans Flex; icone,
-  suoni e musica sono creati per arcOS; tra gli sfondi ci sono foto delle
+  suoni e musica sono creati per JustOS; tra gli sfondi ci sono foto delle
   Dolomiti da Unsplash (autori in
   `rootfs/system/gui/wallpapers/CREDITS.txt`).
 - **Al sicuro e aggiornato**: una password blocca lo schermo (all'avvio,
   con logo+L o dopo qualche minuto di pausa), Stamp salva una schermata in
-  Immagini. arcOS si aggiorna da solo come un telefono: la versione nuova
+  Immagini. JustOS si aggiorna da solo come un telefono: la versione nuova
   va nell'altro dei due slot di sistema, parte al riavvio e, se non
   funziona, si torna da soli alla precedente. Le app
   del Negozio girano in una sandbox: vedono solo la propria cartella e i
@@ -75,7 +75,7 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
   l'interfaccia nel codice. Le app macOS non possono girare; i limiti sono
   in [compatibilità](docs/compat.md#cosa-non-può-girare).
 - **Ha il suo linguaggio**, ArcScript, con compilatore e macchina virtuale
-  che girano su arcOS, e il suo IDE preinstallato, **ArcStudio**: errori
+  che girano su JustOS, e il suo IDE preinstallato, **ArcStudio**: errori
   sottolineati mentre si scrive e l'anteprima dal vivo dell'interfaccia.
 - **Scritto da zero**: niente codice di Linux, Unix, DOS o Windows, nessuna
   crate di terze parti. Solo il compilatore Rust e `core`/`alloc`.
@@ -89,7 +89,7 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 </tr>
 <tr>
 <td><img src="docs/screenshots/schermo-intero.jpg" alt="Schermo intero"><br><b>Schermo intero</b>: la barra si aggancia con il nome dell'app.</td>
-<td><img src="docs/screenshots/browser.jpg" alt="ticly browser"><br><b>ticly browser</b>: Wikipedia con il motore web di arcOS.</td>
+<td><img src="docs/screenshots/browser.jpg" alt="ticly browser"><br><b>ticly browser</b>: Wikipedia con il motore web di JustOS.</td>
 </tr>
 <tr>
 <td width="50%"><img src="docs/screenshots/avvio.jpg" alt="Avvio"><br><b>Avvio</b>: solo il logo e una barra di caricamento.</td>
@@ -115,38 +115,38 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 
 ## Provarlo
 
-Nelle [release](https://github.com/matthias-peterlini/ArcOs/releases)
+Nelle [release](https://github.com/matthias-peterlini/justos/releases)
 ci sono due file:
 
 | File | Cosa farne |
 |---|---|
-| `arcos.iso` | **CD live**: si avvia in una macchina virtuale (VirtualBox, VMware, QEMU) o da un CD, con BIOS o UEFI. Il sistema gira in memoria e le modifiche si perdono allo spegnimento. |
-| `arcos-img.zip` | **Immagine di disco** da scrivere su una chiavetta USB (balenaEtcher, Rufus in modalità DD, `dd`) per avviare un PC vero. Secure Boot va disattivato. |
+| `justos.iso` | **CD live**: si avvia in una macchina virtuale (VirtualBox, VMware, QEMU) o da un CD, con BIOS o UEFI. Il sistema gira in memoria e le modifiche si perdono allo spegnimento. |
+| `justos-img.zip` | **Immagine di disco** da scrivere su una chiavetta USB (balenaEtcher, Rufus in modalità DD, `dd`) per avviare un PC vero. Secure Boot va disattivato. |
 
 Il modo più veloce, con QEMU:
 
 ```sh
-qemu-system-x86_64 -m 512M -cdrom arcos.iso -device ich9-intel-hda -device hda-output
+qemu-system-x86_64 -m 512M -cdrom justos.iso -device ich9-intel-hda -device hda-output
 ```
 
 In VirtualBox basta una macchina "Other/Unknown (64-bit)" con 512 MiB di
-memoria e `arcos.iso` nel lettore CD.
+memoria e `justos.iso` nel lettore CD.
 
 ## Cosa c'è dentro
 
 | Parte | Cosa fa | Dettagli |
 |---|---|---|
-| **ArcBoot** | loader per BIOS (MBR + secondo stadio in assembly) e per UEFI (un'applicazione EFI in Rust); entrambi scelgono uno dei due slot di sistema (aggiornamenti A/B con ritorno indietro) e passano al kernel la stessa `BootInfo` | [architettura](docs/architettura.md#aggiornamenti-del-sistema-ab) |
+| **JustBoot** | loader per BIOS (MBR + secondo stadio in assembly) e per UEFI (un'applicazione EFI in Rust); entrambi scelgono uno dei due slot di sistema (aggiornamenti A/B con ritorno indietro) e passano al kernel la stessa `BootInfo` | [architettura](docs/architettura.md#aggiornamenti-del-sistema-ab) |
 | **Kernel** | 64 bit, memoria virtuale a 4 livelli, scheduler preemptivo, thread, code di attesa, MSI/MSI-X, ACPI con un interprete AML scritto da zero (spegnimento, sospensione in RAM, batteria, temperature) | [architettura](docs/architettura.md#kernel) |
 | **Driver** | pacchetti `.adp` indipendenti dal kernel: il kernel confronta i manifesti con l'hardware e carica il driver giusto da solo, all'avvio e a sistema avviato | [driver](docs/driver.md) |
-| **ArcFS** | il file system nativo: blocchi da 4 KiB, extent, controllo di coerenza; volumi con nome (`sys:`, `ram:`, `chiavetta:`) | [architettura](docs/architettura.md#file-system-arcfs) |
+| **JustFS** | il file system nativo: blocchi da 4 KiB, extent, controllo di coerenza; volumi con nome (`sys:`, `ram:`, `chiavetta:`) | [architettura](docs/architettura.md#file-system-justfs) |
 | **Interfaccia** | splash, configurazione guidata, scrivania con dock, Launchpad, notifiche, ricerca globale, snap delle finestre e animazioni; le app di sistema, tra cui l'IDE ArcStudio | [gui](docs/gui.md) |
-| **Programmi** | in modalità utente, ognuno nel suo spazio di indirizzi, a riga di comando o con finestre proprie (`arcui`) | [programmi](docs/programmi.md) |
+| **Programmi** | in modalità utente, ognuno nel suo spazio di indirizzi, a riga di comando o con finestre proprie (`justui`) | [programmi](docs/programmi.md) |
 | **Negozio** | 2048, Campo minato, Serpente, Sudoku, Tris, Disegno; BusyBox e Lua per il Terminale | [gui](docs/gui.md#il-negozio-e-le-app-installabili) |
 | **Compatibilità** | eseguibili ELF statici Linux, `.exe` Windows x64 (console e finestre), programmi Java e app Android (`.dex`, `.apk`); installazione di `.deb`, `.tar.gz`, `.zip` e `.pkg` con un doppio clic | [compatibilità](docs/compat.md) |
-| **ArcScript** | il linguaggio di arcOS: `arcc` compila ed esegue `.as` e pacchetti `.arc`; ArcStudio è l'IDE con anteprima dal vivo | [ArcScript](docs/arcscript.md#arcstudio) |
+| **ArcScript** | il linguaggio di JustOS: `arcc` compila ed esegue `.as` e pacchetti `.arc`; ArcStudio è l'IDE con anteprima dal vivo | [ArcScript](docs/arcscript.md#arcstudio) |
 | **Rete** | ARP, IPv4, ICMP, UDP, TCP, DHCP, DNS; TLS 1.3 con certificati verificati e HTTP(S) | |
-| **Web** | `arcweb`: HTML, CSS (flexbox, grid, tabelle, media query), PNG, JPEG e GIF, per il ticly browser | [gui](docs/gui.md#il-motore-web) |
+| **Web** | `justweb`: HTML, CSS (flexbox, grid, tabelle, media query), PNG, JPEG e GIF, per il ticly browser | [gui](docs/gui.md#il-motore-web) |
 | **Shell** | una quarantina di comandi, cronologia, completamento con Tab | [primi passi](#primi-passi-nel-terminale) |
 
 ### Hardware
@@ -173,9 +173,9 @@ giusti, grazie a `rust-toolchain.toml`), `nasm`, `qemu-system-x86_64` e,
 per provare l'avvio UEFI, OVMF.
 
 ```sh
-make            # l'immagine di disco build/arcos.img (BIOS e UEFI)
-make iso        # il CD live build/arcos.iso
-make run        # avvia arcOS in QEMU (anche run-uefi, run-q35, run-nvme, run-iso)
+make            # l'immagine di disco build/justos.img (BIOS e UEFI)
+make iso        # il CD live build/justos.iso
+make run        # avvia JustOS in QEMU (anche run-uefi, run-q35, run-nvme, run-iso)
 ```
 
 I test girano tutti in QEMU, senza schermo:
@@ -199,7 +199,7 @@ memoria della macchina virtuale.
 
 ## Su un PC vero
 
-`build/arcos.img` (o `arcos-img.zip` delle release) scritta su una
+`build/justos.img` (o `justos-img.zip` delle release) scritta su una
 chiavetta USB si avvia sia in modalità BIOS/legacy sia UEFI; il loader non
 è firmato, quindi Secure Boot va disattivato. Il disco di sistema può
 essere la chiavetta stessa.
@@ -238,13 +238,13 @@ shutdown / restart
 
 | Percorso | Contenuto |
 |---|---|
-| `boot/bios/`, `boot/uefi/` | ArcBoot per BIOS e per UEFI |
+| `boot/bios/`, `boot/uefi/` | JustBoot per BIOS e per UEFI |
 | `system/kernel/` | il kernel, con l'interfaccia grafica (`src/gui`) |
 | `system/drivers/` | i driver, uno per cartella, ognuno con il suo `driver.manifest` |
 | `system/apps/` | i programmi, tra cui `winrun` (programmi Windows), `dalvik` (Java e Android) e `arcc` (ArcScript) |
 | `system/store/` | le app del Negozio (giochi e Disegno), con icona e scheda |
-| `system/libs/` | le librerie: ABI dei driver (`arcdk`, `arcdrv`), programmi (`arcrt`), finestre (`arcui`), disegno (`arcgfx`), ArcFS, USB, virtio, ArcScript, TLS (`arctls`), web (`arcweb`), JavaScript (`arcjs`), Dalvik (`arcdex`) |
-| `tools/arctool/` | strumento host: crea pacchetti, immagini e CD, legge e scrive volumi ArcFS |
+| `system/libs/` | le librerie: ABI dei driver (`justdk`, `justdrv`), programmi (`justrt`), finestre (`justui`), disegno (`justgfx`), JustFS, USB, virtio, ArcScript, TLS (`justtls`), web (`justweb`), JavaScript (`justjs`), Dalvik (`justdex`) |
+| `tools/justtool/` | strumento host: crea pacchetti, immagini e CD, legge e scrive volumi JustFS |
 | `tools/assets/` | i generatori di caratteri, icone, sfondi, suoni e musica |
 | `tools/qemu/` | modelli per QEMU di dispositivi che QEMU non ha (Realtek RTL8169, RTL8168, RTL8125) |
 | `rootfs/` | i file del volume di sistema |
@@ -253,6 +253,19 @@ shutdown / restart
 
 ## Licenza
 
-Proprietaria: vedi [LICENSE](LICENSE). I caratteri Google Sans Flex e
-DejaVu Sans Mono hanno le loro licenze libere (SIL OFL), in
-`system/kernel/assets/LICENSES.md`.
+Copyright (C) 2026 Matthias Peterlini <https://matthiaspeterlini.tech>
+
+JustOS è software libero: puoi ridistribuirlo e/o modificarlo secondo i
+termini della GNU General Public License pubblicata dalla Free Software
+Foundation, nella versione 3 o (a tua scelta) in una qualsiasi versione
+successiva (GPL-3.0-or-later). È distribuito nella speranza che sia utile,
+ma SENZA ALCUNA GARANZIA, nemmeno quella implicita di COMMERCIABILITÀ o di
+IDONEITÀ A UN PARTICOLARE SCOPO. Il testo completo è in [LICENSE](LICENSE) e
+su <https://licence.justos.dev>.
+
+I caratteri Google Sans Flex e DejaVu Sans Mono hanno le loro licenze
+libere (SIL OFL), in `system/kernel/assets/LICENSES.md`; le foto degli
+sfondi sono di Unsplash (licenza Unsplash), con gli autori in
+`rootfs/system/gui/wallpapers/CREDITS.txt`.
+
+Sito: <https://justos.dev>

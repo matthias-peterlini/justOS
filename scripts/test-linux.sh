@@ -12,15 +12,15 @@
 set -u
 IMAGE=$(realpath "${1:?usage: test-linux.sh <image>}")
 HERE=$(cd "$(dirname "$0")" && pwd)
-ARCTOOL=${ARCTOOL:-$HERE/../tools/target/release/arctool}
+JUSTTOOL=${JUSTTOOL:-$HERE/../tools/target/release/justtool}
 WORK=$(mktemp -d)
 PID=
 cleanup() { [ -n "$PID" ] && kill "$PID" 2>/dev/null; rm -rf "$WORK"; }
 trap cleanup EXIT
-cp --sparse=always "$IMAGE" "$WORK/arcos.img" || exit 2
+cp --sparse=always "$IMAGE" "$WORK/justos.img" || exit 2
 cd "$WORK"
-"$ARCTOOL" fs arcos.img mkdir /home/lt >/dev/null 2>&1
-put() { "$ARCTOOL" fs arcos.img put "$1" "/home/lt/$2" >/dev/null; }
+"$JUSTTOOL" fs justos.img mkdir /home/lt >/dev/null 2>&1
+put() { "$JUSTTOOL" fs justos.img put "$1" "/home/lt/$2" >/dev/null; }
 
 PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
 mkdir www && echo "hello from the host" > www/hello.txt
@@ -63,7 +63,7 @@ fi
     [ $G = 1 ] && printf '%s\n' 'gt: goroutines sum 3599982' 'gt: slept true' 'gt: http 200 hello from the host'
 } > expect.txt
 
-STEP_WAIT=${STEP_WAIT:-2} "$HERE/test.sh" arcos.img session.txt > out.txt 2>&1
+STEP_WAIT=${STEP_WAIT:-2} "$HERE/test.sh" justos.img session.txt > out.txt 2>&1
 STATUS=$?
 FAILED=0
 while IFS= read -r pattern; do

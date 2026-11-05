@@ -1,7 +1,7 @@
-# arcOS build.
+# JustOS build.
 #
-#   make            build the bootable disk image (build/arcos.img)
-#   make iso        build a live CD (build/arcos.iso), BIOS and UEFI
+#   make            build the bootable disk image (build/justos.img)
+#   make iso        build a live CD (build/justos.iso), BIOS and UEFI
 #   make run-iso    start the live CD in QEMU, with no hard disk
 #   make run        start it in QEMU (PC with IDE disk)
 #   make run-q35    start it in QEMU (modern PC: AHCI/SATA disk)
@@ -13,8 +13,8 @@
 #   make test-drivers  boot once per emulated disk, network card and USB
 #                   controller and check that its driver works (SLEEP=1:
 #                   after the machine slept and woke up; test-audio too)
-#   make test-arcscript  run ArcScript programs on arcOS and check them
-#   make test-compat   run a Linux and a Windows program on arcOS and check them
+#   make test-arcscript  run ArcScript programs on JustOS and check them
+#   make test-compat   run a Linux and a Windows program on JustOS and check them
 #   make test-audio    play sounds on every emulated sound card and check them
 #   make test-display  switch the resolution on every emulated display, and
 #                   wake up with the picture back
@@ -29,7 +29,7 @@
 #   make test-update   install a system update into the other slot, restart
 #                   into it; a broken one goes back by itself (BIOS and UEFI)
 #   make updates    the signed index of updates (build/updates): the store's
-#                   apps and this arcOS as a system image, signed with the
+#                   apps and this JustOS as a system image, signed with the
 #                   private key in UPDATES_KEY; scripts/publish-updates.sh
 #                   puts it online
 
@@ -46,7 +46,7 @@ OVMF_VARS ?= /usr/share/OVMF/OVMF_VARS_4M.fd
 
 BUILD    := build
 TARGET   := system/target/x86_64-unknown-none/$(PROFILE)
-ARCTOOL  := tools/target/release/arctool
+JUSTTOOL  := tools/target/release/justtool
 EFI_APP  := boot/uefi/target/x86_64-unknown-uefi/release/BOOTX64.efi
 DRIVERS  := $(notdir $(wildcard system/drivers/*))
 PACKAGES := $(DRIVERS:%=$(BUILD)/drivers/%.adp)
@@ -54,14 +54,14 @@ APPS     := $(notdir $(wildcard system/apps/*))
 # Programs of the store (sys:/store), installed with the Negozio app.
 STORE    := $(notdir $(wildcard system/store/*))
 ROOT     := $(BUILD)/root
-IMAGE    := $(BUILD)/arcos.img
-ISO      := $(BUILD)/arcos.iso
+IMAGE    := $(BUILD)/justos.img
+ISO      := $(BUILD)/justos.iso
 # Size of the live CD's system volume (it lives in memory).
 LIVE_SIZE ?= 48M
 # App updates: the signing key (kept out of the repository) and where the
 # index is published (kernel/src/appupdate.rs looks there).
-UPDATES_KEY ?= $(HOME)/.arcos-keys/updates.key
-UPDATES_URL ?= https://raw.githubusercontent.com/matthias-peterlini/ArcOs/updates
+UPDATES_KEY ?= $(HOME)/.justos-keys/updates.key
+UPDATES_URL ?= https://raw.githubusercontent.com/matthias-peterlini/justos/updates
 VERSION  := $(shell sed -n 's/^version = "\(.*\)"/\1/p' system/Cargo.toml | head -1)
 
 ifeq ($(PROFILE),release)
@@ -91,7 +91,7 @@ tools:
 
 $(PACKAGES): $(BUILD)/drivers/%.adp: system tools
 	@mkdir -p $(BUILD)/drivers
-	$(ARCTOOL) pack system/drivers/$*/driver.manifest $(TARGET)/$* $@
+	$(JUSTTOOL) pack system/drivers/$*/driver.manifest $(TARGET)/$* $@
 
 # The files of the system volume: rootfs/ plus the programs.
 root: system
@@ -105,18 +105,18 @@ root: system
 	gzip -dc system/kernel/assets/fonts@2x.bin.gz > $(ROOT)/system/fonts@2x.bin
 
 image: $(BUILD)/stage1.bin $(BUILD)/stage2.bin uefi system tools $(PACKAGES) root
-	$(ARCTOOL) image $(IMAGE) --size $(SIZE) --slot-size $(SLOT_SIZE) --version $(VERSION) \
+	$(JUSTTOOL) image $(IMAGE) --size $(SIZE) --slot-size $(SLOT_SIZE) --version $(VERSION) \
 		--stage1 $(BUILD)/stage1.bin --stage2 $(BUILD)/stage2.bin --efi $(EFI_APP) \
-		--kernel $(TARGET)/arc-kernel --drivers $(BUILD)/drivers --files $(ROOT)
+		--kernel $(TARGET)/just-kernel --drivers $(BUILD)/drivers --files $(ROOT)
 
-# This arcOS as a system update (a slot image).
-$(BUILD)/arcos-$(VERSION).slot: system tools $(PACKAGES)
-	$(ARCTOOL) slot $@ --kernel $(TARGET)/arc-kernel --drivers $(BUILD)/drivers --version $(VERSION)
+# This JustOS as a system update (a slot image).
+$(BUILD)/justos-$(VERSION).slot: system tools $(PACKAGES)
+	$(JUSTTOOL) slot $@ --kernel $(TARGET)/just-kernel --drivers $(BUILD)/drivers --version $(VERSION)
 
 iso: $(BUILD)/stage1.bin $(BUILD)/stage2.bin uefi system tools $(PACKAGES) root
-	$(ARCTOOL) iso $(ISO) --size $(LIVE_SIZE) --version $(VERSION) \
+	$(JUSTTOOL) iso $(ISO) --size $(LIVE_SIZE) --version $(VERSION) \
 		--stage1 $(BUILD)/stage1.bin --stage2 $(BUILD)/stage2.bin --efi $(EFI_APP) \
-		--kernel $(TARGET)/arc-kernel --drivers $(BUILD)/drivers --files $(ROOT)
+		--kernel $(TARGET)/just-kernel --drivers $(BUILD)/drivers --files $(ROOT)
 
 QEMU_COMMON := -m $(MEMORY) -serial stdio -no-reboot -rtc base=localtime
 
@@ -182,11 +182,11 @@ assets:
 	tools/assets/gen_fonts.py system/kernel/assets/fonts.bin
 	tools/assets/gen_fonts.py --sharp system/kernel/assets/fonts@2x.bin.gz
 	tools/assets/gen_fonts.py --web rootfs/system/webfonts.bin
-	tools/assets/gen_logo.py system/kernel/assets/logo.bin
 	tools/assets/gen_certs.py rootfs
 	tools/assets/gen_icons.py rootfs/system/gui
 	tools/assets/gen_icons.py --store system/store
 	tools/assets/gen_wallpapers.py rootfs/system/gui/wallpapers
+	tools/assets/gen_pixel.py rootfs/system/gui/wallpapers
 	tools/assets/gen_thumbs.py rootfs/system/gui/wallpapers
 	tools/assets/gen_sounds.py rootfs/system/sounds rootfs/home/Musica
 
@@ -196,13 +196,13 @@ photos:
 	tools/assets/gen_thumbs.py rootfs/system/gui/wallpapers
 
 check:
-	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p arcdk -p arcfs -p arcgfx -p arctls -p arczip -p arcjson -p arcc-core -p arc-vm -p arcweb -p arcjs -p arcdex -p arcaml
+	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p justdk -p justfs -p justgfx -p justtls -p justzip -p justjson -p arcc-core -p arc-vm -p justweb -p justjs -p justdex -p justaml
 	cd tools && $(CARGO) test --release
 
-updates: root tools $(BUILD)/arcos-$(VERSION).slot
+updates: root tools $(BUILD)/justos-$(VERSION).slot
 	rm -rf $(BUILD)/updates
-	$(ARCTOOL) updates $(ROOT)/store $(BUILD)/updates --key $(UPDATES_KEY) --base-url $(UPDATES_URL) --system $(VERSION) \
-		--slot $(BUILD)/arcos-$(VERSION).slot
+	$(JUSTTOOL) updates $(ROOT)/store $(BUILD)/updates --key $(UPDATES_KEY) --base-url $(UPDATES_URL) --system $(VERSION) \
+		--slot $(BUILD)/justos-$(VERSION).slot
 
 clean:
 	rm -rf $(BUILD)

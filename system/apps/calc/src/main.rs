@@ -7,10 +7,10 @@
 extern crate alloc;
 
 use alloc::string::String;
-use arcrt::console::color::*;
-use arcrt::{print, println};
+use justrt::console::color::*;
+use justrt::{print, println};
 
-arcrt::main!(main);
+justrt::main!(main);
 
 struct Parser<'a> {
     s: &'a [u8],
@@ -193,7 +193,7 @@ fn main(args: &str) -> i32 {
                 0
             }
             Err(e) => {
-                arcrt::eprintln!("{e}");
+                justrt::eprintln!("{e}");
                 1
             }
         };
@@ -202,7 +202,7 @@ fn main(args: &str) -> i32 {
     let mut ans = 0.0;
     loop {
         print!("{ACCENT}›{RESET} ");
-        let Some(line) = arcrt::console::read_line() else { break };
+        let Some(line) = justrt::console::read_line() else { break };
         if line.trim().is_empty() {
             break;
         }

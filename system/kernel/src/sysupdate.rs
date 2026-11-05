@@ -1,8 +1,8 @@
 //! System updates with two slots (A/B).
 //!
-//! The disk holds the system twice, in `ARCOS/SLOTA.BIN` and `ARCOS/SLOTB.BIN`
-//! on the EFI system partition (the layout is in tools/arctool/src/slot.rs);
-//! `ARCOS/BOOT.CTL` says which one the loader starts. An update is written
+//! The disk holds the system twice, in `JUSTOS/SLOTA.BIN` and `JUSTOS/SLOTB.BIN`
+//! on the EFI system partition (the layout is in tools/justtool/src/slot.rs);
+//! `JUSTOS/BOOT.CTL` says which one the loader starts. An update is written
 //! into the slot that is not running, read back and checked, and becomes
 //! the one that starts next, on trial: it gets [`TRIES`] starts. Once it has
 //! run for [`CONFIRM_AFTER_MS`] it is known to work. If it stops before (a
@@ -22,7 +22,7 @@ use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
-use arctls::sha2::Sha256;
+use justtls::sha2::Sha256;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 const SECTOR: usize = 512;
@@ -64,8 +64,8 @@ fn seal(sector: &mut [u8]) {
     put32(sector, 0x1FC, s.wrapping_neg());
 }
 
-fn check(st: arcdk::Status, what: &str) -> Result<(), String> {
-    if st == arcdk::OK {
+fn check(st: justdk::Status, what: &str) -> Result<(), String> {
+    if st == justdk::OK {
         Ok(())
     } else {
         Err(format!("{what}: errore del disco ({st})"))
@@ -199,7 +199,7 @@ fn layout() -> Result<Layout, String> {
     check(disk.read(0, &mut mbr), "MBR")?;
     let ctl_lba = get32(&mbr, MBR_CTL) as u64;
     if &mbr[MBR_MAGIC..MBR_MAGIC + 4] != b"ARCB" || ctl_lba == 0 || ctl_lba >= disk.sectors {
-        return Err("il disco di sistema non ha gli slot di arcOS".to_string());
+        return Err("il disco di sistema non ha gli slot di JustOS".to_string());
     }
     Ok(Layout { disk, ctl_lba })
 }
@@ -228,7 +228,7 @@ impl Layout {
 
     fn header(&self, c: &Control, slot: usize) -> Option<Header> {
         let mut b = vec![0u8; SECTOR];
-        (self.disk.read(c.lba(slot), &mut b) == arcdk::OK).then_some(())?;
+        (self.disk.read(c.lba(slot), &mut b) == justdk::OK).then_some(())?;
         Header::parse(&b)
     }
 }
@@ -293,7 +293,7 @@ fn refresh() {
     *SLOTS.lock() = s.unwrap_or_default();
 }
 
-/// Checks a system image (an `arcos-<version>.slot` file) and writes it into
+/// Checks a system image (an `justos-<version>.slot` file) and writes it into
 /// the slot that is not running; it starts at the next restart, on trial.
 /// `progress(done, total)`. Returns its version.
 pub fn install(image: &[u8], progress: &mut dyn FnMut(u64, u64)) -> Result<String, String> {
@@ -302,7 +302,7 @@ pub fn install(image: &[u8], progress: &mut dyn FnMut(u64, u64)) -> Result<Strin
     if on_trial() {
         return Err("questa versione è ancora in prova: riprova tra qualche secondo".to_string());
     }
-    let h = Header::parse(image).ok_or("non è un'immagine di sistema di arcOS")?;
+    let h = Header::parse(image).ok_or("non è un'immagine di sistema di JustOS")?;
     let bytes = h.total as usize * SECTOR;
     if image.len() < bytes {
         return Err("l'immagine di sistema è troncata".to_string());
@@ -356,7 +356,7 @@ pub fn install(image: &[u8], progress: &mut dyn FnMut(u64, u64)) -> Result<Strin
     c.set_active(target, TRIES);
     l.save(&mut c)?;
     refresh();
-    crate::info!("update", "arcOS {} written to slot {}: it starts next, on trial", h.version, name(target));
+    crate::info!("update", "JustOS {} written to slot {}: it starts next, on trial", h.version, name(target));
     Ok(h.version)
 }
 
@@ -382,7 +382,7 @@ pub fn rollback() -> Result<String, String> {
     let _one = WORKING.try_lock().ok_or("sto già cambiando gli slot di sistema")?;
     let me = booted().ok_or("questo sistema non è partito da uno slot")?;
     if on_trial() {
-        return Err("questa versione è ancora in prova: se non funziona, arcOS torna indietro da solo".to_string());
+        return Err("questa versione è ancora in prova: se non funziona, JustOS torna indietro da solo".to_string());
     }
     let l = layout()?;
     let mut c = l.control()?;
@@ -431,18 +431,18 @@ pub fn start() {
         ""
     };
     crate::info!("update", "system slot {}{how}", name(me));
-    let spawned = crate::task::spawn("arc.sysupdate", || {
+    let spawned = crate::task::spawn("just.sysupdate", || {
         refresh();
         crate::task::sleep_ms(CONFIRM_AFTER_MS);
         let flags = BOOTED.load(Ordering::Relaxed);
         match confirm() {
             Ok(()) if flags & SLOT_FALLBACK != 0 => {
-                crate::warn!("update", "the new system did not start: back to arcOS {}", crate::VERSION);
-                crate::gui::notify("Aggiornamento non riuscito", &format!("La nuova versione non è partita: arcOS è tornato alla {}.", crate::VERSION), "about");
+                crate::warn!("update", "the new system did not start: back to JustOS {}", crate::VERSION);
+                crate::gui::notify("Aggiornamento non riuscito", &format!("La nuova versione non è partita: JustOS è tornato alla {}.", crate::VERSION), "about");
             }
             Ok(()) if flags & SLOT_TRIAL != 0 => {
-                crate::info!("update", "arcOS {} works: slot {} confirmed", crate::VERSION, booted().map_or('?', name));
-                crate::gui::notify("arcOS è aggiornato", &format!("Ora c'è la versione {}.", crate::VERSION), "about");
+                crate::info!("update", "JustOS {} works: slot {} confirmed", crate::VERSION, booted().map_or('?', name));
+                crate::gui::notify("JustOS è aggiornato", &format!("Ora c'è la versione {}.", crate::VERSION), "about");
             }
             Ok(()) => {}
             Err(e) => {
@@ -457,6 +457,6 @@ pub fn start() {
         refresh();
     });
     if spawned.is_none() {
-        crate::warn!("update", "could not start arc.sysupdate");
+        crate::warn!("update", "could not start just.sysupdate");
     }
 }

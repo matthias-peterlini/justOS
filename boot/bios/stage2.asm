@@ -1,9 +1,9 @@
-; ArcBoot stage 2.
+; JustBoot stage 2.
 ;
 ; Loaded by stage 1 at 0000:7E00, entered in real mode with the boot drive in
 ; DL. It:
 ;   1. enables the A20 line and switches to "unreal" mode (4 GiB data limit);
-;   2. on a disk, picks the system slot (A or B) from ARCOS/BOOT.CTL;
+;   2. on a disk, picks the system slot (A or B) from JUSTOS/BOOT.CTL;
 ;   3. reads the kernel image to 1 MiB, the boot pack right after it and,
 ;      when booting a live CD, the system volume after that;
 ;   4. collects the BIOS memory map (E820) and the 8x16 VGA font;
@@ -78,7 +78,7 @@ BI_SLOT         equ 0x84
 BI_SYSTEM_PHYS  equ 0x88
 BI_SYSTEM_SIZE  equ 0x90
 
-; BOOT.CTL and the slot header (see tools/arctool/src/slot.rs).
+; BOOT.CTL and the slot header (see tools/justtool/src/slot.rs).
 CTL_SLOT_A      equ 0x08                ; then slot B at 0x0C
 CTL_ACTIVE      equ 0x14
 CTL_TRIES       equ 0x15

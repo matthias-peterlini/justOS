@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drives arcOS's graphical interface in QEMU and takes screenshots.
+"""Drives JustOS's graphical interface in QEMU and takes screenshots.
 
 QEMU is controlled through QMP: a USB tablet gives absolute pointer
 positions, keys are sent as key codes, and `screendump` saves the screen.

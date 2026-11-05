@@ -1,9 +1,9 @@
-# ArcScript su arcOS
+# ArcScript su JustOS
 
 [ArcScript](https://github.com/matthias-peterlini/ArcScript) è il
-linguaggio applicativo di arcOS: indentazione al posto delle graffe, struct,
+linguaggio applicativo di JustOS: indentazione al posto delle graffe, struct,
 enum con `match`, `Option`/`Result` con `?`, closure, moduli, una libreria
-standard e un'interfaccia dichiarativa (`view`). Su arcOS gira il compilatore
+standard e un'interfaccia dichiarativa (`view`). Su JustOS gira il compilatore
 e la macchina virtuale del repository ArcScript, portati in Rust `no_std`.
 L'IDE è **ArcStudio**, preinstallato nell'interfaccia grafica: lì le `view`
 si vedono e si usano dal vivo (vedi sotto); `arcc` dal terminale le stampa
@@ -43,21 +43,21 @@ Gli esempi del repository ArcScript sono in `sys:/home/arcscript`:
 il progetto su più file `library`. Il taccuino `notes` è installato anche
 come programma di sistema (`sys:/apps/notes.as`).
 
-## Cosa fa la libreria standard su arcOS
+## Cosa fa la libreria standard su JustOS
 
 Tutto ciò che un programma usa fuori dalla macchina virtuale passa per
-l'interfaccia `Host` di `arc-vm`. Su arcOS la implementa `arcc`
+l'interfaccia `Host` di `arc-vm`. Su JustOS la implementa `arcc`
 (`system/apps/arcc/src/host.rs`):
 
-| Modulo | Su arcOS |
+| Modulo | Su JustOS |
 |---|---|
 | `print`, `read_line` | la console; `read_line` restituisce `None` con Esc |
 | `fs` | i volumi montati, con percorsi come `sys:/home/nota.txt`; quelli relativi partono dalla cartella corrente |
 | `path` | `/` separa i nomi; `sys:` (un volume) rende assoluto un percorso |
-| `time` | l'orologio del computer (`time.now()` conta dal 1970 come altrove; arcOS non conosce i fusi orari e legge l'orologio così com'è) |
+| `time` | l'orologio del computer (`time.now()` conta dal 1970 come altrove; JustOS non conosce i fusi orari e legge l'orologio così com'è) |
 | `os.args`, `os.cwd`, `os.exit` | come altrove |
-| `os.name` | `"arcos"` |
-| `os.env` | sempre `None`: arcOS non ha variabili d'ambiente |
+| `os.name` | `"justos"` |
+| `os.env` | sempre `None`: JustOS non ha variabili d'ambiente |
 | `os.run` | avvia un programma e ne aspetta la fine; `code` è il suo codice d'uscita, `stdout` e `stderr` restano vuoti perché l'uscita va direttamente sulla console |
 | `http` | non ancora: restituisce `Err` (lo stack di rete non ha ancora TCP) |
 | `os.notify` | non ancora: restituisce `Err` |
@@ -70,7 +70,7 @@ ArcScript).
 ## ArcStudio
 
 L'`arc-studio-ide` del repository ArcScript è scritto con egui e wgpu, che
-su arcOS non ci sono: ArcStudio è la stessa idea rifatta come app nativa
+su JustOS non ci sono: ArcStudio è la stessa idea rifatta come app nativa
 dell'interfaccia grafica (`system/kernel/src/gui/apps/arcstudio.rs`), con
 `arcc-core` e `arc-vm` collegati direttamente, senza un programma a parte.
 
@@ -111,11 +111,11 @@ Il codice viene dal repository ArcScript (commit `02dab18`, versione
 
 - `system/libs/arcc-core`: lexer, parser, compilatore, bytecode, formato
   `.arc` e diagnostica. Sono rimasti fuori solo gli eseguibili autonomi
-  (`bundle.rs`), che su arcOS non servono.
+  (`bundle.rs`), che su JustOS non servono.
 - `system/libs/arc-vm`: la macchina virtuale, i valori, le funzioni
   predefinite, la libreria standard e l'albero dell'interfaccia (`ui.rs`).
   Sono rimasti fuori il renderer (egui), i temi e il launcher del desktop.
-- `system/apps/arcc`: il programma `arcc` di arcOS, con l'`Host` di arcOS e
+- `system/apps/arcc`: il programma `arcc` di JustOS, con l'`Host` di JustOS e
   la lettura dei progetti (`Arc.toml`).
 
 Le differenze rispetto all'originale:
@@ -141,7 +141,7 @@ Le differenze rispetto all'originale:
 - `make check` esegue anche i test di `arcc-core` e `arc-vm` (sul computer
   di sviluppo): sono quelli del repository ArcScript, più quelli di
   `deflate` e `float`, che confrontano le funzioni con quelle di `std`.
-- `make test-arcscript` avvia arcOS in QEMU, copia nell'immagine i
+- `make test-arcscript` avvia JustOS in QEMU, copia nell'immagine i
   programmi di `scripts/arcscript/` ed esegue esempi, progetti, pacchetti,
   file, errori di compilazione e di esecuzione, `read_line` e la
   matematica (confrontata con i valori della libreria C), controllandone

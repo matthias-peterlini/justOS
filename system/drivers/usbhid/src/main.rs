@@ -1,6 +1,6 @@
 //! USB HID driver: keyboards, mice, trackballs, touchpads and tablets.
 //!
-//! Reads the device's report descriptor (`arcdk::hid`) to learn where keys,
+//! Reads the device's report descriptor (`justdk::hid`) to learn where keys,
 //! buttons and axes sit in its reports, then has the host controller poll
 //! the interrupt endpoint and turns every report into input events. USB
 //! keyboards do not repeat keys by themselves: a small thread per keyboard
@@ -13,14 +13,14 @@ extern crate alloc;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use arcdrv::hid::{self, Field};
-use arcdrv::usb::*;
-use arcdrv::{DeviceInfo, IrqLock, Status, ABS_MAX, AXIS_WHEEL, AXIS_X, AXIS_Y, E_NODEV, INPUT_ABS, INPUT_BUTTON, INPUT_KEY, INPUT_REL};
-use arcdrv::{KEY_PRESSED, KEY_RELEASED, KEY_REPEAT, OK};
+use justdrv::hid::{self, Field};
+use justdrv::usb::*;
+use justdrv::{DeviceInfo, IrqLock, Status, ABS_MAX, AXIS_WHEEL, AXIS_X, AXIS_Y, E_NODEV, INPUT_ABS, INPUT_BUTTON, INPUT_KEY, INPUT_REL};
+use justdrv::{KEY_PRESSED, KEY_RELEASED, KEY_REPEAT, OK};
 use core::ffi::c_void;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-arcdrv::driver! {
+justdrv::driver! {
     name: "usbhid",
     version: "1.0.0",
     probe: probe,
@@ -82,7 +82,7 @@ impl Hid {
         let dev = self.device;
         if r.has_keys {
             let mut k = self.keys.lock();
-            let now = arcdrv::time_ms();
+            let now = justdrv::time_ms();
             let pressed: Vec<u8> = r.keys.iter().copied().filter(|c| !k.held.contains(c)).collect();
             let released: Vec<u8> = k.held.iter().copied().filter(|c| !r.keys.contains(c)).collect();
             for &c in &pressed {
@@ -96,28 +96,28 @@ impl Hid {
             k.held = r.keys.clone();
             drop(k);
             for c in released {
-                arcdrv::input_event(dev, INPUT_KEY, c as u32, KEY_RELEASED);
+                justdrv::input_event(dev, INPUT_KEY, c as u32, KEY_RELEASED);
             }
             for c in pressed {
-                arcdrv::input_event(dev, INPUT_KEY, c as u32, KEY_PRESSED);
+                justdrv::input_event(dev, INPUT_KEY, c as u32, KEY_PRESSED);
             }
         }
         if r.has_pointer {
             if r.dx != 0 {
-                arcdrv::input_event(dev, INPUT_REL, AXIS_X, r.dx);
+                justdrv::input_event(dev, INPUT_REL, AXIS_X, r.dx);
             }
             if r.dy != 0 {
-                arcdrv::input_event(dev, INPUT_REL, AXIS_Y, r.dy);
+                justdrv::input_event(dev, INPUT_REL, AXIS_Y, r.dy);
             }
             if r.wheel != 0 {
                 // HID wheels count up away from the user; screens scroll down.
-                arcdrv::input_event(dev, INPUT_REL, AXIS_WHEEL, -r.wheel);
+                justdrv::input_event(dev, INPUT_REL, AXIS_WHEEL, -r.wheel);
             }
             if let Some(x) = r.abs_x {
-                arcdrv::input_event(dev, INPUT_ABS, AXIS_X, x);
+                justdrv::input_event(dev, INPUT_ABS, AXIS_X, x);
             }
             if let Some(y) = r.abs_y {
-                arcdrv::input_event(dev, INPUT_ABS, AXIS_Y, y);
+                justdrv::input_event(dev, INPUT_ABS, AXIS_Y, y);
             }
             let changed = {
                 let mut k = self.keys.lock();
@@ -127,7 +127,7 @@ impl Hid {
             };
             for b in 0..3 {
                 if changed & (1 << b) != 0 {
-                    arcdrv::input_event(dev, INPUT_BUTTON, b, (r.buttons >> b & 1) as i32);
+                    justdrv::input_event(dev, INPUT_BUTTON, b, (r.buttons >> b & 1) as i32);
                 }
             }
         }
@@ -144,8 +144,8 @@ unsafe extern "C" fn repeater(ctx: *mut c_void) {
     // SAFETY: the Hid of a keyboard; it stays alive until `stopped` is set.
     let h = unsafe { &*(ctx as *const Hid) };
     while !h.dead.load(Ordering::Acquire) {
-        arcdrv::sleep_ms(10);
-        let now = arcdrv::time_ms();
+        justdrv::sleep_ms(10);
+        let now = justdrv::time_ms();
         let due = {
             let mut k = h.keys.lock();
             match k.repeat {
@@ -157,7 +157,7 @@ unsafe extern "C" fn repeater(ctx: *mut c_void) {
             }
         };
         if let Some(c) = due {
-            arcdrv::input_event(h.device, INPUT_KEY, c as u32, KEY_REPEAT);
+            justdrv::input_event(h.device, INPUT_KEY, c as u32, KEY_REPEAT);
         }
     }
     h.stopped.store(true, Ordering::Release);
@@ -234,7 +234,7 @@ fn probe(dev: &DeviceInfo) -> Status {
         return st;
     }
     if h.keyboard {
-        arcdrv::spawn("usb-keyrepeat", repeater, ctx);
+        justdrv::spawn("usb-keyrepeat", repeater, ctx);
     } else {
         h.stopped.store(true, Ordering::Release);
     }
@@ -245,7 +245,7 @@ fn probe(dev: &DeviceInfo) -> Status {
         (false, _, true) => "tablet",
         (false, _, false) => "mouse",
     };
-    arcdrv::info!("{what} ready ({} report fields)", h.fields.len());
+    justdrv::info!("{what} ready ({} report fields)", h.fields.len());
     OK
 }
 
@@ -262,12 +262,12 @@ fn remove(device: u32) {
     // running callback.
     unsafe { (h.iface.poll_stop)(h.iface.ctx, h.endpoint) };
     while !h.stopped.load(Ordering::Acquire) {
-        arcdrv::sleep_ms(5);
+        justdrv::sleep_ms(5);
     }
     // Keys still held are released, so nothing stays stuck.
     let held = core::mem::take(&mut h.keys.lock().held);
     for c in held {
-        arcdrv::input_event(device, INPUT_KEY, c as u32, KEY_RELEASED);
+        justdrv::input_event(device, INPUT_KEY, c as u32, KEY_RELEASED);
     }
     // SAFETY: no callback or thread uses it any more.
     drop(unsafe { Box::from_raw(ptr as *mut Hid) });

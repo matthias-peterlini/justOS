@@ -1,6 +1,6 @@
 [package]
 name = "sandbox"
-description = "arcOS program: apps and their sandbox"
+description = "JustOS program: apps and their sandbox"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true
@@ -13,7 +13,7 @@ test = false
 bench = false
 
 [dependencies]
-arcrt.workspace = true
+justrt.workspace = true
 
 [lints]
 workspace = true

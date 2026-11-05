@@ -16,7 +16,7 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
-use arcrt::sys;
+use justrt::sys;
 use core::ffi::c_void;
 
 // ----------------------------------------------------------------------------
@@ -231,7 +231,7 @@ extern "win64" fn noop4(_a: u64, _b: u64, _c: u64, _d: u64) {}
 // kernel32
 
 extern "win64" fn ExitProcess(code: u32) -> ! {
-    arcrt::process::exit(code as i32)
+    justrt::process::exit(code as i32)
 }
 extern "win64" fn GetLastError() -> u32 {
     // SAFETY: single-threaded.
@@ -241,7 +241,7 @@ extern "win64" fn SetLastError(e: u32) {
     set_last_error(e);
 }
 extern "win64" fn Sleep(ms: u32) {
-    arcrt::time::sleep_ms(ms as u64);
+    justrt::time::sleep_ms(ms as u64);
 }
 extern "win64" fn GetStdHandle(which: u32) -> u64 {
     // -10 = stdin, -11 = stdout, -12 = stderr: small non-null tokens that
@@ -325,7 +325,7 @@ extern "win64" fn GetACP() -> u32 {
 extern "win64" fn QueryPerformanceCounter(out: *mut u64) -> u32 {
     if !out.is_null() {
         // SAFETY: a place for the counter.
-        unsafe { *out = arcrt::time::uptime_ms() };
+        unsafe { *out = justrt::time::uptime_ms() };
     }
     1
 }
@@ -337,12 +337,12 @@ extern "win64" fn QueryPerformanceFrequency(out: *mut u64) -> u32 {
     1
 }
 extern "win64" fn GetTickCount() -> u32 {
-    arcrt::time::uptime_ms() as u32
+    justrt::time::uptime_ms() as u32
 }
 extern "win64" fn GetSystemTimeAsFileTime(out: *mut u64) {
     if !out.is_null() {
         // 100-ns ticks since 1601; close enough from the Unix epoch.
-        let secs = arcrt::time::now() + 946_684_800; // 2000 -> 1970
+        let secs = justrt::time::now() + 946_684_800; // 2000 -> 1970
         let ticks = (secs + 11_644_473_600) * 10_000_000;
         // SAFETY: a place for the 64-bit file time.
         unsafe { *out = ticks };
@@ -588,13 +588,13 @@ extern "win64" fn _onexit(func: u64) -> u64 {
 }
 extern "win64" fn _amsg_exit(code: i32) -> ! {
     console_write(b"winrun: the C runtime stopped the program\n");
-    arcrt::process::exit(code)
+    justrt::process::exit(code)
 }
 extern "win64" fn abort() -> ! {
-    arcrt::process::exit(3)
+    justrt::process::exit(3)
 }
 extern "win64" fn exit(code: i32) -> ! {
-    arcrt::process::exit(code)
+    justrt::process::exit(code)
 }
 extern "win64" fn __C_specific_handler(_rec: u64, _frame: u64, _ctx: u64, _disp: u64) -> i32 {
     1 // ExceptionContinueSearch

@@ -12,7 +12,7 @@
 //! vm.run_main().unwrap();
 //! ```
 //!
-//! In arcOS the crate is `no_std` + `alloc` (it comes from the ArcScript
+//! In JustOS the crate is `no_std` + `alloc` (it comes from the ArcScript
 //! repository, where it uses `std`): files, the clock, the environment and
 //! the network are reached through [`Host`], which each system implements.
 //! The window renderer, its themes and the desktop launcher are left out;
