@@ -37,8 +37,8 @@ pub const DEVICES: [(&str, &str); 4] =
     [("camera", "la fotocamera"), ("microphone", "il microfono"), ("location", "la posizione"), ("network", "la rete")];
 
 /// What every app may read (paths in `sys:`, lowercase).
-const SHARED: [&str; 7] =
-    ["/apps", "/system/fonts.bin", "/system/webfonts.bin", "/system/certs.bin", "/system/gui", "/system/sounds", "/etc/ssl"];
+const SHARED: [&str; 8] =
+    ["/apps", "/system/fonts.bin", "/system/fonts@2x.bin", "/system/webfonts.bin", "/system/certs.bin", "/system/gui", "/system/sounds", "/etc/ssl"];
 
 /// An app, as the sandbox knows it.
 #[derive(Clone, PartialEq, Eq, Debug)]

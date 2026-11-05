@@ -40,17 +40,18 @@ fn decode(path: &str) -> Option<Canvas> {
     qoi::decode(&data)
 }
 
-/// `img` scaled to fit `w` x `h`, keeping its shape.
+/// `img` scaled to fit `w` x `h` units, keeping its shape (with the screen's
+/// pixels per unit).
 fn fit(img: &Canvas, w: i32, h: i32) -> Canvas {
     let s = (w as i64 * 1000 / img.w as i64).min(h as i64 * 1000 / img.h as i64).min(1000);
-    img.scaled(((img.w as i64 * s / 1000) as i32).max(1), ((img.h as i64 * s / 1000) as i32).max(1))
+    img.scaled_at(((img.w as i64 * s / 1000) as i32).max(1), ((img.h as i64 * s / 1000) as i32).max(1), crate::gui::scale())
 }
 
 /// `img` scaled and cropped to fill a square.
 fn square(img: &Canvas, side: i32) -> Canvas {
     let m = img.w.min(img.h);
     let crop = img.crop(Rect::new((img.w - m) / 2, (img.h - m) / 2, m, m));
-    crop.scaled(side, side)
+    crop.scaled_at(side, side, crate::gui::scale())
 }
 
 impl Photos {
@@ -160,6 +161,10 @@ impl App for Photos {
             let t = Self::tile(area, i, self.scroll);
             if t.bottom() < g.y || t.y > g.bottom() {
                 continue;
+            }
+            if self.photos[i].thumb.as_ref().is_some_and(|th| th.scale() != c.scale()) {
+                // The interface changed size.
+                self.photos[i].thumb = None;
             }
             if self.photos[i].thumb.is_none() {
                 if budget > 0 {

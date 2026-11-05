@@ -90,7 +90,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("play", "<file.wav> | stop", "play a sound file"),
     ("tone", "[hz] [ms]", "play a tone (default 440 Hz, 500 ms)"),
     ("volume", "[0-100]", "show or set the sound volume"),
-    ("display", "[WxH]", "screen resolutions, or switch to one"),
+    ("display", "[WxH | scale auto|1|2]", "screen resolutions, switch to one, or the interface size"),
 ];
 
 /// The BusyBox applets arcOS exposes as commands once `busybox` is installed.
@@ -1026,7 +1026,7 @@ impl Shell {
                     _ => println!("{ERR}usage: volume [0-100]{RESET}"),
                 },
             },
-            "display" => self.display(rest.first().copied()),
+            "display" => self.display(rest.first().copied(), rest.get(1).copied()),
             _ => {
                 let prog_args = line.trim_start()[args[0].len()..].trim();
                 if crate::user::find_program(&args[0], &self.cwd).is_some() {
@@ -1176,11 +1176,18 @@ impl Shell {
         }
     }
 
-    fn display(&self, arg: Option<&str>) {
+    fn display(&self, arg: Option<&str>, value: Option<&str>) {
         let Some(arg) = arg else {
             match crate::console::pixel_size() {
                 Some((w, h)) => println!("screen {w}x{h}"),
                 None => println!("text screen"),
+            }
+            if crate::gui::active() {
+                let choice = match crate::gui::scale_choice() {
+                    0 => "auto",
+                    _ => "chosen",
+                };
+                println!("interface: {} pixels per unit ({choice})", crate::gui::scale());
             }
             match crate::dev::display::controller() {
                 Some(name) => {
@@ -1196,9 +1203,29 @@ impl Shell {
             }
             return;
         };
+        if arg == "scale" {
+            let choice = match value {
+                Some("auto") => 0,
+                Some("1") => 1,
+                Some("2") => 2,
+                _ => {
+                    println!("{ERR}usage: display scale auto|1|2{RESET}");
+                    return;
+                }
+            };
+            if choice == 2 && !crate::gui::can_double() {
+                println!("{ERR}the screen is too small for the double size (it needs 1600x1200 pixels){RESET}");
+                return;
+            }
+            match crate::gui::change_scale(choice) {
+                Ok(()) => println!("interface size: {}", value.unwrap_or("")),
+                Err(e) => println!("{ERR}{e}{RESET}"),
+            }
+            return;
+        }
         let mode = arg.split_once('x').and_then(|(w, h)| Some(arcdk::DisplayMode { width: w.parse().ok()?, height: h.parse().ok()? }));
         let Some(mode) = mode else {
-            println!("{ERR}usage: display [WxH]{RESET}");
+            println!("{ERR}usage: display [WxH | scale auto|1|2]{RESET}");
             return;
         };
         match crate::gui::change_resolution(mode) {

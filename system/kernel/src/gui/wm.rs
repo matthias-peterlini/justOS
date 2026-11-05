@@ -74,6 +74,13 @@ pub trait App {
     fn tick(&mut self) -> bool {
         false
     }
+    /// After a [`tick`](Self::tick) that returned true: the part of the
+    /// content that changed, when it is not all of it (on the screen;
+    /// `area` is the content area). A blinking caret is a few pixels, not
+    /// a window.
+    fn changed(&mut self, _area: Rect) -> Option<Rect> {
+        None
+    }
     /// Does the app want a call to [`frame`](Self::frame) on every frame?
     fn animating(&self) -> bool {
         false
@@ -288,7 +295,7 @@ impl Window {
     pub fn snapshot(&mut self, blur: &Canvas, focused: bool) -> (Canvas, Rect) {
         let b = self.bounds();
         let local_blur = blur.crop(b);
-        let mut layer = Canvas::new_layer(b.w, b.h);
+        let mut layer = Canvas::new_layer_at(b.w, b.h, blur.scale());
         let saved = self.rect;
         self.rect = self.rect.offset(-b.x, -b.y);
         let all = layer.bounds();

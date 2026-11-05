@@ -26,6 +26,9 @@ pub struct Settings {
     pub password: String,
     /// Lock the screen after this many minutes without input (0: never).
     pub lock_after: u32,
+    /// Pixels per unit: 0 chooses by the screen, 1 or 2 as the user wants
+    /// (the size of the interface).
+    pub scale: u32,
 }
 
 impl Default for Settings {
@@ -40,6 +43,7 @@ impl Default for Settings {
             startup_sound: true,
             password: String::new(),
             lock_after: 5,
+            scale: 0,
         }
     }
 }
@@ -64,6 +68,7 @@ fn load() -> Settings {
             "startup-sound" => s.startup_sound = v != "off",
             "password" => s.password = String::from(v),
             "lock-after" => s.lock_after = v.parse().unwrap_or(5),
+            "scale" => s.scale = v.parse::<u32>().unwrap_or(0).min(2),
             _ => {}
         }
     }
@@ -105,6 +110,9 @@ pub fn update(f: impl FnOnce(&mut Settings)) {
     }
     if let Some((w, h)) = s.resolution {
         text.push_str(&format!("resolution={w}x{h}\n"));
+    }
+    if s.scale != 0 {
+        text.push_str(&format!("scale={}\n", s.scale));
     }
     if let Ok(p) = fs::abs(FILE) {
         if let Err(e) = fs::write_file(&p, text.as_bytes()) {

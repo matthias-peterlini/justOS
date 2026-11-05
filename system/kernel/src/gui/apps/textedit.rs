@@ -266,6 +266,10 @@ impl App for TextEdit {
         self.picker.is_none() && self.area.tick()
     }
 
+    fn changed(&mut self, _area: Rect) -> Option<Rect> {
+        Some(self.area.caret())
+    }
+
     fn close(&mut self) {
         if !self.area.dirty {
             return;

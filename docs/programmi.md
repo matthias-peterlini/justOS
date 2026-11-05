@@ -170,6 +170,7 @@ File e cartelle aperti sono **handle** numerici, non descrittori Unix.
 | 38 | `APP_ENTER` | entra nella sandbox di un'app (una volta sola, senza ritorno) |
 | 39 | `PICK_FILE` | il selettore di file del sistema (`PICK_OPEN` o `PICK_SAVE`) |
 | 40 | `WIN_DROPPED` | i file dell'ultimo rilascio sulla finestra, uno per riga |
+| 41 | `WIN_SCALE` | i pixel per unità della finestra (2 su uno schermo ad alta densità) |
 
 Due errori riguardano la sandbox: `Denied` (permesso negato) e `Cancelled`
 (l'utente ha chiuso il selettore).
@@ -294,6 +295,14 @@ fn main(_args: &str) -> i32 {
 | `Event` | `Press`, `Menu` (tasto destro), `Release`, `Move`, `Leave`, `Key`, `Scroll`, `Resize`, `Close`, `Drop` |
 | `ui` | i colori e alcuni controlli delle app di sistema (`button`, `segmented`, `overlay`) |
 | `Rng`, `now_ms` | numeri casuali e tempo, per i giochi |
+
+Misure e posizioni sono in unità. Su uno schermo ad alta densità la tela ha
+2×2 pixel per unità (`win.scale()` lo dice) e il testo arriva dai caratteri
+disegnati al doppio della misura: lo stesso codice dà una finestra più
+nitida, senza cambiare nulla. Se la scala cambia mentre il programma è
+aperto arriva un `Event::Resize` e la tela è già quella nuova. Sotto,
+`WIN_PRESENT` riceve i pixel e la scala del fotogramma (quarto argomento) e
+`WIN_EVENT` la manda con la nuova misura.
 
 Quando l'utente chiude la finestra arriva `Event::Close`: il programma
 dovrebbe finire; se dopo due secondi è ancora lì, il kernel lo ferma. Se il

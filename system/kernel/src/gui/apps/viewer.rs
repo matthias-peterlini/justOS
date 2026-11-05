@@ -16,10 +16,10 @@ pub struct Viewer {
 impl Viewer {
     pub fn new(path: &str) -> Viewer {
         let img = fs::abs(path).and_then(|p| fs::read_file(&p)).ok().and_then(|d| qoi::decode(&d)).map(|img| {
-            // Fit 640 x 420.
+            // Fit 640 x 420 units (with the screen's pixels per unit).
             let (w, h) = (img.w, img.h);
             let s = (640 * 1000 / w).min(420 * 1000 / h).min(1000);
-            img.scaled((w * s / 1000).max(1), (h * s / 1000).max(1))
+            img.scaled_at((w * s / 1000).max(1), (h * s / 1000).max(1), crate::gui::scale())
         });
         let name = String::from(path.rsplit('/').next().unwrap_or(path));
         Viewer { name, img }

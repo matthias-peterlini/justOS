@@ -1115,13 +1115,16 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
             crate::gui::window::create(task::current_pid(), &title, w, h, a[3])
         }
         sys::WIN_PRESENT => {
+            use crate::gui::window::{MAX_H, MAX_SCALE, MAX_W};
             let (w, h) = ((a[2] >> 32) as i64, (a[2] & 0xFFFF_FFFF) as i64);
-            if !(1..=crate::gui::window::MAX_W as i64).contains(&w) || !(1..=crate::gui::window::MAX_H as i64).contains(&h) {
+            let scale = a[3].clamp(1, MAX_SCALE as u64) as i64;
+            if !(1..=MAX_W as i64 * scale).contains(&w) || !(1..=MAX_H as i64 * scale).contains(&h) || a[3] > MAX_SCALE as u64 {
                 return Err(Error::BadAddress);
             }
             let pixels = user_slice(a[1], (w * h * 4) as u64)?;
-            crate::gui::window::present(task::current_pid(), a[0], pixels, w as i32, h as i32).map(|_| 0)
+            crate::gui::window::present(task::current_pid(), a[0], pixels, w as i32, h as i32, scale as i32).map(|_| 0)
         }
+        sys::WIN_SCALE => crate::gui::window::scale(task::current_pid(), a[0]),
         sys::WIN_EVENT => {
             let out = user_slice(a[1], 32)?;
             match crate::gui::window::next_event(task::current_pid(), a[0], a[2])? {

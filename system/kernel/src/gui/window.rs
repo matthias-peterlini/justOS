@@ -5,6 +5,11 @@
 //!
 //! The picture keeps its alpha: what the program leaves transparent shows
 //! the window's frosted glass.
+//!
+//! Sizes and positions are in units. On a screen with two pixels per unit a
+//! program may draw its frames with twice the pixels (`WIN_SCALE` says how
+//! many, `WIN_PRESENT` says which it drew); a frame of one pixel per unit is
+//! stretched.
 
 use super::gfx::{Canvas, Rect};
 use super::wm::{Action, App};
@@ -17,9 +22,11 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use arcdk::syscall as sys;
 
-/// Largest window content a program may ask for.
+/// Largest window content a program may ask for (in units).
 pub const MAX_W: i32 = 2560;
 pub const MAX_H: i32 = 1600;
+/// Most pixels per unit in a frame.
+pub const MAX_SCALE: i32 = 2;
 const QUEUE_MAX: usize = 256;
 
 pub struct Shared {
@@ -35,6 +42,8 @@ pub struct Shared {
     events: VecDeque<[u64; 4]>,
     /// The size the window has on the screen now.
     area: (i32, i32),
+    /// The pixels per unit the program was last told of.
+    scale: i32,
     /// The user closed it, or the program ended.
     closed: bool,
     ended: bool,
@@ -75,6 +84,7 @@ pub fn create(pid: u32, title: &str, w: i32, h: i32, flags: u64) -> Result<u64, 
         generation: 0,
         events: VecDeque::new(),
         area: (w, h),
+        scale: super::scale(),
         closed: false,
         ended: false,
         drops: flags & sys::WIN_DROPS != 0,
@@ -93,18 +103,20 @@ pub fn create(pid: u32, title: &str, w: i32, h: i32, flags: u64) -> Result<u64, 
 }
 
 /// `WIN_PRESENT`: a frame of `w` x `h` pixels (0xAARRGGBB) from the
-/// program's memory.
-pub fn present(pid: u32, handle: u64, pixels: &[u8], w: i32, h: i32) -> Result<(), sys::Error> {
+/// program's memory, drawn at `scale` pixels per unit (0 is 1).
+pub fn present(pid: u32, handle: u64, pixels: &[u8], w: i32, h: i32, scale: i32) -> Result<(), sys::Error> {
     let win = get(handle, pid).ok_or(sys::Error::BadHandle)?;
-    if w < 1 || h < 1 || w > MAX_W || h > MAX_H || pixels.len() < (w * h * 4) as usize {
+    let k = scale.max(1);
+    let fits = k <= MAX_SCALE && w >= k && h >= k && w % k == 0 && h % k == 0 && w <= MAX_W * k && h <= MAX_H * k;
+    if !fits || pixels.len() < (w * h * 4) as usize {
         return Err(sys::Error::BadAddress);
     }
     let mut s = win.lock();
-    if s.frame.w != w || s.frame.h != h {
-        s.frame = Canvas::new_layer(w, h);
+    if s.frame.pixel_width() != w || s.frame.pixel_height() != h || s.frame.scale() != k {
+        s.frame = Canvas::new_layer_at(w / k, h / k, k);
     }
-    for (dst, src) in s.frame.px.iter_mut().zip(pixels.chunks_exact(4)) {
-        *dst = u32::from_le_bytes([src[0], src[1], src[2], src[3]]);
+    for (dst, src) in s.frame.px.iter_mut().zip(pixels.as_chunks::<4>().0) {
+        *dst = u32::from_le_bytes(*src);
     }
     s.generation += 1;
     Ok(())
@@ -143,6 +155,12 @@ pub fn dropped(pid: u32, handle: u64) -> Result<String, sys::Error> {
         text.push('\n');
     }
     Ok(text)
+}
+
+/// `WIN_SCALE`: how many pixels per unit the window is shown with.
+pub fn scale(pid: u32, handle: u64) -> Result<u64, sys::Error> {
+    get(handle, pid).ok_or(sys::Error::BadHandle)?;
+    Ok(super::scale() as u64)
 }
 
 pub fn set_title(pid: u32, handle: u64, title: &str) -> Result<(), sys::Error> {
@@ -261,10 +279,12 @@ impl App for UserWindow {
         let mut s = self.shared.lock();
         self.seen = s.generation;
         let (w, h) = (area.w, area.h);
-        if s.area != (w, h) {
+        let k = c.scale();
+        if s.area != (w, h) || s.scale != k {
             s.area = (w, h);
+            s.scale = k;
             if s.events.len() < QUEUE_MAX {
-                s.events.push_back([sys::WIN_EV_RESIZE, w as u64, h as u64, 0]);
+                s.events.push_back([sys::WIN_EV_RESIZE, w as u64, h as u64, k as u64]);
             }
             drop(s);
             EVENTS.notify_all();

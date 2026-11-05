@@ -1,7 +1,9 @@
 //! Pictures: the icon atlas and the wallpapers in `sys:/system/gui`.
 //!
 //! Icons are stored once at 128 px; each size the interface asks for is
-//! scaled on first use and kept.
+//! scaled on first use and kept, with the screen's pixels per unit (an icon
+//! of 52 units is 104 pixels on a high-density screen). Wallpapers are
+//! scaled to the screen's pixels too.
 
 use super::gfx::{Canvas, Rect};
 use super::qoi;
@@ -17,9 +19,11 @@ const CELL: i32 = 128;
 struct Icons {
     atlas: Canvas,
     names: Vec<String>,
-    cache: BTreeMap<(usize, i32), Canvas>,
-    /// Icons of installed programs ("@sys:/apps/x.qoi"), by name and size.
-    files: BTreeMap<(String, i32), Option<Canvas>>,
+    /// By icon, size and scale.
+    cache: BTreeMap<(usize, i32, i32), Canvas>,
+    /// Icons of installed programs ("@sys:/apps/x.qoi"), by name, size and
+    /// scale.
+    files: BTreeMap<(String, i32, i32), Option<Canvas>>,
 }
 
 static ICONS: IrqLock<Option<Icons>> = IrqLock::new(None);
@@ -47,14 +51,20 @@ pub fn load(progress: impl Fn(u32)) {
     progress(100);
 }
 
-/// Runs `f` with icon `name` at `size` pixels (if there is such an icon).
+/// Runs `f` with icon `name` at `size` units (if there is such an icon), at
+/// the screen's scale.
 pub fn with_icon<T>(name: &str, size: i32, f: impl FnOnce(&Canvas) -> T) -> Option<T> {
+    with_icon_at(name, size, super::scale(), f)
+}
+
+/// [`with_icon`] at `k` pixels per unit (for the canvas it is drawn on).
+pub fn with_icon_at<T>(name: &str, size: i32, k: i32, f: impl FnOnce(&Canvas) -> T) -> Option<T> {
     if let Some(path) = name.strip_prefix('@') {
-        let key = (String::from(path), size);
+        let key = (String::from(path), size, k);
         let known = ICONS.lock().as_ref()?.files.contains_key(&key);
         if !known {
             // Read outside the lock: the file system may sleep.
-            let img = read(path).and_then(|d| qoi::decode(&d)).map(|img| if img.w == size { img } else { img.scaled(size, size) });
+            let img = read(path).and_then(|d| qoi::decode(&d)).map(|img| if img.w == size && k == 1 { img } else { img.scaled_at(size, size, k) });
             ICONS.lock().as_mut()?.files.insert(key.clone(), img);
         }
         let guard = ICONS.lock();
@@ -63,14 +73,14 @@ pub fn with_icon<T>(name: &str, size: i32, f: impl FnOnce(&Canvas) -> T) -> Opti
     let mut guard = ICONS.lock();
     let icons = guard.as_mut()?;
     let id = icons.names.iter().position(|n| n == name)?;
-    if !icons.cache.contains_key(&(id, size)) {
+    if !icons.cache.contains_key(&(id, size, k)) {
         let cols = icons.atlas.w / CELL;
         let cell = Rect::new((id as i32 % cols) * CELL, (id as i32 / cols) * CELL, CELL, CELL);
         let img = icons.atlas.crop(cell);
-        let img = if size == CELL { img } else { img.scaled(size, size) };
-        icons.cache.insert((id, size), img);
+        let img = if size == CELL && k == 1 { img } else { img.scaled_at(size, size, k) };
+        icons.cache.insert((id, size, k), img);
     }
-    Some(f(&icons.cache[&(id, size)]))
+    Some(f(&icons.cache[&(id, size, k)]))
 }
 
 /// Draws an icon; a plain rounded square if it is missing.
@@ -79,22 +89,21 @@ pub fn draw_icon(c: &mut Canvas, name: &str, size: i32, x: i32, y: i32) {
 }
 
 pub fn draw_icon_faded(c: &mut Canvas, name: &str, size: i32, x: i32, y: i32, opacity: u32) {
-    if with_icon(name, size, |img| c.draw_image(img, x, y, opacity)).is_none() {
+    if with_icon_at(name, size, c.scale(), |img| c.draw_image(img, x, y, opacity)).is_none() {
         c.fill_round(Rect::new(x + size / 10, y + size / 10, size * 8 / 10, size * 8 / 10), size / 5, 0xC0A0_A8B8);
     }
 }
 
 /// Draws a glyph icon (white in the atlas) in `color`: its alpha is the mask.
 pub fn draw_icon_tinted(c: &mut Canvas, name: &str, size: i32, x: i32, y: i32, color: u32) {
-    let mask = with_icon(name, size, |img| (img.w, img.h, img.px.iter().map(|p| (p >> 24) as u8).collect::<Vec<u8>>()));
-    if let Some((w, h, m)) = mask {
-        c.draw_mask(&m, w, h, x, y, color);
-    }
+    with_icon_at(name, size, c.scale(), |img| c.draw_tinted(img, x, y, color));
 }
 
-/// A wallpaper scaled to cover `w` x `h`, and a blurred copy of it for the
-/// frosted-glass panels. A gradient if the file is missing.
+/// A wallpaper scaled to cover `w` x `h` units (at the screen's scale), and
+/// a blurred copy of it for the frosted-glass panels. A gradient if the file
+/// is missing.
 pub fn wallpaper(name: &str, w: i32, h: i32) -> (Canvas, Canvas) {
+    let k = super::scale();
     let img = read(&alloc::format!("{DIR}/wallpapers/{name}.qoi")).and_then(|d| qoi::decode(&d));
     let sharp = match img {
         Some(img) => {
@@ -104,11 +113,11 @@ pub fn wallpaper(name: &str, w: i32, h: i32) -> (Canvas, Canvas) {
             } else {
                 (w, (img.h as i64 * w as i64 / img.w as i64) as i32)
             };
-            let scaled = img.scaled(sw, sh);
+            let scaled = img.scaled_at(sw, sh, k);
             scaled.crop(Rect::new((sw - w) / 2, (sh - h) / 2, w, h))
         }
         None => {
-            let mut c = Canvas::new(w, h, 0xFF2A_2038);
+            let mut c = Canvas::new_at(w, h, 0xFF2A_2038, k);
             c.fill_round_grad(c.bounds(), 0, 0xFF3B_2E5A, 0xFFE0_8F6E);
             c
         }
@@ -117,22 +126,24 @@ pub fn wallpaper(name: &str, w: i32, h: i32) -> (Canvas, Canvas) {
     for p in sharp.px.iter_mut() {
         *p |= 0xFF00_0000;
     }
-    // The blur is cheaper on a quarter-size copy, scaled back up.
-    let mut soft = sharp.scaled(w / 4, h / 4);
+    // The blur is cheaper on a quarter-size copy (one pixel per unit),
+    // scaled back up.
+    let mut soft = sharp.scaled_at(w / 4, h / 4, 1);
     soft.blur(6);
-    let soft = soft.scaled(w, h);
+    let soft = soft.scaled_at(w, h, k);
     (sharp, soft)
 }
 
-/// A small preview of a wallpaper (for the settings and the setup): from the
-/// ready-made one in `thumbs/` if there is one, else from the full picture.
+/// A small preview of a wallpaper (for the settings and the setup), `w` x `h`
+/// units at the screen's scale: from the ready-made one in `thumbs/` if there
+/// is one, else from the full picture.
 pub fn wallpaper_thumb(name: &str, w: i32, h: i32) -> Canvas {
     let img = read(&alloc::format!("{DIR}/wallpapers/thumbs/{name}.qoi"))
         .or_else(|| read(&alloc::format!("{DIR}/wallpapers/{name}.qoi")))
         .and_then(|d| qoi::decode(&d));
     match img {
-        Some(img) => img.scaled(w, h),
-        None => Canvas::new(w, h, 0xFF55_4466),
+        Some(img) => img.scaled_at(w, h, super::scale()),
+        None => Canvas::new_at(w, h, 0xFF55_4466, super::scale()),
     }
 }
 

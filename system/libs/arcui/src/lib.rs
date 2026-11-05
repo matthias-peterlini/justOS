@@ -9,6 +9,10 @@
 //! The canvas starts transparent: whatever is left transparent shows the
 //! window's frosted glass, as in the built-in apps.
 //!
+//! Sizes and positions are in units. On a high-density screen the canvas
+//! has two pixels per unit (and text comes from fonts drawn at twice the
+//! size): the same drawing code gives a sharper window.
+//!
 //! ```ignore
 //! let mut win = Window::new("Ciao", 400, 300)?;
 //! loop {
@@ -71,6 +75,7 @@ pub struct Window {
 }
 
 static mut FONTS: Option<&'static Fonts> = None;
+static mut ATLAS: Option<&'static [u8]> = None;
 
 /// The system fonts (`sys:/system/fonts.bin`), read once.
 pub fn fonts() -> arcrt::Result<&'static Fonts> {
@@ -82,8 +87,33 @@ pub fn fonts() -> arcrt::Result<&'static Fonts> {
     let data: &'static [u8] = alloc::boxed::Box::leak(data.into_boxed_slice());
     let f: &'static Fonts = alloc::boxed::Box::leak(alloc::boxed::Box::new(Fonts::parse(data).ok_or(arcrt::Error::BadProgram)?));
     // SAFETY: as above.
-    unsafe { FONTS = Some(f) };
+    unsafe {
+        ATLAS = Some(data);
+        FONTS = Some(f);
+    }
     Ok(f)
+}
+
+/// The system fonts for a canvas of `scale` pixels per unit: with the
+/// faces drawn at twice the size (`sys:/system/fonts@2x.bin`) from 2 up.
+pub fn fonts_for(scale: i32) -> arcrt::Result<&'static Fonts> {
+    let f = fonts()?;
+    if scale < 2 || f.has_sharp() {
+        return Ok(f);
+    }
+    // SAFETY: programs have a single thread; ATLAS was set by fonts().
+    let Some(data) = (unsafe { ATLAS }) else { return Ok(f) };
+    let Some(sharp) = arcrt::fs::read("sys:/system/fonts@2x.bin").ok().and_then(|d| Fonts::parse(alloc::boxed::Box::leak(d.into_boxed_slice())))
+    else {
+        // Without them text is stretched from the normal faces.
+        return Ok(f);
+    };
+    let mut both = Fonts::parse(data).ok_or(arcrt::Error::BadProgram)?;
+    both.set_sharp(sharp);
+    let both: &'static Fonts = alloc::boxed::Box::leak(alloc::boxed::Box::new(both));
+    // SAFETY: as above.
+    unsafe { FONTS = Some(both) };
+    Ok(both)
 }
 
 impl Window {
@@ -120,12 +150,15 @@ impl Window {
     }
 
     fn create(title: &str, w: i32, h: i32, flags: u64) -> arcrt::Result<Window> {
-        let fonts = fonts()?;
         let size = (w as u64) << 32 | h as u64;
         let handle = check(call(sys::WIN_CREATE, title.as_ptr() as u64, title.len() as u64, size, flags, 0))?;
-        Ok(Window { handle, canvas: Canvas::new_layer(w, h), fonts })
+        // An older system has no WIN_SCALE: one pixel per unit.
+        let scale = check(call(sys::WIN_SCALE, handle, 0, 0, 0, 0)).map_or(1, |s| s.clamp(1, 2) as i32);
+        let fonts = fonts_for(scale)?;
+        Ok(Window { handle, canvas: Canvas::new_layer_at(w, h, scale), fonts })
     }
 
+    /// The width of the content in units.
     pub fn width(&self) -> i32 {
         self.canvas.w
     }
@@ -134,10 +167,16 @@ impl Window {
         self.canvas.h
     }
 
+    /// Pixels per unit of the canvas.
+    pub fn scale(&self) -> i32 {
+        self.canvas.scale()
+    }
+
     /// Shows the canvas.
     pub fn present(&self) {
-        let size = (self.canvas.w as u64) << 32 | self.canvas.h as u64;
-        call(sys::WIN_PRESENT, self.handle, self.canvas.px.as_ptr() as u64, size, 0, 0);
+        let c = &self.canvas;
+        let size = (c.pixel_width() as u64) << 32 | c.pixel_height() as u64;
+        call(sys::WIN_PRESENT, self.handle, c.px.as_ptr() as u64, size, c.scale() as u64, 0);
     }
 
     pub fn set_title(&self, title: &str) {
@@ -162,8 +201,12 @@ impl Window {
             sys::WIN_EV_CLOSE => Event::Close,
             sys::WIN_EV_RESIZE => {
                 let (w, h) = (raw[1] as i32, raw[2] as i32);
-                if w != self.canvas.w || h != self.canvas.h {
-                    self.canvas = Canvas::new_layer(w.max(1), h.max(1));
+                let scale = (raw[3] as i32).clamp(1, 2);
+                if w != self.canvas.w || h != self.canvas.h || scale != self.canvas.scale() {
+                    self.canvas = Canvas::new_layer_at(w.max(1), h.max(1), scale);
+                    if let Ok(f) = fonts_for(scale) {
+                        self.fonts = f;
+                    }
                 }
                 Event::Resize { w, h }
             }

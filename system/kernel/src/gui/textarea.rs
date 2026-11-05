@@ -28,6 +28,8 @@ pub struct TextArea {
     layout_w: i32,
     blink: bool,
     ticks: u32,
+    /// Where the caret blinks (from the last drawing), if it shows.
+    caret_at: Option<Rect>,
     /// Where the pointer pressed (to drag a selection).
     dragging: bool,
     /// The column the cursor tries to stay in when moving up and down.
@@ -66,6 +68,7 @@ impl TextArea {
             layout_w: -1,
             blink: true,
             ticks: 0,
+            caret_at: None,
             dragging: false,
             goal_x: None,
             code: false,
@@ -393,11 +396,16 @@ impl TextArea {
                 text::draw(c, font, x, y + 1, &line, TEXT);
             }
         }
-        if focused && self.blink && sel.is_none() {
+        self.caret_at = None;
+        if focused && sel.is_none() {
             let li = self.line_of(self.cursor);
             let x = inner.x + self.x_of(li, self.cursor);
             let y = inner.y + li as i32 * lh - self.scroll;
-            c.fill(Rect::new(x, y + 1, 2, lh - 2), ui::ACCENT);
+            let caret = Rect::new(x, y + 1, 2, lh - 2);
+            self.caret_at = Some(caret.intersect(&inner));
+            if self.blink {
+                c.fill(caret, ui::ACCENT);
+            }
         }
         // A thin scroll bar when the text is taller than the area.
         if max_scroll > 0 {
@@ -624,6 +632,13 @@ impl TextArea {
         self.blink = true;
         self.ticks = 0;
         true
+    }
+
+    /// What a blink of the cursor changes on the screen (for
+    /// [`App::changed`](super::wm::App::changed)): nothing when it does not
+    /// show.
+    pub fn caret(&self) -> Rect {
+        self.caret_at.map_or(Rect::EMPTY, |r| r.grow(1))
     }
 
     /// The cursor blinks; true when it changed.

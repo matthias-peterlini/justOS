@@ -4,8 +4,15 @@
 //! The atlas: "ARCF", a version, the number of faces, then for each face its
 //! line height, ascent and glyph table (code point, size, offset, advance,
 //! where its coverage mask starts); the masks follow, one byte per pixel.
+//!
+//! On a canvas with two pixels per unit, text is drawn from sharper faces
+//! rendered at twice the size (`fonts@2x.bin`, the same faces in the same
+//! order, or for the faces of web pages the face of twice the size in the
+//! same atlas). Where each letter goes still comes from the normal faces,
+//! so text measures the same at any scale.
 
 use crate::gfx::Canvas;
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -47,6 +54,16 @@ pub struct Fonts {
     bytes: &'static [u8],
     faces: Vec<Face>,
     data: usize,
+    sharp: Sharp,
+}
+
+/// Where the faces for two pixels per unit are.
+enum Sharp {
+    None,
+    /// Another atlas, face for face.
+    Atlas(Box<Fonts>),
+    /// In this one: the face of twice the size and the same style.
+    Doubled,
 }
 
 impl Fonts {
@@ -83,11 +100,49 @@ impl Fonts {
             glyphs.sort_by_key(|g| g.code);
             faces.push(Face { size, line, ascent, glyphs });
         }
-        Some(Fonts { bytes, faces, data: at })
+        Some(Fonts { bytes, faces, data: at, sharp: Sharp::None })
+    }
+
+    /// Text on canvases with two pixels per unit comes from `atlas`, which
+    /// holds the same faces rendered at twice the size.
+    pub fn set_sharp(&mut self, atlas: Fonts) {
+        self.sharp = Sharp::Atlas(Box::new(atlas));
+    }
+
+    /// Text on canvases with two pixels per unit comes from the face of
+    /// twice the size in this atlas (the faces of web pages, whose size
+    /// field is the size with the style in its high bits).
+    pub fn double_sizes(&mut self) {
+        self.sharp = Sharp::Doubled;
+    }
+
+    /// Are there faces for two pixels per unit?
+    pub fn has_sharp(&self) -> bool {
+        !matches!(self.sharp, Sharp::None)
+    }
+
+    /// The face that draws face number `face` on a canvas of `scale`.
+    fn sharp_face(&self, face: usize, scale: i32) -> Option<(&Fonts, &Face)> {
+        if scale != 2 {
+            return None;
+        }
+        match &self.sharp {
+            Sharp::None => None,
+            Sharp::Atlas(a) => a.faces.get(face).map(|f| (&**a, f)),
+            Sharp::Doubled => {
+                let tag = self.faces.get(face)?.size;
+                let want = (tag & 0xF000) | ((tag & 0x0FFF) * 2);
+                self.faces.iter().find(|f| f.size == want).map(|f| (self, f))
+            }
+        }
+    }
+
+    fn index(&self, font: Font) -> usize {
+        (font as usize).min(self.faces.len() - 1)
     }
 
     fn face(&self, font: Font) -> &Face {
-        &self.faces[(font as usize).min(self.faces.len() - 1)]
+        &self.faces[self.index(font)]
     }
 
     /// How many faces the atlas holds (an atlas of web faces is addressed
@@ -119,23 +174,45 @@ impl Fonts {
 
     /// Draws `s` in a face by number, its top-left corner at (`x`, `y`).
     pub fn face_draw(&self, c: &mut Canvas, face: usize, x: i32, y: i32, s: &str, color: u32) -> i32 {
-        let Some(f) = self.faces.get(face) else { return 0 };
-        self.draw_face(c, f, x, y, s, color)
+        if face >= self.faces.len() {
+            return 0;
+        }
+        self.draw_face(c, face, x, y, s, color)
     }
 
-    fn draw_face(&self, c: &mut Canvas, face: &Face, x: i32, y: i32, s: &str, color: u32) -> i32 {
+    fn draw_face(&self, c: &mut Canvas, index: usize, x: i32, y: i32, s: &str, color: u32) -> i32 {
+        let face = &self.faces[index];
         let base = y + face.ascent as i32;
+        let sharp = self.sharp_face(index, c.scale());
         let mut pen = x;
         for ch in s.chars() {
             let Some(g) = Self::find(face, ch) else { continue };
-            if g.w > 0 {
-                if let Some(mask) = self.mask(&g) {
-                    c.draw_mask(mask, g.w as i32, g.h as i32, pen + g.x as i32, base + g.y as i32, color);
-                }
-            }
+            self.glyph(c, sharp, ch, &g, (pen, base), color);
             pen += g.advance as i32;
         }
         pen - x
+    }
+
+    /// Draws one letter with its origin at `at` (in units): from the sharp
+    /// face if there is one, else `g`.
+    fn glyph(&self, c: &mut Canvas, sharp: Option<(&Fonts, &Face)>, ch: char, g: &Glyph, at: (i32, i32), color: u32) {
+        let (pen, base) = at;
+        if let Some((atlas, hi)) = sharp {
+            if let Some(h) = Self::find(hi, ch) {
+                if h.w > 0 {
+                    if let Some(mask) = atlas.mask(&h) {
+                        let k = c.scale();
+                        c.draw_mask_px(mask, h.w as i32, h.h as i32, pen * k + h.x as i32, base * k + h.y as i32, color);
+                    }
+                }
+                return;
+            }
+        }
+        if g.w > 0 {
+            if let Some(mask) = self.mask(g) {
+                c.draw_mask(mask, g.w as i32, g.h as i32, pen + g.x as i32, base + g.y as i32, color);
+            }
+        }
     }
 
     fn find(face: &Face, c: char) -> Option<Glyph> {
@@ -182,7 +259,7 @@ impl Fonts {
 
     /// Draws `s` with its top-left corner at (`x`, `y`). Returns the width.
     pub fn draw(&self, c: &mut Canvas, font: Font, x: i32, y: i32, s: &str, color: u32) -> i32 {
-        self.draw_face(c, self.face(font), x, y, s, color)
+        self.draw_face(c, self.index(font), x, y, s, color)
     }
 
     /// Draws `s` centred horizontally on `cx`.
@@ -251,14 +328,12 @@ impl Fonts {
     /// Draws one glyph of the terminal font in a cell; false if the font
     /// lacks it.
     pub fn draw_cell_glyph(&self, c: &mut Canvas, x: i32, y: i32, ch: char, color: u32) -> bool {
-        let face = self.face(Font::Mono);
+        let index = self.index(Font::Mono);
+        let face = &self.faces[index];
         let Ok(i) = face.glyphs.binary_search_by_key(&(ch as u32), |g| g.code) else { return false };
         let g = face.glyphs[i];
-        if g.w > 0 {
-            if let Some(mask) = self.mask(&g) {
-                c.draw_mask(mask, g.w as i32, g.h as i32, x + g.x as i32, y + face.ascent as i32 + g.y as i32, color);
-            }
-        }
+        let sharp = self.sharp_face(index, c.scale());
+        self.glyph(c, sharp, ch, &g, (x, y + face.ascent as i32), color);
         true
     }
 }

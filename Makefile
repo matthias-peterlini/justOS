@@ -102,6 +102,7 @@ root: system
 	for p in $(STORE); do mkdir -p $(ROOT)/store/$$p && cp $(TARGET)/$$p $(ROOT)/store/$$p/app \
 		&& cp system/store/$$p/info system/store/$$p/icon.qoi $(ROOT)/store/$$p/; done
 	cp system/kernel/assets/fonts.bin $(ROOT)/system/fonts.bin
+	gzip -dc system/kernel/assets/fonts@2x.bin.gz > $(ROOT)/system/fonts@2x.bin
 
 image: $(BUILD)/stage1.bin $(BUILD)/stage2.bin uefi system tools $(PACKAGES) root
 	$(ARCTOOL) image $(IMAGE) --size $(SIZE) --slot-size $(SLOT_SIZE) --version $(VERSION) \
@@ -179,6 +180,7 @@ shots: image
 
 assets:
 	tools/assets/gen_fonts.py system/kernel/assets/fonts.bin
+	tools/assets/gen_fonts.py --sharp system/kernel/assets/fonts@2x.bin.gz
 	tools/assets/gen_fonts.py --web rootfs/system/webfonts.bin
 	tools/assets/gen_logo.py system/kernel/assets/logo.bin
 	tools/assets/gen_certs.py rootfs

@@ -2,7 +2,9 @@
 """Renders the GUI fonts into an anti-aliased glyph atlas for the kernel.
 
 The kernel has no font rasterizer: it draws text from alpha masks rendered
-here, once, with Pillow. Output: system/kernel/assets/fonts.bin.
+here, once, with Pillow. Output: system/kernel/assets/fonts.bin, and with
+--sharp the same faces at twice the size for screens with two pixels per
+unit (system/kernel/assets/fonts@2x.bin.gz, gzipped).
 
 Format (little-endian):
     "ARCF" u16 version=1, u16 font count
@@ -18,7 +20,7 @@ typeface of the arc design; a variable font, rendered at the weight and
 optical size each use asks for) and DejaVu Sans Mono (Bitstream Vera
 licence); see system/kernel/assets/LICENSES.md.
 
-Usage: tools/assets/gen_fonts.py [output]
+Usage: tools/assets/gen_fonts.py [--web | --sharp] [output]
 """
 import struct
 import sys
@@ -48,7 +50,7 @@ FONTS = [
 ]
 
 
-def load(path, size, weight):
+def load(path, size, weight, optical=None):
     font = ImageFont.truetype(path, size)
     if weight is not None:
         axes = []
@@ -57,15 +59,17 @@ def load(path, size, weight):
             if "Weight" in name:
                 axes.append(weight)
             elif "Optical" in name:
-                axes.append(max(a["minimum"], min(a["maximum"], size)))
+                # The optical size is the size the text is read at: twice the
+                # pixels on a sharper screen are the same size to the eye.
+                axes.append(max(a["minimum"], min(a["maximum"], optical or size)))
             else:
                 axes.append(a["default"])
         font.set_variation_by_axes(axes)
     return font
 
 
-def render(path, size, chars, weight=None):
-    font = load(path, size, weight)
+def render(path, size, chars, weight=None, optical=None):
+    font = load(path, size, weight, optical)
     ascent, descent = font.getmetrics()
     glyphs = []
     for ch in chars:
@@ -98,22 +102,29 @@ WEB_FONTS = ([(SANS, s, WEB_TEXT, s, 400) for s in WEB_SIZES]
 
 
 def main():
-    web = len(sys.argv) > 1 and sys.argv[1] == "--web"
-    args = sys.argv[2:] if web else sys.argv[1:]
-    out = args[0] if args else ("rootfs/system/webfonts.bin" if web else "system/kernel/assets/fonts.bin")
-    fonts = WEB_FONTS if web else [(p, s, c, s, wt) for p, s, c, wt in FONTS]
+    mode = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in ("--web", "--sharp") else None
+    web, sharp = mode == "--web", mode == "--sharp"
+    args = sys.argv[2:] if mode else sys.argv[1:]
+    default = {"--web": "rootfs/system/webfonts.bin", "--sharp": "system/kernel/assets/fonts@2x.bin.gz"}
+    out = args[0] if args else default.get(mode, "system/kernel/assets/fonts.bin")
+    if web:
+        fonts = [(p, s, c, tag, wt, None) for p, s, c, tag, wt in WEB_FONTS]
+    elif sharp:
+        fonts = [(p, s * 2, c, s * 2, wt, s) for p, s, c, wt in FONTS]
+    else:
+        fonts = [(p, s, c, s, wt, None) for p, s, c, wt in FONTS]
     header = bytearray(b"ARCF" + struct.pack("<HH", 1, len(fonts)))
     data = bytearray()
     tables = bytearray()
-    for path, size, chars, tag, weight in fonts:
-        ascent, line, glyphs = render(path, size, chars, weight)
+    for path, size, chars, tag, weight, optical in fonts:
+        ascent, line, glyphs = render(path, size, chars, weight, optical)
         tables += struct.pack("<HHhH", tag, line, ascent, len(glyphs))
         for code, w, h, x, y, adv, mask in glyphs:
             assert w < 256 and h < 256 and -128 <= x < 128 and -128 <= y < 128 and adv < 256, (path, size, chr(code))
             tables += struct.pack("<IBBbbBBI", code, w, h, x, y, adv, 0, len(data))
             data += mask
     blob = bytes(header + tables + data)
-    if web:
+    if web or sharp:
         import gzip
         blob = gzip.compress(blob, 9, mtime=0)
     with open(out, "wb") as f:

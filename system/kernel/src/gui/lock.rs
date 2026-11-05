@@ -103,7 +103,7 @@ impl Lock {
         };
         if shown < 1000 {
             // Fading: the desktop underneath shows through.
-            let mut layer = Canvas::new(w, h, 0);
+            let mut layer = Canvas::new_at(w, h, 0, blur.scale());
             self.paint(&mut layer, blur, Rect::new(0, 0, w, h), now);
             c.draw_scaled(&layer, Rect::new(0, 0, w, h), shown * 255 / 1000);
         } else {

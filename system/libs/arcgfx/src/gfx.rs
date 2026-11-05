@@ -146,10 +146,22 @@ fn round_cover(r: &Rect, rad: i32, px: i32, py: i32) -> u32 {
     (rad * 16 - d + 8).clamp(0, 16) as u32
 }
 
+
+/// A picture to draw on: the screen, a window, an icon.
+///
+/// Sizes and every drawing call are in *units*; a canvas has `scale` pixels
+/// per unit (2 on a high-density screen), so the same drawing code gives a
+/// sharper picture there. [`px`](Self::px) holds the pixels, row by row:
+/// `w * scale` by `h * scale` of them.
 pub struct Canvas {
     pub w: i32,
     pub h: i32,
     pub px: Vec<u32>,
+    scale: i32,
+    /// The size in pixels.
+    pw: i32,
+    ph: i32,
+    /// Where drawing goes, in pixels.
     clip: Rect,
     /// A layer keeps its alpha: drawing composites over what is there
     /// instead of treating it as opaque.
@@ -204,58 +216,136 @@ pub fn angle_permille(dx: i32, dy: i32) -> u32 {
     (a as u32) % 1000
 }
 
+/// The most pixels per unit a canvas may have.
+pub const MAX_SCALE: i32 = 4;
+
 impl Canvas {
+    /// `w` x `h` units at one pixel each, filled with `fill`.
     pub fn new(w: i32, h: i32, fill: u32) -> Canvas {
-        Canvas { w, h, px: vec![fill; (w.max(0) * h.max(0)) as usize], clip: Rect::new(0, 0, w, h), layer: false }
+        Canvas::new_at(w, h, fill, 1)
     }
 
+    /// `w` x `h` units at `scale` pixels per unit.
+    pub fn new_at(w: i32, h: i32, fill: u32, scale: i32) -> Canvas {
+        let s = scale.clamp(1, MAX_SCALE);
+        let (w, h) = (w.max(0), h.max(0));
+        Canvas::from_pixels_at(w, h, s, vec![fill; (w * s * h * s) as usize])
+    }
+
+    /// A canvas around `px`, `w` x `h` pixels (one per unit).
     pub fn from_pixels(w: i32, h: i32, px: Vec<u32>) -> Canvas {
-        Canvas { w, h, px, clip: Rect::new(0, 0, w, h), layer: false }
+        Canvas::from_pixels_at(w, h, 1, px)
+    }
+
+    /// A canvas of `w` x `h` units around `px`, which holds `w * scale` by
+    /// `h * scale` pixels.
+    pub fn from_pixels_at(w: i32, h: i32, scale: i32, px: Vec<u32>) -> Canvas {
+        let s = scale.clamp(1, MAX_SCALE);
+        let (pw, ph) = (w * s, h * s);
+        Canvas { w, h, px, scale: s, pw, ph, clip: Rect::new(0, 0, pw, ph), layer: false }
     }
 
     /// A transparent canvas that keeps alpha (a window drawn on its own).
     pub fn new_layer(w: i32, h: i32) -> Canvas {
-        let mut c = Canvas::new(w, h, 0);
+        Canvas::new_layer_at(w, h, 1)
+    }
+
+    /// [`new_layer`](Self::new_layer) at `scale` pixels per unit.
+    pub fn new_layer_at(w: i32, h: i32, scale: i32) -> Canvas {
+        let mut c = Canvas::new_at(w, h, 0, scale);
         c.layer = true;
         c
+    }
+
+    /// Pixels per unit.
+    pub fn scale(&self) -> i32 {
+        self.scale
+    }
+
+    /// The width in pixels (`w * scale`).
+    pub fn pixel_width(&self) -> i32 {
+        self.pw
+    }
+
+    /// The height in pixels.
+    pub fn pixel_height(&self) -> i32 {
+        self.ph
+    }
+
+    /// A rectangle in units, in pixels.
+    #[inline]
+    fn up(&self, r: Rect) -> Rect {
+        let s = self.scale;
+        Rect::new(r.x * s, r.y * s, r.w * s, r.h * s)
     }
 
     pub fn bounds(&self) -> Rect {
         Rect::new(0, 0, self.w, self.h)
     }
 
+    fn pixel_bounds(&self) -> Rect {
+        Rect::new(0, 0, self.pw, self.ph)
+    }
+
     pub fn set_clip(&mut self, r: Rect) {
-        self.clip = r.intersect(&self.bounds());
+        self.clip = self.up(r).intersect(&self.pixel_bounds());
     }
 
     pub fn clip(&self) -> Rect {
-        self.clip
+        let (s, c) = (self.scale, self.clip);
+        if c.is_empty() {
+            return Rect::EMPTY;
+        }
+        let (x, y) = (c.x / s, c.y / s);
+        Rect::new(x, y, (c.right() + s - 1) / s - x, (c.bottom() + s - 1) / s - y)
     }
 
     pub fn reset_clip(&mut self) {
-        self.clip = self.bounds();
+        self.clip = self.pixel_bounds();
     }
 
+    /// The colour at (`x`, `y`) in units (the first pixel of that unit).
     #[inline]
     pub fn get(&self, x: i32, y: i32) -> u32 {
-        self.px[(y * self.w + x) as usize]
+        self.px[(y * self.scale * self.pw + x * self.scale) as usize]
     }
 
+    /// The colour of pixel (`x`, `y`).
+    #[inline]
+    pub fn pixel(&self, x: i32, y: i32) -> u32 {
+        self.px[(y * self.pw + x) as usize]
+    }
+
+    /// The clip in pixels.
+    pub fn pixel_clip(&self) -> Rect {
+        self.clip
+    }
+
+    /// Blends `c` (by its alpha) into pixel (`x`, `y`) if it is inside the
+    /// clip.
+    #[inline]
+    pub fn blend_pixel(&mut self, x: i32, y: i32, c: u32) {
+        if self.clip.contains(x, y) {
+            self.put(x, y, c, c >> 24);
+        }
+    }
+
+    /// Blends `c` at opacity `a` into pixel (`x`, `y`).
     #[inline]
     fn put(&mut self, x: i32, y: i32, c: u32, a: u32) {
-        let i = (y * self.w + x) as usize;
+        let i = (y * self.pw + x) as usize;
         self.px[i] = if self.layer { over(self.px[i], c, a) } else { blend(self.px[i], c, a) };
     }
 
     /// Fills a rectangle (blended by the colour's alpha).
     pub fn fill(&mut self, r: Rect, c: u32) {
         let a = c >> 24;
-        let r = r.intersect(&self.clip);
+        let r = self.up(r).intersect(&self.clip);
         if r.is_empty() || a == 0 {
             return;
         }
         for y in r.y..r.bottom() {
-            let row = (y * self.w) as usize;
+            let row = (y * self.pw) as usize;
             let line = &mut self.px[row + r.x as usize..row + r.right() as usize];
             if a == 255 {
                 line.fill(c);
@@ -278,7 +368,8 @@ impl Canvas {
 
     /// A rounded rectangle with a vertical gradient from `top` to `bottom`.
     pub fn fill_round_grad(&mut self, r: Rect, rad: i32, top: u32, bottom: u32) {
-        let rad = rad.min(r.w / 2).min(r.h / 2);
+        let r = self.up(r);
+        let rad = (rad * self.scale).min(r.w / 2).min(r.h / 2);
         let area = r.intersect(&self.clip);
         if area.is_empty() {
             return;
@@ -309,8 +400,11 @@ impl Canvas {
     /// glow in the corner of a ticly card).
     #[allow(clippy::too_many_arguments)]
     pub fn glow_round(&mut self, r: Rect, rad: i32, cx: i32, cy: i32, radius: i32, c: u32, strength: u32) {
-        let radius = radius.max(1);
-        let rad = rad.min(r.w / 2).min(r.h / 2);
+        let s = self.scale;
+        let r = self.up(r);
+        let (cx, cy) = (cx * s, cy * s);
+        let radius = (radius * s).max(1);
+        let rad = (rad * s).min(r.w / 2).min(r.h / 2);
         let area = r.intersect(&Rect::new(cx - radius, cy - radius, radius * 2, radius * 2)).intersect(&self.clip);
         let r2 = radius as i64 * radius as i64;
         for y in area.y..area.bottom() {
@@ -332,10 +426,13 @@ impl Canvas {
         }
     }
 
-    /// The outline of a rounded rectangle, `width` pixels wide.
+    /// The outline of a rounded rectangle, `width` units wide.
     pub fn stroke_round(&mut self, r: Rect, rad: i32, width: i32, c: u32) {
+        let s = self.scale;
+        let r = self.up(r);
+        let width = width * s;
         let inner = r.grow(-width);
-        let rad = rad.min(r.w / 2).min(r.h / 2);
+        let rad = (rad * s).min(r.w / 2).min(r.h / 2);
         let irad = (rad - width).max(0);
         let area = r.intersect(&self.clip);
         let a = c >> 24;
@@ -358,6 +455,11 @@ impl Canvas {
 
     /// Copies part of an opaque canvas (`src` at `sx`, `sy`) to `dst`.
     pub fn blit(&mut self, src: &Canvas, sx: i32, sy: i32, dst: Rect) {
+        if src.scale != self.scale {
+            return self.copy_from(src, sx, sy, dst, 255);
+        }
+        let s = self.scale;
+        let (sx, sy, dst) = (sx * s, sy * s, self.up(dst));
         let d = dst.intersect(&self.clip);
         if d.is_empty() {
             return;
@@ -365,18 +467,46 @@ impl Canvas {
         let (ox, oy) = (sx + d.x - dst.x, sy + d.y - dst.y);
         for y in 0..d.h {
             let syy = oy + y;
-            if syy < 0 || syy >= src.h {
+            if syy < 0 || syy >= src.ph {
                 continue;
             }
             let x0 = ox.max(0);
-            let x1 = (ox + d.w).min(src.w);
+            let x1 = (ox + d.w).min(src.pw);
             if x1 <= x0 {
                 continue;
             }
-            let s = (syy * src.w + x0) as usize;
-            let t = ((d.y + y) * self.w + d.x + (x0 - ox)) as usize;
+            let s = (syy * src.pw + x0) as usize;
+            let t = ((d.y + y) * self.pw + d.x + (x0 - ox)) as usize;
             let n = (x1 - x0) as usize;
             self.px[t..t + n].copy_from_slice(&src.px[s..s + n]);
+        }
+    }
+
+    /// Where pixel `x` (of `dst`, which starts at pixel `x0`) reads `src`
+    /// from, `sx` units into it: the nearest pixel when the scales differ.
+    #[inline]
+    fn source(&self, src: &Canvas, sx: i32, x0: i32, x: i32) -> i32 {
+        sx * src.scale + (x - x0) * src.scale / self.scale
+    }
+
+    /// [`blit`](Self::blit) (`opacity` 255) or [`blit_faded`](Self::blit_faded)
+    /// for any two scales.
+    fn copy_from(&mut self, src: &Canvas, sx: i32, sy: i32, dst: Rect, opacity: u32) {
+        let dp = self.up(dst);
+        let d = dp.intersect(&self.clip);
+        for y in d.y..d.bottom() {
+            let syy = self.source(src, sy, dp.y, y);
+            if syy < 0 || syy >= src.ph {
+                continue;
+            }
+            for x in d.x..d.right() {
+                let sxx = self.source(src, sx, dp.x, x);
+                if sxx >= 0 && sxx < src.pw {
+                    let i = (y * self.pw + x) as usize;
+                    let p = src.px[(syy * src.pw + sxx) as usize];
+                    self.px[i] = if opacity >= 255 { p } else { blend(self.px[i], p, opacity) };
+                }
+            }
         }
     }
 
@@ -389,25 +519,26 @@ impl Canvas {
 
     /// Copies `src` from (`sx`, `sy`) into the rounded rectangle `r`.
     pub fn blit_round_from(&mut self, src: &Canvas, sx: i32, sy: i32, r: Rect, rad: i32, tint: u32) {
-        let rad = rad.min(r.w / 2).min(r.h / 2);
+        let r = self.up(r);
+        let rad = (rad * self.scale).min(r.w / 2).min(r.h / 2);
         let area = r.intersect(&self.clip);
         let ta = tint >> 24;
         for y in area.y..area.bottom() {
-            let syy = y - r.y + sy;
-            if syy < 0 || syy >= src.h {
+            let syy = self.source(src, sy, r.y, y);
+            if syy < 0 || syy >= src.ph {
                 continue;
             }
             let corner_row = y < r.y + rad || y >= r.bottom() - rad;
             for x in area.x..area.right() {
-                let sxx = x - r.x + sx;
-                if sxx < 0 || sxx >= src.w {
+                let sxx = self.source(src, sx, r.x, x);
+                if sxx < 0 || sxx >= src.pw {
                     continue;
                 }
                 let cov = if corner_row { round_cover(&r, rad, x, y) } else { 16 };
                 if cov == 0 {
                     continue;
                 }
-                let px = src.get(sxx, syy);
+                let px = src.pixel(sxx, syy);
                 let s = blend(px, tint, ta);
                 self.put(x, y, s, (px >> 24) * cov / 16);
             }
@@ -415,11 +546,16 @@ impl Canvas {
     }
 
     /// Draws an image with its own alpha at (`x`, `y`), faded by `opacity`.
+    /// An image of another scale is stretched to its size in units.
     pub fn draw_image(&mut self, img: &Canvas, x: i32, y: i32, opacity: u32) {
-        let d = Rect::new(x, y, img.w, img.h).intersect(&self.clip);
+        if img.scale != self.scale {
+            return self.draw_scaled(img, Rect::new(x, y, img.w, img.h), opacity);
+        }
+        let (x, y) = (x * self.scale, y * self.scale);
+        let d = Rect::new(x, y, img.pw, img.ph).intersect(&self.clip);
         for yy in d.y..d.bottom() {
             for xx in d.x..d.right() {
-                let s = img.get(xx - x, yy - y);
+                let s = img.pixel(xx - x, yy - y);
                 let a = (s >> 24) * opacity / 255;
                 if a != 0 {
                     self.put(xx, yy, s, a);
@@ -428,8 +564,61 @@ impl Canvas {
         }
     }
 
-    /// Draws an alpha mask (one byte per pixel) in colour `c`.
+    /// Draws the shape of an image (its alpha) in colour `c`: a white glyph
+    /// icon in another colour.
+    pub fn draw_tinted(&mut self, img: &Canvas, x: i32, y: i32, c: u32) {
+        let a = c >> 24;
+        let dp = self.up(Rect::new(x, y, img.w, img.h));
+        let d = dp.intersect(&self.clip);
+        for yy in d.y..d.bottom() {
+            let sy = self.source(img, 0, dp.y, yy).min(img.ph - 1);
+            for xx in d.x..d.right() {
+                let sx = self.source(img, 0, dp.x, xx).min(img.pw - 1);
+                let m = img.pixel(sx, sy) >> 24;
+                if m != 0 {
+                    self.put(xx, yy, c, a * m / 255);
+                }
+            }
+        }
+    }
+
+    /// Draws an alpha mask (one byte per unit) in colour `c`; on a canvas
+    /// with more pixels per unit it is stretched smoothly.
     pub fn draw_mask(&mut self, mask: &[u8], mw: i32, mh: i32, x: i32, y: i32, c: u32) {
+        let s = self.scale;
+        if s == 1 {
+            return self.draw_mask_px(mask, mw, mh, x, y, c);
+        }
+        let a = c >> 24;
+        let dp = self.up(Rect::new(x, y, mw, mh));
+        let d = dp.intersect(&self.clip);
+        let at = |mx: i32, my: i32| -> u32 {
+            if mx < 0 || my < 0 || mx >= mw || my >= mh {
+                0
+            } else {
+                mask[(my * mw + mx) as usize] as u32
+            }
+        };
+        for yy in d.y..d.bottom() {
+            // The middle of the pixel, in 1/256 of a mask cell.
+            let fy = ((yy - dp.y) * 2 + 1) * 128 / s - 128;
+            let (my, ty) = (fy >> 8, (fy & 0xFF) as u32);
+            for xx in d.x..d.right() {
+                let fx = ((xx - dp.x) * 2 + 1) * 128 / s - 128;
+                let (mx, tx) = (fx >> 8, (fx & 0xFF) as u32);
+                let top = at(mx, my) * (256 - tx) + at(mx + 1, my) * tx;
+                let bot = at(mx, my + 1) * (256 - tx) + at(mx + 1, my + 1) * tx;
+                let m = (top * (256 - ty) + bot * ty) >> 16;
+                if m != 0 {
+                    self.put(xx, yy, c, a * m / 255);
+                }
+            }
+        }
+    }
+
+    /// Draws an alpha mask (one byte per pixel) in colour `c`, its top-left
+    /// corner at pixel (`x`, `y`): glyphs rendered for this scale.
+    pub fn draw_mask_px(&mut self, mask: &[u8], mw: i32, mh: i32, x: i32, y: i32, c: u32) {
         let a = c >> 24;
         let d = Rect::new(x, y, mw, mh).intersect(&self.clip);
         for yy in d.y..d.bottom() {
@@ -443,9 +632,12 @@ impl Canvas {
         }
     }
 
-    /// A soft shadow around `r` (outside it only), `size` pixels wide.
+    /// A soft shadow around `r` (outside it only), `size` units wide.
     pub fn shadow(&mut self, r: Rect, rad: i32, size: i32, strength: u32) {
-        let rad = rad.min(r.w / 2).min(r.h / 2).max(0);
+        let s = self.scale;
+        let r = self.up(r);
+        let size = size * s;
+        let rad = (rad * s).min(r.w / 2).min(r.h / 2).max(0);
         let outer = r.grow(size).offset(0, size / 3);
         let area = outer.intersect(&self.clip);
         for y in area.y..area.bottom() {
@@ -471,38 +663,49 @@ impl Canvas {
         }
     }
 
-    /// Blurs the whole canvas (three box passes ≈ a Gaussian of `radius`).
+    /// Blurs the whole canvas (three box passes ≈ a Gaussian of `radius`
+    /// units).
     pub fn blur(&mut self, radius: i32) {
+        let radius = radius * self.scale;
         for _ in 0..3 {
             box_blur_h(self, radius);
             box_blur_v(self, radius);
         }
     }
 
-    /// A copy scaled to `w` x `h`: area averaging when shrinking, bilinear
-    /// when growing. Alpha is kept and colours are weighted by it.
+    /// A copy scaled to `w` x `h` units (at the same scale): area averaging
+    /// when shrinking, bilinear when growing. Alpha is kept and colours are
+    /// weighted by it.
     pub fn scaled(&self, w: i32, h: i32) -> Canvas {
-        let mut out = Canvas::new(w, h, 0);
-        if w <= 0 || h <= 0 || self.w <= 0 || self.h <= 0 {
+        self.scaled_at(w, h, self.scale)
+    }
+
+    /// [`scaled`](Self::scaled) to `w` x `h` units at `scale` pixels per
+    /// unit (an icon from the atlas, sharp on a high-density screen).
+    pub fn scaled_at(&self, w: i32, h: i32, scale: i32) -> Canvas {
+        let mut out = Canvas::new_at(w, h, 0, scale);
+        let (w, h) = (out.pw, out.ph);
+        let (sw, sh) = (self.pw, self.ph);
+        if w <= 0 || h <= 0 || sw <= 0 || sh <= 0 {
             return out;
         }
-        if w <= self.w && h <= self.h {
+        if w <= sw && h <= sh {
             // Area average, in 1/256 of a source pixel.
             for y in 0..h {
-                let y0 = (y as i64 * self.h as i64 * 256 / h as i64) as i32;
-                let y1 = ((y + 1) as i64 * self.h as i64 * 256 / h as i64) as i32;
+                let y0 = (y as i64 * sh as i64 * 256 / h as i64) as i32;
+                let y1 = ((y + 1) as i64 * sh as i64 * 256 / h as i64) as i32;
                 for x in 0..w {
-                    let x0 = (x as i64 * self.w as i64 * 256 / w as i64) as i32;
-                    let x1 = ((x + 1) as i64 * self.w as i64 * 256 / w as i64) as i32;
+                    let x0 = (x as i64 * sw as i64 * 256 / w as i64) as i32;
+                    let x1 = ((x + 1) as i64 * sw as i64 * 256 / w as i64) as i32;
                     let (mut sa, mut sr, mut sg, mut sb, mut wt) = (0u64, 0u64, 0u64, 0u64, 0u64);
                     let mut sy = y0 >> 8;
-                    while (sy << 8) < y1 && sy < self.h {
+                    while (sy << 8) < y1 && sy < sh {
                         let wy = ((sy + 1) * 256).min(y1) - (sy * 256).max(y0);
                         let mut sx = x0 >> 8;
-                        while (sx << 8) < x1 && sx < self.w {
+                        while (sx << 8) < x1 && sx < sw {
                             let wx = ((sx + 1) * 256).min(x1) - (sx * 256).max(x0);
                             let k = (wx * wy) as u64;
-                            let p = self.get(sx, sy);
+                            let p = self.pixel(sx, sy);
                             let a = (p >> 24) as u64;
                             sa += a * k;
                             sr += ((p >> 16) & 0xFF) as u64 * a * k;
@@ -523,15 +726,15 @@ impl Canvas {
             }
         } else {
             for y in 0..h {
-                let fy = (y as i64 * 2 + 1) * self.h as i64 * 128 / h as i64 - 128;
-                let (y0, ty) = ((fy >> 8).clamp(0, self.h as i64 - 1) as i32, (fy & 0xFF) as u32);
-                let y1 = (y0 + 1).min(self.h - 1);
+                let fy = (y as i64 * 2 + 1) * sh as i64 * 128 / h as i64 - 128;
+                let (y0, ty) = ((fy >> 8).clamp(0, sh as i64 - 1) as i32, (fy & 0xFF) as u32);
+                let y1 = (y0 + 1).min(sh - 1);
                 for x in 0..w {
-                    let fx = (x as i64 * 2 + 1) * self.w as i64 * 128 / w as i64 - 128;
-                    let (x0, tx) = ((fx >> 8).clamp(0, self.w as i64 - 1) as i32, (fx & 0xFF) as u32);
-                    let x1 = (x0 + 1).min(self.w - 1);
-                    let top = mix(self.get(x0, y0), self.get(x1, y0), tx);
-                    let bot = mix(self.get(x0, y1), self.get(x1, y1), tx);
+                    let fx = (x as i64 * 2 + 1) * sw as i64 * 128 / w as i64 - 128;
+                    let (x0, tx) = ((fx >> 8).clamp(0, sw as i64 - 1) as i32, (fx & 0xFF) as u32);
+                    let x1 = (x0 + 1).min(sw - 1);
+                    let top = mix(self.pixel(x0, y0), self.pixel(x1, y0), tx);
+                    let bot = mix(self.pixel(x0, y1), self.pixel(x1, y1), tx);
                     out.px[(y * w + x) as usize] = mix(top, bot, ty);
                 }
             }
@@ -542,22 +745,23 @@ impl Canvas {
     /// Draws `img` stretched into `dst` (nearest pixel, fast enough to
     /// animate), with its alpha and faded by `opacity`.
     pub fn draw_scaled(&mut self, img: &Canvas, dst: Rect, opacity: u32) {
-        if dst.is_empty() || img.w <= 0 || img.h <= 0 || opacity == 0 {
+        let dst = self.up(dst);
+        if dst.is_empty() || img.pw <= 0 || img.ph <= 0 || opacity == 0 {
             return;
         }
         let d = dst.intersect(&self.clip);
         if d.is_empty() {
             return;
         }
-        let sx_step = ((img.w as i64) << 16) / dst.w as i64;
-        let sy_step = ((img.h as i64) << 16) / dst.h as i64;
+        let sx_step = ((img.pw as i64) << 16) / dst.w as i64;
+        let sy_step = ((img.ph as i64) << 16) / dst.h as i64;
         for y in d.y..d.bottom() {
-            let sy = (((y - dst.y) as i64 * sy_step) >> 16).min(img.h as i64 - 1) as i32;
-            let srow = (sy * img.w) as usize;
-            let row = (y * self.w) as usize;
+            let sy = (((y - dst.y) as i64 * sy_step) >> 16).min(img.ph as i64 - 1) as i32;
+            let srow = (sy * img.pw) as usize;
+            let row = (y * self.pw) as usize;
             let mut fx = (d.x - dst.x) as i64 * sx_step;
             for x in d.x..d.right() {
-                let sx = ((fx >> 16) as i32).min(img.w - 1);
+                let sx = ((fx >> 16) as i32).min(img.pw - 1);
                 fx += sx_step;
                 let s = img.px[srow + sx as usize];
                 let a = (s >> 24) * opacity / 255;
@@ -575,28 +779,20 @@ impl Canvas {
         if opacity >= 255 {
             return self.blit(src, sx, sy, dst);
         }
-        let d = dst.intersect(&self.clip);
-        for y in d.y..d.bottom() {
-            let syy = sy + y - dst.y;
-            if syy < 0 || syy >= src.h {
-                continue;
-            }
-            for x in d.x..d.right() {
-                let sxx = sx + x - dst.x;
-                if sxx >= 0 && sxx < src.w {
-                    let i = (y * self.w + x) as usize;
-                    self.px[i] = blend(self.px[i], src.get(sxx, syy), opacity);
-                }
-            }
-        }
+        self.copy_from(src, sx, sy, dst, opacity);
     }
 
-    /// A line `width` pixels wide with round ends, anti-aliased.
+    /// A line `width` units wide with round ends, anti-aliased.
     pub fn line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, width: i32, c: u32) {
-        let half = (width.max(1) * 8) as i64; // in 1/16 px
-        let box_ = Rect::new(x0.min(x1) - width, y0.min(y1) - width, (x0 - x1).abs() + 2 * width + 1, (y0 - y1).abs() + 2 * width + 1);
-        let area = box_.intersect(&self.clip);
-        let (ax, ay, bx, by) = (x0 as i64 * 16 + 8, y0 as i64 * 16 + 8, x1 as i64 * 16 + 8, y1 as i64 * 16 + 8);
+        let s = self.scale as i64;
+        let half = width.max(1) as i64 * 8 * s; // in 1/16 px
+        // The ends, in the middle of their units, in 1/16 pixel.
+        let at = |v: i32| v as i64 * 16 * s + 8 * s;
+        let (ax, ay, bx, by) = (at(x0), at(y0), at(x1), at(y1));
+        let pad = half / 16 + 1;
+        let (left, top) = (ax.min(bx) / 16 - pad, ay.min(by) / 16 - pad);
+        let (right, bottom) = (ax.max(bx) / 16 + pad + 1, ay.max(by) / 16 + pad + 1);
+        let area = Rect::new(left as i32, top as i32, (right - left) as i32, (bottom - top) as i32).intersect(&self.clip);
         let (vx, vy) = (bx - ax, by - ay);
         let len2 = vx * vx + vy * vy;
         let a = c >> 24;
@@ -618,6 +814,8 @@ impl Canvas {
     /// Part of a ring (centre, outer radius, thickness): from straight up,
     /// clockwise, `permille` of a full turn.
     pub fn arc(&mut self, cx: i32, cy: i32, rad: i32, thick: i32, permille: u32, c: u32) {
+        let s = self.scale;
+        let (cx, cy, rad, thick) = (cx * s, cy * s, rad * s, thick * s);
         let area = Rect::new(cx - rad - 1, cy - rad - 1, 2 * rad + 2, 2 * rad + 2).intersect(&self.clip);
         let a = c >> 24;
         let (ro, ri) = (rad * 16, (rad - thick) * 16);
@@ -634,21 +832,22 @@ impl Canvas {
         }
     }
 
-    /// A filled triangle (no anti-aliasing; for small symbols).
+    /// A filled triangle (four samples a pixel; for small symbols).
     pub fn triangle(&mut self, p: [(i32, i32); 3], c: u32) {
+        let s = self.scale;
         let (x0, x1) = (p.iter().map(|q| q.0).min().unwrap_or(0), p.iter().map(|q| q.0).max().unwrap_or(0));
         let (y0, y1) = (p.iter().map(|q| q.1).min().unwrap_or(0), p.iter().map(|q| q.1).max().unwrap_or(0));
-        let area = Rect::new(x0, y0, x1 - x0 + 1, y1 - y0 + 1).intersect(&self.clip);
+        let area = self.up(Rect::new(x0, y0, x1 - x0 + 1, y1 - y0 + 1)).intersect(&self.clip);
+        // The corners, in the middle of their units, in 1/4 pixel.
+        let q = p.map(|(x, y)| (x * s * 4 + 2 * s, y * s * 4 + 2 * s));
         let edge = |a: (i32, i32), b: (i32, i32), x: i32, y: i32| (b.0 - a.0) as i64 * (y - a.1) as i64 - (b.1 - a.1) as i64 * (x - a.0) as i64;
         let a = c >> 24;
-        // Four samples per pixel for soft edges.
         for y in area.y..area.bottom() {
             for x in area.x..area.right() {
                 let mut n = 0;
                 for (sx, sy) in [(1, 1), (3, 1), (1, 3), (3, 3)] {
                     let (qx, qy) = (x * 4 + sx, y * 4 + sy);
-                    let s = |a: (i32, i32)| (a.0 * 4 + 2, a.1 * 4 + 2);
-                    let (e0, e1, e2) = (edge(s(p[0]), s(p[1]), qx, qy), edge(s(p[1]), s(p[2]), qx, qy), edge(s(p[2]), s(p[0]), qx, qy));
+                    let (e0, e1, e2) = (edge(q[0], q[1], qx, qy), edge(q[1], q[2], qx, qy), edge(q[2], q[0], qx, qy));
                     if (e0 >= 0 && e1 >= 0 && e2 >= 0) || (e0 <= 0 && e1 <= 0 && e2 <= 0) {
                         n += 1;
                     }
@@ -660,19 +859,19 @@ impl Canvas {
         }
     }
 
-    /// A copy of a region.
+    /// A copy of a region (at the same scale).
     pub fn crop(&self, r: Rect) -> Canvas {
-        let mut out = Canvas::new(r.w, r.h, 0);
+        let mut out = Canvas::new_at(r.w, r.h, 0, self.scale);
         out.blit(self, r.x, r.y, out.bounds());
         out
     }
 }
 
 fn box_blur_h(c: &mut Canvas, rad: i32) {
-    let w = c.w as usize;
+    let w = c.pw as usize;
     let n = (2 * rad + 1) as u32;
     let mut line = vec![0u32; w];
-    for y in 0..c.h as usize {
+    for y in 0..c.ph as usize {
         let row = &mut c.px[y * w..y * w + w];
         line.copy_from_slice(row);
         let at = |i: i32| line[i.clamp(0, w as i32 - 1) as usize];
@@ -694,7 +893,7 @@ fn box_blur_h(c: &mut Canvas, rad: i32) {
 }
 
 fn box_blur_v(c: &mut Canvas, rad: i32) {
-    let (w, h) = (c.w as usize, c.h as usize);
+    let (w, h) = (c.pw as usize, c.ph as usize);
     let n = (2 * rad + 1) as u32;
     let mut col = vec![0u32; h];
     for x in 0..w {
@@ -748,5 +947,60 @@ mod tests {
         let mut screen = Canvas::new(4, 4, 0xFF00_0000);
         screen.fill(Rect::new(0, 0, 4, 4), 0x80FF_FFFF);
         assert_eq!(screen.get(1, 1) >> 24, 0xFF);
+    }
+
+    #[test]
+    fn a_unit_is_scale_pixels_wide() {
+        let mut c = Canvas::new_at(10, 5, 0xFF00_0000, 2);
+        assert_eq!((c.w, c.h, c.pixel_width(), c.pixel_height(), c.px.len()), (10, 5, 20, 10, 200));
+        c.fill(Rect::new(1, 1, 2, 1), 0xFFFF_FFFF);
+        assert_eq!(c.pixel(1, 2), 0xFF00_0000);
+        assert_eq!(c.pixel(2, 2), 0xFFFF_FFFF);
+        assert_eq!(c.pixel(5, 3), 0xFFFF_FFFF);
+        assert_eq!(c.pixel(6, 3), 0xFF00_0000);
+        assert_eq!(c.pixel(2, 4), 0xFF00_0000);
+    }
+
+    #[test]
+    fn the_clip_is_kept_in_units() {
+        let mut c = Canvas::new_at(10, 10, 0, 2);
+        c.set_clip(Rect::new(2, 3, 4, 5));
+        assert_eq!(c.clip(), Rect::new(2, 3, 4, 5));
+        c.fill(c.bounds(), 0xFFFF_FFFF);
+        assert_eq!(c.get(1, 3), 0);
+        assert_eq!(c.get(2, 3), 0xFFFF_FFFF);
+        assert_eq!(c.get(5, 7), 0xFFFF_FFFF);
+        assert_eq!(c.get(6, 7), 0);
+    }
+
+    #[test]
+    fn pictures_of_another_scale_keep_their_size_in_units() {
+        let mut icon = Canvas::new_layer(2, 2);
+        icon.fill(Rect::new(0, 0, 1, 2), 0xFFFF_0000);
+        let mut screen = Canvas::new_at(4, 4, 0xFF00_0000, 2);
+        screen.draw_image(&icon, 1, 1, 255);
+        // The red half covers units (1, 1)..(2, 3): pixels 2..4, 2..6.
+        assert_eq!(screen.pixel(2, 2), 0xFFFF_0000);
+        assert_eq!(screen.pixel(3, 5), 0xFFFF_0000);
+        assert_eq!(screen.pixel(4, 2), 0xFF00_0000);
+        let sharp = icon.scaled_at(2, 2, 2);
+        assert_eq!((sharp.pixel_width(), sharp.scale()), (4, 2));
+        let mut back = Canvas::new_at(4, 4, 0xFF00_0000, 2);
+        back.blit(&screen, 0, 0, back.bounds());
+        assert_eq!(back.px, screen.px);
+        let small = screen.crop(Rect::new(1, 1, 2, 2));
+        assert_eq!((small.w, small.pixel_width(), small.pixel(0, 0)), (2, 4, 0xFFFF_0000));
+    }
+
+    #[test]
+    fn masks_grow_smoothly() {
+        let mut c = Canvas::new_at(3, 3, 0xFF00_0000, 2);
+        c.draw_mask(&[0, 0, 0, 0, 255, 0, 0, 0, 0], 3, 3, 0, 0, 0xFFFF_FFFF);
+        let v = |x, y| c.pixel(x, y) & 0xFF;
+        // The middle unit is the brightest and it fades out evenly.
+        assert_eq!(v(2, 2), v(3, 3));
+        assert_eq!(v(2, 3), v(3, 2));
+        assert!(v(2, 2) > v(1, 2) && v(1, 2) > v(0, 2));
+        assert_eq!(v(0, 0), 0);
     }
 }

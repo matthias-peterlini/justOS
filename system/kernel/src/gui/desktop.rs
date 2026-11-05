@@ -1316,7 +1316,7 @@ impl Desktop {
     /// Saves a picture of the screen in Immagini.
     fn screenshot(&mut self, l: &mut Looper) {
         let screen = self.screen();
-        let mut shot = Canvas::new(self.w, self.h, 0xFF00_0000);
+        let mut shot = Canvas::new_at(self.w, self.h, 0xFF00_0000, super::scale());
         self.paint_desktop(&mut shot, screen);
         let d = now();
         let dir = "sys:/home/Immagini";
@@ -2682,7 +2682,7 @@ fn shrink(pic: Canvas, max_w: i32) -> Canvas {
     if pic.w <= max_w || pic.w == 0 {
         return pic;
     }
-    let mut small = Canvas::new_layer(max_w, (pic.h * max_w / pic.w).max(1));
+    let mut small = Canvas::new_layer_at(max_w, (pic.h * max_w / pic.w).max(1), pic.scale());
     let all = small.bounds();
     small.draw_scaled(&pic, all, 255);
     small
@@ -2932,7 +2932,8 @@ impl Desktop {
                 }
                 for w in self.windows.iter_mut() {
                     if !w.minimized && w.app.tick() {
-                        l.damage(w.body());
+                        let body = w.body();
+                        l.damage(w.app.changed(body).map_or(body, |r| r.intersect(&body)));
                     }
                 }
                 // Programs that ended take their windows with them.

@@ -13,6 +13,11 @@
 //! Drawing happens in a back buffer ([`gfx::Canvas`]); only the parts that
 //! changed are copied to the framebuffer, and the pointer is drawn straight
 //! on the framebuffer so that moving it redraws nothing.
+//!
+//! Everything is laid out in units. On a high-density screen (at least
+//! 2560 x 1440, unless the user chose otherwise) a unit is two pixels: the
+//! interface keeps its size and is drawn with twice the detail, text from
+//! fonts rendered at twice the size ([`scale`]).
 
 pub mod gfx;
 pub use arcgfx::qoi;
@@ -42,7 +47,30 @@ pub struct Display {
     pub scene: Canvas,
 }
 
+/// Pixels per unit on the screen: 1, or 2 on a high-density screen.
+static SCALE: core::sync::atomic::AtomicI32 = core::sync::atomic::AtomicI32::new(1);
+
+/// Pixels per unit on the screen now. Canvases for the screen are made at
+/// this scale.
+pub fn scale() -> i32 {
+    SCALE.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+/// The scale for a screen of `w` x `h` pixels: what the user chose
+/// (`choice`, 0 for automatic), if the screen is big enough for it.
+/// Automatic is 2 from 2560 x 1440 up (the interface then has the room of
+/// 1280 x 720).
+pub fn scale_for(w: usize, h: usize, choice: u32) -> i32 {
+    let fits = |s: usize| w.is_multiple_of(s) && h.is_multiple_of(s) && w / s >= 800 && h / s >= 600;
+    match choice {
+        2 if fits(2) => 2,
+        0 if w >= 2560 && h >= 1440 && fits(2) => 2,
+        _ => 1,
+    }
+}
+
 impl Display {
+    /// The screen's width in units.
     pub fn width(&self) -> i32 {
         self.scene.w
     }
@@ -51,16 +79,29 @@ impl Display {
         self.scene.h
     }
 
-    /// Copies a region of the back buffer to the screen.
+    /// Pixels per unit.
+    pub fn scale(&self) -> i32 {
+        self.scene.scale()
+    }
+
+    /// A back buffer for `fb` at `scale` pixels per unit.
+    fn scene_for(fb: &FbInfo, scale: i32) -> Canvas {
+        Canvas::new_at(fb.width as i32 / scale, fb.height as i32 / scale, 0xFF00_0000, scale)
+    }
+
+    /// Copies a region of the back buffer to the screen (`r` in units).
     pub fn present(&self, r: Rect) {
         let r = r.intersect(&self.scene.bounds());
         if r.is_empty() {
             return;
         }
+        let k = self.scene.scale();
+        let r = Rect::new(r.x * k, r.y * k, r.w * k, r.h * k);
+        let stride = self.scene.pixel_width();
         let level = brightness();
         let fast = self.fb.shift == (16, 8, 0) && level >= 100;
         for y in r.y..r.bottom() {
-            let src = &self.scene.px[(y * self.scene.w + r.x) as usize..(y * self.scene.w + r.right()) as usize];
+            let src = &self.scene.px[(y * stride + r.x) as usize..(y * stride + r.right()) as usize];
             let dst = (self.fb.virt + y as u64 * self.fb.pitch as u64 + r.x as u64 * 4) as *mut u32;
             if level < 100 {
                 // Software brightness: every channel scaled down.
@@ -91,12 +132,37 @@ impl Display {
     /// driver). The back buffer starts black at the new size.
     pub fn set_mode(&mut self, mode: arcdk::DisplayMode) -> Result<(), &'static str> {
         let fb = crate::dev::display::set_mode(mode)?;
+        let scale = scale_for(fb.width, fb.height, settings::get().scale);
+        self.adopt(fb, scale);
+        Ok(())
+    }
+
+    /// Draws at the scale the settings ask for on this screen; true if it
+    /// changed (the back buffer then starts black, like after a new mode).
+    pub fn apply_scale(&mut self) -> bool {
+        let scale = scale_for(self.fb.width, self.fb.height, settings::get().scale);
+        if scale == self.scene.scale() {
+            return false;
+        }
+        let fb = self.fb;
+        self.adopt(fb, scale);
+        true
+    }
+
+    /// Draws on `fb` at `scale` from now on.
+    fn adopt(&mut self, fb: FbInfo, scale: i32) {
+        if scale > 1 {
+            text::load_sharp();
+        }
         self.fb = fb;
+        self.scene = Canvas::new(0, 0, 0);
+        self.scene = Display::scene_for(&fb, scale);
+        SCALE.store(scale, core::sync::atomic::Ordering::Relaxed);
+        let mut panic = Canvas::new_at(PANIC_W, PANIC_H, 0, scale);
         if let Some(p) = PANIC.lock().as_mut() {
             p.0 = fb;
+            core::mem::swap(&mut p.1, &mut panic);
         }
-        self.scene = Canvas::new(fb.width as i32, fb.height as i32, 0xFF00_0000);
-        Ok(())
     }
 
     /// After sleep the display driver may have set the same mode again with
@@ -104,7 +170,7 @@ impl Display {
     /// window the firmware used): draw there from now on.
     pub fn follow_framebuffer(&mut self) {
         let Some(fb) = crate::console::framebuffer() else { return };
-        if fb.virt == self.fb.virt || fb.width as i32 != self.scene.w || fb.height as i32 != self.scene.h {
+        if fb.virt == self.fb.virt || fb.width as i32 != self.scene.pixel_width() || fb.height as i32 != self.scene.pixel_height() {
             return;
         }
         self.fb = fb;
@@ -113,9 +179,9 @@ impl Display {
         }
     }
 
-    /// The current resolution.
+    /// The current resolution (in pixels).
     pub fn mode(&self) -> arcdk::DisplayMode {
-        arcdk::DisplayMode { width: self.scene.w as u32, height: self.scene.h as u32 }
+        arcdk::DisplayMode { width: self.fb.width as u32, height: self.fb.height as u32 }
     }
 
     fn convert(&self, p: u32) -> u32 {
@@ -123,9 +189,10 @@ impl Display {
         r << self.fb.shift.0 | g << self.fb.shift.1 | b << self.fb.shift.2
     }
 
-    /// Writes one pixel straight to the screen (the pointer).
+    /// Writes one pixel straight to the screen (the pointer), at pixel
+    /// (`x`, `y`).
     fn put_screen(&self, x: i32, y: i32, p: u32) {
-        if x < 0 || y < 0 || x >= self.scene.w || y >= self.scene.h {
+        if x < 0 || y < 0 || x >= self.scene.pixel_width() || y >= self.scene.pixel_height() {
             return;
         }
         let v = if self.fb.shift == (16, 8, 0) { p } else { self.convert(p) };
@@ -154,9 +221,17 @@ pub fn active() -> bool {
 /// Called right after the console: takes the framebuffer and shows the splash.
 pub fn boot_start() {
     let Some(fb) = crate::console::framebuffer() else { return };
-    let scene = Canvas::new(fb.width as i32, fb.height as i32, 0xFF00_0000);
+    // The settings are not readable yet: the automatic scale until the
+    // desktop starts.
+    let scale = scale_for(fb.width, fb.height, 0);
+    if scale > 1 {
+        text::load_sharp();
+    }
+    SCALE.store(scale, core::sync::atomic::Ordering::Relaxed);
+    let scene = Display::scene_for(&fb, scale);
+    let panic = Canvas::new_at(PANIC_W, PANIC_H, 0, scale);
     *DISPLAY.lock() = Some(Display { fb, scene });
-    *PANIC.lock() = Some((fb, Canvas::new(PANIC_W, PANIC_H, 0)));
+    *PANIC.lock() = Some((fb, panic));
     ACTIVE.store(true, core::sync::atomic::Ordering::Relaxed);
     splash::show(0);
 }
@@ -197,10 +272,12 @@ pub fn panic_screen() -> bool {
         }
     }
     // The message, drawn on the same gradient, in the middle.
-    let (ox, oy) = ((w - PANIC_W) / 2, (h - PANIC_H) / 2);
+    let k = c.scale();
+    let (cw, ch) = (c.pixel_width(), c.pixel_height());
+    let (ox, oy) = ((w - cw) / 2, (h - ch) / 2);
     c.reset_clip();
     for y in 0..PANIC_H {
-        let t = ((oy + y).clamp(0, h) * 255 / h.max(1)) as u32;
+        let t = ((oy + y * k).clamp(0, h) * 255 / h.max(1)) as u32;
         c.fill(Rect::new(0, y, PANIC_W, 1), gfx::mix(0xFF1A_1428, 0xFF2C_1F3F, t));
     }
     let cx = PANIC_W / 2;
@@ -208,15 +285,15 @@ pub fn panic_screen() -> bool {
     text::draw_centered(c, text::Font::Title, cx, 104, "arcOS si è dovuto fermare", 0xFFF5_F2F8);
     text::draw_centered(c, text::Font::Body, cx, 156, "Si è verificato un problema che il sistema non può risolvere da solo.", 0xB3F5_F2F8);
     text::draw_centered(c, text::Font::Body, cx, 184, "Spegni e riaccendi il computer.", 0xB3F5_F2F8);
-    for y in 0..PANIC_H {
-        for x in 0..PANIC_W {
+    for y in 0..ch {
+        for x in 0..cw {
             let (sx, sy) = (ox + x, oy + y);
             if sx < 0 || sy < 0 || sx >= w || sy >= h {
                 continue;
             }
             let at = (fb.virt + sy as u64 * fb.pitch as u64 + sx as u64 * 4) as *mut u32;
             // SAFETY: (sx, sy) is on the screen.
-            unsafe { at.write_volatile(convert(c.px[(y * PANIC_W + x) as usize])) };
+            unsafe { at.write_volatile(convert(c.pixel(x, y))) };
         }
     }
     crate::dev::display::flush(0, 0, w, h);
@@ -336,6 +413,38 @@ fn take_mode_request() -> Option<arcdk::DisplayMode> {
     MODE_REQUEST.lock().take()
 }
 
+/// The user chose another size for the interface.
+static SCALE_REQUEST: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Sets the size of the interface (0: automatic, 1: normal, 2: double),
+/// remembers it and applies it.
+pub fn change_scale(choice: u32) -> Result<(), &'static str> {
+    if !active() {
+        return Err("the interface size can change only with the graphical interface");
+    }
+    if choice > 2 {
+        return Err("the size is 0 (automatic), 1 or 2");
+    }
+    settings::update(|s| s.scale = choice);
+    SCALE_REQUEST.store(true, core::sync::atomic::Ordering::Release);
+    Ok(())
+}
+
+/// The interface size the user chose (0: automatic).
+pub fn scale_choice() -> u32 {
+    settings::get().scale
+}
+
+/// Whether the screen is big enough for the double size (800 x 600 units
+/// or more).
+pub fn can_double() -> bool {
+    crate::console::pixel_size().is_some_and(|(w, h)| scale_for(w, h, 2) == 2)
+}
+
+fn take_scale_request() -> bool {
+    SCALE_REQUEST.swap(false, core::sync::atomic::Ordering::AcqRel)
+}
+
 /// The resolution saved in the settings, if a driver can set it and the
 /// screen is not in it already.
 fn apply_saved_mode(d: &mut Display) {
@@ -386,6 +495,7 @@ fn run() {
     crate::task::sleep_ms(250);
     let Some(mut d) = DISPLAY.lock().take() else { return };
     apply_saved_mode(&mut d);
+    d.apply_scale();
     if !settings::get().setup_done {
         setup::run(&mut d);
     }

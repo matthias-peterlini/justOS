@@ -17,8 +17,20 @@ use alloc::vec::Vec;
 use arcdk::DisplayMode;
 
 /// Resolutions offered when the display has them, in this order.
-const COMMON_MODES: &[(u32, u32)] =
-    &[(1024, 768), (1280, 720), (1280, 800), (1366, 768), (1440, 900), (1600, 900), (1680, 1050), (1920, 1080), (1920, 1200), (2560, 1440)];
+const COMMON_MODES: &[(u32, u32)] = &[
+    (1024, 768),
+    (1280, 720),
+    (1280, 800),
+    (1366, 768),
+    (1440, 900),
+    (1600, 900),
+    (1680, 1050),
+    (1920, 1080),
+    (1920, 1200),
+    (2560, 1440),
+    (2560, 1600),
+    (3840, 2160),
+];
 /// Where the right column starts.
 const RIGHT: i32 = 492;
 
@@ -48,12 +60,15 @@ enum Row {
 /// The choices for locking after a while without input (minutes; 0: never).
 const LOCK_AFTER: [(u32, &str); 4] = [(0, "Mai"), (2, "2 min"), (5, "5 min"), (15, "15 min")];
 
+/// The sizes of the interface (pixels per unit; 0: by the screen).
+const SIZES: [(u32, &str); 3] = [(0, "Auto"), (1, "100%"), (2, "200%")];
+
 impl Prefs {
     pub fn new() -> Prefs {
-        let thumbs = res::WALLPAPERS.iter().map(|(n, _)| res::wallpaper_thumb(n, 104, 65)).collect();
+        let thumbs = Self::thumbs();
         let offered = crate::dev::display::modes();
         let modes =
-            COMMON_MODES.iter().map(|&(width, height)| DisplayMode { width, height }).filter(|m| offered.contains(m)).take(9).collect();
+            COMMON_MODES.iter().map(|&(width, height)| DisplayMode { width, height }).filter(|m| offered.contains(m)).take(12).collect();
         Prefs {
             name: settings::get().name,
             editing: false,
@@ -66,6 +81,15 @@ impl Prefs {
             privacy: None,
             scroll: 0,
         }
+    }
+
+    fn thumbs() -> Vec<Canvas> {
+        res::WALLPAPERS.iter().map(|(n, _)| res::wallpaper_thumb(n, 104, 65)).collect()
+    }
+
+    /// The choice of the interface size, next to the "Schermo" heading.
+    fn sizes(area: Rect) -> Rect {
+        Rect::new(area.x + RIGHT + 150, area.y + 12, 214, 32)
     }
 
     fn privacy_btn(area: Rect) -> Rect {
@@ -182,7 +206,7 @@ impl Prefs {
     }
 
     fn mode_btn(area: Rect, i: usize) -> Rect {
-        Rect::new(area.x + RIGHT + (i as i32 % 3) * 124, area.y + 72 + (i as i32 / 3) * 46, 116, 38)
+        Rect::new(area.x + RIGHT + (i as i32 % 3) * 124, area.y + 70 + (i as i32 / 3) * 40, 116, 34)
     }
 
     fn volume_bar(area: Rect) -> Rect {
@@ -277,6 +301,10 @@ impl App for Prefs {
             self.draw_privacy(c, area, grants);
             return;
         }
+        if self.thumbs.first().is_some_and(|t| t.scale() != c.scale()) {
+            // The interface changed size: sharper (or smaller) previews.
+            self.thumbs = Self::thumbs();
+        }
         let s = settings::get();
         text::draw(c, Font::Strong, area.x + 24, area.y + 20, "Il tuo nome", TEXT);
         ui::text_field(c, Self::field(area), &self.name, "Nome", self.editing);
@@ -308,6 +336,11 @@ impl App for Prefs {
         // Screen
         let x = area.x + RIGHT;
         text::draw(c, Font::Strong, x, area.y + 20, "Schermo", TEXT);
+        if crate::gui::can_double() {
+            let sel = SIZES.iter().position(|(k, _)| *k == s.scale).unwrap_or(0);
+            let labels: Vec<&str> = SIZES.iter().map(|(_, l)| *l).collect();
+            ui::segmented(c, Self::sizes(area), &labels, sel);
+        }
         let (w, h) = crate::console::pixel_size().unwrap_or((0, 0));
         let current = DisplayMode { width: w as u32, height: h as u32 };
         if self.modes.is_empty() {
@@ -399,6 +432,17 @@ impl App for Prefs {
             if Self::thumb(area, i).contains(ax, ay) {
                 settings::update(|s| s.wallpaper = String::from(*name));
                 return Action::Wallpaper;
+            }
+        }
+        if crate::gui::can_double() {
+            for (i, seg) in ui::segments(Self::sizes(area), SIZES.len()).iter().enumerate() {
+                if seg.contains(ax, ay) {
+                    self.note = match crate::gui::change_scale(SIZES[i].0) {
+                        Ok(()) => "",
+                        Err(_) => "Dimensione non disponibile",
+                    };
+                    return Action::Redraw;
+                }
             }
         }
         for (i, m) in self.modes.iter().enumerate() {

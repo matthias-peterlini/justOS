@@ -220,6 +220,16 @@ che lo schermo offre; un clic la cambia subito, e arcOS la riprende a ogni
 avvio. Senza driver resta la risoluzione scelta dal firmware. Dal
 Terminale: `display` elenca, `display 1920x1080` cambia.
 
+Sugli schermi ad alta densità l'interfaccia raddoppia: tutto è misurato in
+*unità*, e da 2560×1440 in su (se restano almeno 800×600 unità) ogni unità
+è di 2×2 pixel. Il testo non viene ingrandito ma disegnato da un secondo
+atlante di glifi fatto al doppio della misura (`fonts@2x.bin`), le icone e
+gli sfondi sono ridotti dagli originali grandi, il puntatore è ridisegnato
+alla nuova misura: stessa disposizione, il doppio dei dettagli. *Impostazioni
+→ Schermo* (quando lo schermo è abbastanza grande) sceglie tra *Auto*,
+*100%* e *200%*; dal Terminale `display scale auto|1|2`. La scelta resta
+nelle impostazioni.
+
 Con una scheda audio (`hda`, `ac97`) la scrivania suona una breve melodia
 quando compare (si può spegnere), il volume si regola dal centro di
 controllo e dalle Impostazioni, e Musica e Orologio suonano. Dal Terminale:
@@ -243,7 +253,10 @@ esterne.
 | `apps/` | le app di sistema |
 
 Il disegno avviene in un buffer in memoria; sullo schermo si copia solo la
-parte che cambia. Il puntatore è disegnato direttamente sullo schermo, così
+parte che cambia. Un'app può dire quale parte del suo contenuto è cambiata
+(`App::changed`): il cursore che lampeggia nel Terminale o nell'Editor
+ridisegna una cella, non la finestra, e l'output del Terminale solo le
+righe nuove. Il puntatore è disegnato direttamente sullo schermo, così
 muoverlo non ridisegna nulla. I pannelli "vetro smerigliato" mostrano una
 copia sfocata dello sfondo calcolata una volta sola. I clic del mouse vengono
 messi in coda dal driver, così un clic rapido non si perde anche se la
@@ -261,7 +274,9 @@ servono.
 
 - `gen_fonts.py` → `system/kernel/assets/fonts.bin`: Inter e DejaVu Sans
   Mono (licenze in `system/kernel/assets/LICENSES.md`); una copia va in
-  `sys:/system/fonts.bin` per i programmi.
+  `sys:/system/fonts.bin` per i programmi. Con `--sharp` gli stessi
+  caratteri al doppio della misura (`fonts@2x.bin.gz`, per gli schermi ad
+  alta densità; i programmi lo trovano in `sys:/system/fonts@2x.bin`).
 - `gen_icons.py` → `rootfs/system/gui/icons.qoi`: oltre 70 icone, disegnate
   da zero nello stile arc (squircle con sfumatura e simbolo); con `--store`
   le icone delle app del Negozio.

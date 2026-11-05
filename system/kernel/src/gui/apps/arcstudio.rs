@@ -237,6 +237,8 @@ pub struct ArcStudio {
     compiled_at: u64,
     /// Ticks since the text last changed.
     idle: u32,
+    /// The last tick compiled the program again (errors and colours changed).
+    recompiled: bool,
     problems: Vec<Problem>,
     out: Output,
     vm: Option<Vm>,
@@ -270,6 +272,7 @@ impl ArcStudio {
             colored_at: u64::MAX,
             compiled_at: u64::MAX,
             idle: 0,
+            recompiled: false,
             problems: Vec::new(),
             out: Rc::new(RefCell::new(Vec::new())),
             vm: None,
@@ -1043,14 +1046,20 @@ impl App for ArcStudio {
     }
 
     fn tick(&mut self) -> bool {
-        let mut changed = self.focus.is_none() && self.area.tick();
+        let blinked = self.focus.is_none() && self.area.tick();
         self.idle += 1;
         // Compiled again a moment after the typing stops.
+        self.recompiled = false;
         if self.compiled_at != self.area.edits && self.idle >= 3 {
             self.compile();
-            changed = true;
+            self.recompiled = true;
         }
-        changed
+        blinked || self.recompiled
+    }
+
+    fn changed(&mut self, _area: Rect) -> Option<Rect> {
+        // Errors and colours change after a compilation: all of it then.
+        (!self.recompiled).then(|| self.area.caret())
     }
 
     fn close(&mut self) {

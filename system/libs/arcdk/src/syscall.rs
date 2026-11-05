@@ -63,11 +63,13 @@ pub const MAP_AT: u64 = 24;
 pub const UNMAP: u64 = 25;
 
 /// (title, len, width << 32 | height, flags) -> window handle: a window on
-/// the desktop with a content area of that size.
+/// the desktop with a content area of that size, in units (`WIN_SCALE`
+/// pixels each).
 pub const WIN_CREATE: u64 = 26;
-/// (handle, pixels, width << 32 | height): shows a frame, `width * height`
-/// pixels of 0xAARRGGBB (little-endian words); transparent parts show the
-/// window's glass.
+/// (handle, pixels, width << 32 | height, scale): shows a frame, `width *
+/// height` pixels of 0xAARRGGBB (little-endian words) at `scale` pixels per
+/// unit (0 or 1: one each; a frame of fewer pixels per unit than the window
+/// has is stretched); transparent parts show the window's glass.
 pub const WIN_PRESENT: u64 = 27;
 /// (handle, ptr to [u64; 4], timeout_ms) -> 1 and the event, or 0 on timeout.
 pub const WIN_EVENT: u64 = 28;
@@ -125,6 +127,10 @@ pub const PICK_SAVE: u64 = 1;
 /// (`WIN_EV_DROP`), absolute paths one per line. The program may read them
 /// (only read: to change one it asks with `PICK_FILE`).
 pub const WIN_DROPPED: u64 = 40;
+/// (handle) -> pixels per unit the window is shown with: 1, or 2 on a
+/// high-density screen (where a frame drawn with twice the pixels each way
+/// is sharp). `WIN_EV_RESIZE` says when it changes.
+pub const WIN_SCALE: u64 = 41;
 
 pub const PORT_MSG_MAX: u64 = 64 << 10;
 pub const PORT_QUEUE_MAX: usize = 64;
@@ -148,7 +154,8 @@ pub const WIN_EV_KEY: u64 = 4;
 pub const WIN_EV_SCROLL: u64 = 5;
 /// The user closed the window: the program should end.
 pub const WIN_EV_CLOSE: u64 = 6;
-/// width, height: the content area changed size.
+/// width, height, scale: the content area changed size (in units) or the
+/// pixels per unit changed.
 pub const WIN_EV_RESIZE: u64 = 7;
 /// The pointer left the window.
 pub const WIN_EV_LEAVE: u64 = 8;

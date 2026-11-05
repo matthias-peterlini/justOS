@@ -73,12 +73,12 @@ pub fn decode(data: &[u8]) -> Option<Canvas> {
     Some(Canvas::from_pixels(w as i32, h as i32, px))
 }
 
-/// Encodes a canvas as a QOI file (with alpha).
+/// Encodes a canvas as a QOI file (with alpha), pixel for pixel.
 pub fn encode(img: &Canvas) -> Vec<u8> {
     let mut out = Vec::with_capacity(img.px.len() * 2 + 22);
     out.extend_from_slice(b"qoif");
-    out.extend_from_slice(&(img.w as u32).to_be_bytes());
-    out.extend_from_slice(&(img.h as u32).to_be_bytes());
+    out.extend_from_slice(&(img.pixel_width() as u32).to_be_bytes());
+    out.extend_from_slice(&(img.pixel_height() as u32).to_be_bytes());
     out.extend_from_slice(&[4, 0]);
     let mut index = [[0u8; 4]; 64];
     let mut prev = [0u8, 0, 0, 255];

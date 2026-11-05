@@ -92,7 +92,7 @@ framebuffer UEFI, tutti senza accelerazione 3D.
 | Compositore con rettangoli sporchi, sfocatura, ombre, animazioni a tempo | ✅ (via processore) |
 | 60 fps nelle animazioni | 🟡 sì a risoluzioni normali; non garantito in 4K |
 | 120 Hz, VRR | ⬜ |
-| HiDPI (scala 2×) | ⬜ |
+| HiDPI (scala 2×) | ✅ automatica da 2560×1440, o scelta nelle Impostazioni |
 | Più monitor | ⬜ |
 | Dock, Applicazioni (Launchpad), barra in alto, centro di controllo | ✅ |
 | Centro notifiche con cronologia e *Non disturbare* | ✅ |
@@ -109,10 +109,11 @@ chiamate `WIN_CREATE`/`WIN_PRESENT`/`WIN_EVENT`.
 
 1. ~~**Desktop virtuali**~~ fatto: `Window::space`, la vista d'insieme
    disegna ogni finestra una volta con `Window::snapshot` e la scala.
-2. **HiDPI** (3–4 settimane): un fattore di scala nel desktop; l'atlante dei
-   font (`tools/assets/gen_fonts.py`) generato anche a 2×, le icone sono già
-   grandi. Le coordinate delle app restano logiche; `WIN_PRESENT` riceve
-   buffer a 2×.
+2. ~~**HiDPI**~~ fatto: `Canvas` misura in unità con 1 o 2 pixel per unità,
+   l'atlante dei caratteri esiste anche a 2× (`gen_fonts.py --sharp`), icone
+   e sfondi sono ridotti dagli originali; i programmi chiedono la scala con
+   `WIN_SCALE` e `WIN_PRESENT` riceve buffer a 2×. Restano scale frazionarie
+   (125%, 150%) e una scala per ogni schermo.
 3. **Più monitor** (1–2 mesi): `dev::display` con più uscite (virtio-gpu ne
    ha fino a 16, il driver Intel le avrebbe); il desktop diventa una lista
    di schermi con una barra ciascuno.
@@ -301,7 +302,7 @@ mostra i permessi dichiarati nel manifest di ogni app.
 | 1 | ✅ IPC a porte, identità delle app, desktop virtuali, schede in File | fatto |
 | 2 | ✅ sandbox, permessi, aggiornamenti delle app, trascinamento | fatto |
 | 3 | ✅ interprete AML, batteria, temperatura, sospensione | fatto |
-| 4 | ✅ aggiornamenti A/B; HiDPI, indice dei file | 2–3 mesi |
+| 4 | ✅ aggiornamenti A/B, HiDPI; indice dei file | 2–3 mesi |
 | 5 | strato Linux completo (JavaScript in `arcweb`: fatto), poi Servo | 6–12 mesi |
 | 6 | Wi-Fi (un chip), Bluetooth HID e audio | 6–9 mesi |
 | 7 | accelerazione grafica (virgl, poi hardware vero) | 12 mesi e oltre |

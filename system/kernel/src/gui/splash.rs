@@ -8,23 +8,26 @@ pub const BG_BOTTOM: u32 = 0xFF0B_0809;
 
 static LOGO: &[u8] = include_bytes!("../../assets/logo.bin");
 
-/// Width of the arc wordmark drawn `h` pixels tall.
+/// Width of the arc wordmark drawn `h` units tall.
 pub fn logo_width(h: i32) -> i32 {
     let (lw, lh) = (u16::from_le_bytes([LOGO[0], LOGO[1]]) as i32, u16::from_le_bytes([LOGO[2], LOGO[3]]) as i32);
     lw * h / lh
 }
 
-/// The arc wordmark ("ARC", from `tools/assets/gen_logo.py`), `h` pixels
-/// tall and centred on (`cx`, `cy`). Scaled down with a box filter, without
-/// allocating (the fatal error screen uses it too).
+/// The arc wordmark ("ARC", from `tools/assets/gen_logo.py`), `h` units
+/// tall and centred on (`cx`, `cy`). Scaled with a box filter straight to
+/// the canvas's pixels, so it stays sharp at 2x, without allocating (the
+/// fatal error screen uses it too).
 pub fn draw_logo(c: &mut Canvas, cx: i32, cy: i32, h: i32, color: u32) {
     let (lw, lh) = (u16::from_le_bytes([LOGO[0], LOGO[1]]) as i32, u16::from_le_bytes([LOGO[2], LOGO[3]]) as i32);
     let mask = &LOGO[4..];
     let h = h.clamp(4, lh);
     let w = logo_width(h);
-    let (x0, y0) = (cx - w / 2, cy - h / 2);
+    let s = c.scale();
+    let (x0, y0) = ((cx - w / 2) * s, (cy - h / 2) * s);
+    let (w, h) = (w * s, h * s);
     let a = color >> 24;
-    let clip = c.clip();
+    let clip = c.pixel_clip();
     for ty in 0..h {
         let (sy0, sy1) = (ty * lh / h, ((ty + 1) * lh / h).max(ty * lh / h + 1));
         for tx in 0..w {
@@ -42,7 +45,7 @@ pub fn draw_logo(c: &mut Canvas, cx: i32, cy: i32, h: i32, color: u32) {
             }
             let cov = sum / ((sy1 - sy0) * (sx1 - sx0)) as u32;
             if cov > 0 {
-                c.fill(Rect::new(x, y, 1, 1), ((a * cov / 255) << 24) | (color & 0xFF_FFFF));
+                c.blend_pixel(x, y, ((a * cov / 255) << 24) | (color & 0xFF_FFFF));
             }
         }
     }

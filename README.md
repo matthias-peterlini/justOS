@@ -66,7 +66,9 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 - **I driver si installano da soli**: dischi SATA e NVMe, USB 1/2/3,
   schede di rete Intel e Realtek, lettori di schede SD, audio HD e AC'97,
   schede video delle macchine virtuali con cambio di risoluzione, e lo
-  schermo su ogni altra scheda (Intel, AMD, NVIDIA).
+  schermo su ogni altra scheda (Intel, AMD, NVIDIA). Sugli schermi ad alta
+  densità l'interfaccia raddoppia, con il testo disegnato al doppio dei
+  pixel.
 - **Esegue programmi Linux, Windows e Android** senza modificarli, accanto
   ai suoi: Linux x86-64 statici, Windows x64 da console e con finestre,
   programmi Java e app Android (`.apk`, `.dex`) che costruiscono
@@ -219,6 +221,7 @@ dev / drv              dispositivi trovati e driver installati
 vol / disks            volumi montati, dischi e partizioni
 ls sys:/home           i tuoi file
 display 1920x1080      cambia risoluzione (con un driver video)
+display scale 2        interfaccia al 200% (auto: secondo lo schermo)
 play sys:/system/sounds/avvio.wav
 volume 60
 net / ping 10.0.2.2    rete

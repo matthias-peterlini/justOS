@@ -60,7 +60,9 @@ fn web_fonts() -> Option<&'static WebFonts> {
     if g.is_none() {
         let raw = fs::abs("sys:/system/webfonts.bin").and_then(|p| fs::read_file(&p)).ok()?;
         let data: &'static [u8] = Box::leak(arczip::gunzip(&raw)?.into_boxed_slice());
-        let fonts = arcgfx::Fonts::parse(data)?;
+        let mut fonts = arcgfx::Fonts::parse(data)?;
+        // On a high-density screen a 14-pixel face is drawn with the 28.
+        fonts.double_sizes();
         *g = Some(Box::leak(Box::new(WebFonts::new(fonts))));
     }
     *g
@@ -1115,11 +1117,12 @@ impl Browser {
                 t.doc_h = d.height();
                 t.scroll = t.scroll.clamp(0, (t.doc_h - content.h).max(0));
                 let key = (p.version, t.scroll, content.w, content.h, caret);
-                if t.dirty || key != t.painted || t.view.is_none() {
+                let k = crate::gui::scale();
+                if t.dirty || key != t.painted || t.view.as_ref().is_none_or(|v| v.scale() != k) {
                     if let Some(f) = loaded_fonts() {
                         let v = match t.view.take() {
-                            Some(v) if v.w == content.w && v.h == content.h => v,
-                            _ => Canvas::new(content.w.max(1), content.h.max(1), 0xFFFF_FFFF),
+                            Some(v) if v.w == content.w && v.h == content.h && v.scale() == k => v,
+                            _ => Canvas::new_at(content.w.max(1), content.h.max(1), 0xFFFF_FFFF, k),
                         };
                         let mut v = v;
                         d.paint(&mut v, f, Rect::new(0, 0, content.w, content.h), t.scroll, caret);

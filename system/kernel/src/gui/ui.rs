@@ -506,7 +506,7 @@ impl Looper {
         let (w, h) = (d.width(), d.height());
         input::set_capture(true);
         input::take_clicks();
-        Looper { cursor: Cursor::new(w, h), dirty: Rect::EMPTY, last_click: (0, -100, -100), last_tick: 0 }
+        Looper { cursor: Cursor::new(w, h, d.scale()), dirty: Rect::EMPTY, last_click: (0, -100, -100), last_tick: 0 }
     }
 
     /// Marks part of the screen to be drawn again.
@@ -531,11 +531,20 @@ impl Looper {
                 self.cursor.hide(d);
                 match d.set_mode(mode) {
                     Ok(()) => {
+                        self.cursor.set_scale(d.scale());
                         view.resized(d.width(), d.height());
                         self.damage_all(d);
                     }
                     Err(e) => crate::warn!("gui", "{}x{}: {e}", mode.width, mode.height),
                 }
+            }
+            if super::take_scale_request() {
+                self.cursor.hide(d);
+                if d.apply_scale() {
+                    self.cursor.set_scale(d.scale());
+                    view.resized(d.width(), d.height());
+                }
+                self.damage_all(d);
             }
             let mut events: alloc::vec::Vec<Event> = alloc::vec::Vec::new();
             let (w, h) = (d.width(), d.height());
