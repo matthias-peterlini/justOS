@@ -33,7 +33,7 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
   schermo intero (F11) la barra si aggancia in alto e porta con sé il nome
   dell'app e i suoi pulsanti. Il carattere è Google Sans Flex; icone,
   suoni e musica sono creati per arcOS; tra gli sfondi ci sono foto delle
-  Dolomiti da Wikimedia Commons (autori e licenze in
+  Dolomiti da Unsplash (autori in
   `rootfs/system/gui/wallpapers/CREDITS.txt`).
 - **Al sicuro e aggiornato**: una password blocca lo schermo (all'avvio,
   con logo+L o dopo qualche minuto di pausa), Stamp salva una schermata in

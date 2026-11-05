@@ -24,7 +24,7 @@
 #   make test-linux    Linux programs with threads, sockets, poll (C, Rust, Go)
 #   make shots      boot headless, drive the GUI and save screenshots (build/shots)
 #   make assets     regenerate fonts, icons, wallpapers and sounds (Python, Pillow, numpy)
-#   make photos     download the photo wallpapers from Wikimedia Commons
+#   make photos     download the photo wallpapers from Unsplash
 #   make check      unit tests of the shared libraries and the host tool
 #   make test-update   install a system update into the other slot, restart
 #                   into it; a broken one goes back by itself (BIOS and UEFI)
@@ -190,7 +190,7 @@ assets:
 	tools/assets/gen_thumbs.py rootfs/system/gui/wallpapers
 	tools/assets/gen_sounds.py rootfs/system/sounds rootfs/home/Musica
 
-# The photo wallpapers, downloaded from Wikimedia Commons (needs the network).
+# The photo wallpapers, downloaded from Unsplash (needs the network).
 photos:
 	tools/assets/fetch_photos.py rootfs/system/gui/wallpapers
 	tools/assets/gen_thumbs.py rootfs/system/gui/wallpapers

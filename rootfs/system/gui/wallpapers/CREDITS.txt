@@ -1,21 +1,22 @@
-Photo wallpapers (from Wikimedia Commons), cropped and scaled.
+Photo wallpapers (from Unsplash), cropped and scaled.
+Free to use under the Unsplash License: https://unsplash.com/license
 
-tre-cime.qoi: Tre Cime di Lavaredo
-  Wolfgang Moroder, CC BY-SA 3.0
-  https://commons.wikimedia.org/wiki/File:Drei_Zinnen_Tre_Cime_di_Lavaredo_Dolomites.jpg
-  https://creativecommons.org/licenses/by-sa/3.0
+cadini.qoi: Cadini di Misurina
+  Samuel Quek
+  https://unsplash.com/photos/EsZoWxyzBpg
 
-sassolungo.qoi: Sassolungo dal passo Sella
-  Wolfgang Moroder, CC BY-SA 3.0
-  https://commons.wikimedia.org/wiki/File:Langkofel_group_from_the_Sella_pass_2016.jpg
-  https://creativecommons.org/licenses/by-sa/3.0
+braies.qoi: Lago di Braies
+  Luca Bravo
+  https://unsplash.com/photos/O453M2Liufs
 
-seceda.qoi: Odle dal Seceda
-  Wolfgang Moroder, CC BY-SA 3.0
-  https://commons.wikimedia.org/wiki/File:Odles_da_Sec%C3%ABda_Gherd%C3%ABina.jpg
-  https://creativecommons.org/licenses/by-sa/3.0
+seceda.qoi: Seceda all'alba
+  Justin Luebke
+  https://unsplash.com/photos/nMdaUdsswl4
 
-montanaia.qoi: Campanile di Val Montanaia
-  Scosse, CC BY-SA 4.0
-  https://commons.wikimedia.org/wiki/File:Val_Montanaia.jpg
-  https://creativecommons.org/licenses/by-sa/4.0
+siusi.qoi: Alpe di Siusi
+  Michiel Ronde
+  https://unsplash.com/photos/p7S6AxykCl0
+
+brenta.qoi: Dolomiti di Brenta
+  Andrea Belussi
+  https://unsplash.com/photos/O-YEpluawy0

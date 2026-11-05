@@ -36,7 +36,7 @@ impl Default for Settings {
         Settings {
             name: String::new(),
             layout: Layout::It,
-            wallpaper: String::from("tre-cime"),
+            wallpaper: String::from(super::res::WALLPAPERS[0].0),
             setup_done: false,
             resolution: None,
             volume: 70,

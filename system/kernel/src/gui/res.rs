@@ -182,13 +182,14 @@ pub fn make_icon(name: &str, color: u32, platform: crate::store::Platform) -> Ve
     super::qoi::encode(&c)
 }
 
-/// The photos of the Dolomites (Wikimedia Commons, see CREDITS.txt next to
-/// them) first, then the painted ones.
-pub const WALLPAPERS: [(&str, &str); 7] = [
-    ("tre-cime", "Tre Cime"),
-    ("sassolungo", "Sassolungo"),
+/// The photos of the Dolomites (Unsplash, see CREDITS.txt next to them)
+/// first, then the painted ones. The first is the default.
+pub const WALLPAPERS: [(&str, &str); 8] = [
+    ("cadini", "Cadini"),
+    ("braies", "Braies"),
     ("seceda", "Seceda"),
-    ("montanaia", "Val Montanaia"),
+    ("siusi", "Alpe di Siusi"),
+    ("brenta", "Brenta"),
     ("dolomiti", "Tramonto"),
     ("alba", "Alba"),
     ("notte", "Notte"),
