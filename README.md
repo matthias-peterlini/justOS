@@ -6,7 +6,7 @@ Website: https://justos.dev
 
 ## License
 
-Copyright (C) 2026 Matthias Peterlini
+Copyright (C) 2026 Matthias Peterlini <https://matthiaspeterlini.tech>
 
 This program is free software: you can redistribute it and/or modify it
 under the terms of the GNU General Public License as published by
