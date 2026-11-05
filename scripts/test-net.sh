@@ -98,9 +98,9 @@ if [ $WEB = 1 ]; then
     "$JUSTTOOL" fs web.img mkdir /system/certs >/dev/null 2>&1
     for f in proxy-ca-*.der; do "$JUSTTOOL" fs web.img put "$f" "/system/certs/$f" >/dev/null; done
     "$JUSTTOOL" fs web.img put proxy /system/proxy >/dev/null
-    printf '@sleep 2\nfetch https://api.github.com/repos/matthias-peterlini/justos\n@sleep 6\nshutdown\n' > web.txt
+    printf '@sleep 2\nfetch https://api.github.com/repos/matthias-peterlini/justOS\n@sleep 6\nshutdown\n' > web.txt
     STEP_WAIT=2 "$HERE/test.sh" web.img web.txt >> out.txt 2>&1
-    echo '200 https://api.github.com/repos/matthias-peterlini/justos' >> expect.txt
+    echo '200 https://api.github.com/repos/matthias-peterlini/justOS' >> expect.txt
 fi
 
 FAILED=0

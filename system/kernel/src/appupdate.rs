@@ -40,7 +40,7 @@ pub const KEY: [u8; 32] = [
 ];
 
 /// Where the index is published (the `updates` branch of the repository).
-pub const INDEX_URL: &str = "https://raw.githubusercontent.com/matthias-peterlini/justos/updates/index.json";
+pub const INDEX_URL: &str = "https://raw.githubusercontent.com/matthias-peterlini/justOS/updates/index.json";
 
 const DIR: &str = "sys:/system/updates";
 const APPS: &str = "sys:/apps";

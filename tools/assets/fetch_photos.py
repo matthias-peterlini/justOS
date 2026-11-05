@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import qoi  # noqa: E402
 
 W, H = 1920, 1200
-UA = {"User-Agent": "JustOS-wallpapers/1.0 (https://github.com/matthias-peterlini/justos)"}
+UA = {"User-Agent": "JustOS-wallpapers/1.0 (https://github.com/matthias-peterlini/justOS)"}
 
 # name: (Unsplash photo page, its picture on images.unsplash.com, label,
 # photographer, where the 16:10 crop sits: 0 = top/left, 0.5 = centre,

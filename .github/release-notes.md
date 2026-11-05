@@ -1,6 +1,6 @@
 JustOS: un sistema operativo per PC x86-64 scritto da zero, con il linguaggio ArcScript.
 
-![La scrivania di JustOS](https://raw.githubusercontent.com/matthias-peterlini/justos/main/docs/screenshots/scrivania.jpg)
+![La scrivania di JustOS](https://raw.githubusercontent.com/matthias-peterlini/justOS/main/docs/screenshots/scrivania.jpg)
 
 ## Novità
 
@@ -16,9 +16,9 @@ JustOS: un sistema operativo per PC x86-64 scritto da zero, con il linguaggio Ar
 - **Lo stile arc**: il logo ARC, pannelli ticly in vetro con bagliore ruggine, nuovi sfondi; le app a schermo intero (F11) non hanno barre in alto.
 - **Più compatibilità Linux**: thread, futex, mmap, poll e socket.
 
-![Il Negozio](https://raw.githubusercontent.com/matthias-peterlini/justos/main/docs/screenshots/negozio.jpg)
+![Il Negozio](https://raw.githubusercontent.com/matthias-peterlini/justOS/main/docs/screenshots/negozio.jpg)
 
-Ancora senza driver: Wi-Fi, schede video vere (Intel, AMD, nVidia: si usa il framebuffer del firmware), batteria dei portatili. Lo stato di ogni driver è in [docs/driver.md](https://github.com/matthias-peterlini/justos/blob/main/docs/driver.md#hardware-supportato).
+Ancora senza driver: Wi-Fi, schede video vere (Intel, AMD, nVidia: si usa il framebuffer del firmware), batteria dei portatili. Lo stato di ogni driver è in [docs/driver.md](https://github.com/matthias-peterlini/justOS/blob/main/docs/driver.md#hardware-supportato).
 
 ## File
 
@@ -33,4 +33,4 @@ Ancora senza driver: Wi-Fi, schede video vere (Intel, AMD, nVidia: si usa il fra
 - **QEMU**: `qemu-system-x86_64 -m 512M -cdrom justos.iso -device ich9-intel-hda -device hda-output`
 - **VirtualBox**: nuova macchina "Other/Unknown (64-bit)", 512 MiB di memoria, nessun disco, `justos.iso` nel lettore CD.
 
-Al primo avvio JustOS chiede nome, tastiera e sfondo, poi apre la scrivania. Il Terminale (nel dock) ha la shell: `help` elenca i comandi. Documentazione nel [README](https://github.com/matthias-peterlini/justos#readme).
+Al primo avvio JustOS chiede nome, tastiera e sfondo, poi apre la scrivania. Il Terminale (nel dock) ha la shell: `help` elenca i comandi. Documentazione nel [README](https://github.com/matthias-peterlini/justOS#readme).

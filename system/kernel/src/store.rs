@@ -28,7 +28,7 @@ use justjson::Value;
 const STORE: &str = "sys:/store";
 const APPS: &str = "sys:/apps";
 const CATALOG_FILE: &str = "sys:/system/store-catalog.json";
-pub const CATALOG_URL: &str = "https://raw.githubusercontent.com/matthias-peterlini/justos/main/rootfs/system/store-catalog.json";
+pub const CATALOG_URL: &str = "https://raw.githubusercontent.com/matthias-peterlini/justOS/main/rootfs/system/store-catalog.json";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Platform {

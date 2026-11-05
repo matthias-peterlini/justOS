@@ -61,7 +61,7 @@ LIVE_SIZE ?= 48M
 # App updates: the signing key (kept out of the repository) and where the
 # index is published (kernel/src/appupdate.rs looks there).
 UPDATES_KEY ?= $(HOME)/.justos-keys/updates.key
-UPDATES_URL ?= https://raw.githubusercontent.com/matthias-peterlini/justos/updates
+UPDATES_URL ?= https://raw.githubusercontent.com/matthias-peterlini/justOS/updates
 VERSION  := $(shell sed -n 's/^version = "\(.*\)"/\1/p' system/Cargo.toml | head -1)
 
 ifeq ($(PROFILE),release)

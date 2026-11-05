@@ -7,13 +7,13 @@
 Boot loader, kernel, file system, driver, interfaccia grafica e linguaggio
 di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 
-[**Scarica l'ultima versione**](https://github.com/matthias-peterlini/justos/releases/latest) ·
+[**Scarica l'ultima versione**](https://github.com/matthias-peterlini/justOS/releases/latest) ·
 [Documentazione](docs/) ·
 [Architettura](docs/architettura.md) ·
 [Compatibilità](docs/compat.md) ·
 [Roadmap](docs/roadmap.md)
 
-[![Build](https://github.com/matthias-peterlini/justos/actions/workflows/build.yml/badge.svg)](https://github.com/matthias-peterlini/justos/actions/workflows/build.yml)
+[![Build](https://github.com/matthias-peterlini/justOS/actions/workflows/build.yml/badge.svg)](https://github.com/matthias-peterlini/justOS/actions/workflows/build.yml)
 
 ![La scrivania di JustOS](docs/screenshots/scrivania.jpg)
 
@@ -115,7 +115,7 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 
 ## Provarlo
 
-Nelle [release](https://github.com/matthias-peterlini/justos/releases)
+Nelle [release](https://github.com/matthias-peterlini/justOS/releases)
 ci sono due file:
 
 | File | Cosa farne |
