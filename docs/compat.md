@@ -15,10 +15,24 @@ convenzione x64 e i pochi `.dll` di sistema per Windows).
 
 ## Programmi Linux
 
-JustOS carica un eseguibile ELF x86-64 **collegato staticamente** (senza
-librerie condivise: niente `ld.so`) e serve le chiamate di sistema Linux che
-fa. Funziona con i programmi costruiti con [musl](https://musl.libc.org/), per
-esempio `musl-gcc -static`.
+JustOS carica un eseguibile ELF x86-64 e serve le chiamate di sistema Linux
+che fa. Il programma può essere **collegato staticamente** (con
+[musl](https://musl.libc.org/), `musl-gcc -static`, o costruito da Go e Rust)
+oppure **dinamicamente con la glibc**, come quasi tutti i programmi delle
+distribuzioni. Per questi il kernel carica il caricatore dinamico che il
+programma chiede (`/lib64/ld-linux-x86-64.so.2`) e parte da lì; il
+caricatore trova il programma nel vettore ausiliario e mappa le librerie
+condivise con `mmap`.
+
+Il caricatore, la glibc e le altre librerie vengono dai **pacchetti di
+Debian**, non sono ricompilati: `tools/linux/debroot.py` scarica i pacchetti
+indicati (controllando le somme SHA-256 dell'archivio), segue le loro
+dipendenze e li scompatta in `build/linux`. L'immagine li porta nel volume di
+sistema con la disposizione di Debian: tutto in `/usr`, con `/bin`, `/sbin`,
+`/lib` e `/lib64` come collegamenti simbolici dentro `/usr` (JustFS ha i
+collegamenti simbolici). L'app File non mostra queste cartelle. Quali
+pacchetti, lo dice `LINUX_PKGS` nel `Makefile` (per ora `libc6`, la glibc
+2.41 di Debian 13); `make linux-root` rifà l'albero.
 
 Un programma Linux si avvia come gli altri, per percorso o per nome:
 
@@ -37,7 +51,12 @@ busybox ls -la             un programma installato (vedi "Installare programmi")
 | orologio | `clock_gettime`, `gettimeofday`, `nanosleep` |
 | TLS | `arch_prctl(ARCH_SET_FS)` imposta la base del segmento FS del thread |
 | casualità | `getrandom` |
-| rete, utenti, segnali, processi | non ancora: le chiamate rispondono con un valore innocuo o `ENOSYS` |
+| librerie condivise | il caricatore dinamico della glibc, `mmap` dei file (i byte di un file mappato più volte sono condivisi), `dlopen` |
+| thread | `clone` per i thread, `futex`, `set_tid_address` |
+| rete | socket TCP e UDP, `poll`, `select`, `epoll` |
+| collegamenti simbolici | `symlink`, `readlink`, `lstat` |
+| utenti | tutto gira come `root` |
+| segnali, processi nuovi | non ancora (`fork`, `exec`): le chiamate rispondono con un valore innocuo o `ENOSYS` |
 
 Le chiamate implementate bastano ai programmi da riga di comando: lettura e
 scrittura di file, elenco di cartelle (`getdents64`), `stat`, `ioctl` per sapere
@@ -45,7 +64,7 @@ se l'uscita è un terminale, e così via. Una chiamata non ancora prevista compa
 nel giornale di sistema come `unimplemented syscall N` (con `verbose on`), così
 è facile vedere cosa manca.
 
-Com'è fatto: `system/kernel/src/linux.rs` (le chiamate) e
+Com'è fatto: `system/kernel/src/linux/` (il caricamento e le chiamate) e
 `system/kernel/src/arch/syscall.rs` (l'istruzione `syscall` e le basi FS/GS di
 ogni thread).
 
@@ -180,8 +199,8 @@ anche senza estensione) lo avvia nel Terminale.
   rete, i servizi di Google Play, il codice nativo (`.so`) e le lambda
   compilate con `invokedynamic` (quelle trasformate da `d8` vanno bene). I
   thread girano uno dopo l'altro.
-- **Linux con librerie condivise** e **Windows a 32 bit**: non ancora (vedi
-  sopra).
+- **Programmi Linux che avviano altri processi** (`fork`, `exec`) e
+  **Windows a 32 bit**: non ancora.
 
 ## Provarlo
 

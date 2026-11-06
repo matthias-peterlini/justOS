@@ -165,7 +165,7 @@ La metà bassa appartiene al programma in esecuzione.
 | sincronizzazione | `sync.rs` | `IrqLock` (spinlock con interruzioni spente), `Mutex` (cede il processore mentre aspetta) |
 | console | `console/` | terminale con sequenze ANSI su framebuffer, VGA testo e porta seriale; giornale di sistema; con la grafica attiva è una griglia mostrata dalla finestra Terminale |
 | grafica | `gui/` | splash d'avvio, configurazione guidata, scrivania con animazioni, app di sistema, finestre dei programmi, schermata di errore ([gui.md](gui.md)); il disegno è nella libreria `justgfx` |
-| Linux | `linux.rs` | caricatore ELF statico e chiamate di sistema Linux ([compat.md](compat.md)) |
+| Linux | `linux/` | caricatore ELF (statico o con `ld.so`) e chiamate di sistema Linux ([compat.md](compat.md)) |
 | dispositivi | `dev/` | registro dei dispositivi, PCI, piattaforma (8042), IRQ condivisi, dischi e partizioni (MBR, GPT), tastiera, interfacce di rete, uscite audio (conversione, volume, WAV), controller video (risoluzioni) |
 | driver | `driver/` | gestore dei driver, caricatore ELF dei moduli, tabella `KernelApi` |
 | file | `fs/` | volumi, percorsi `volume:/cartella/file`, montaggio automatico |
@@ -309,6 +309,10 @@ dati                 contenuto di file e cartelle
   un blocco indiretto.
 - Le cartelle sono elenchi di voci da 64 byte; i nomi arrivano a 56 byte e
   non distinguono maiuscole e minuscole.
+- Un collegamento simbolico è un nodo il cui contenuto è il percorso a cui
+  punta: la ricerca di un percorso lo segue (fino a 40 collegamenti), da
+  radice del volume se il percorso è assoluto, dalla sua cartella se è
+  relativo.
 - `check` verifica la coerenza tra bitmap, nodi e cartelle.
 
 La stessa libreria (`system/libs/justfs`) serve al kernel e ad `justtool`,
@@ -337,8 +341,8 @@ sollevano un'eccezione.
 
 Oltre ai programmi nativi, il kernel riconosce altri due tipi di eseguibile
 dal loro contenuto. Un ELF che non è un `.app` è un **programma Linux**:
-`linux.rs` lo carica (ET_EXEC o PIE statico, con stack iniziale e vettore
-ausiliario) e serve le chiamate di sistema Linux che arrivano sull'istruzione
+`linux/` lo carica (ET_EXEC o PIE, con stack iniziale e vettore ausiliario;
+se chiede un caricatore dinamico, carica anche quello e parte da lì) e serve le chiamate di sistema Linux che arrivano sull'istruzione
 `syscall` (`arch/syscall.rs`), traducendole nelle operazioni di JustOS. Un file
 che inizia con `MZ` è un **programma Windows**: il kernel avvia `winrun`, un
 normale programma di JustOS che carica il `.exe`, risolve le importazioni verso

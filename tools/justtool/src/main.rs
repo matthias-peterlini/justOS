@@ -163,7 +163,8 @@ fn build_boot_pack(drivers: &[DriverFile]) -> Result<Vec<u8>> {
     Ok(fs.into_device().data)
 }
 
-/// Copies a host folder into the volume, recursively.
+/// Copies a host folder into the volume, recursively (symbolic links stay
+/// links).
 fn copy_tree<D: BlockDevice>(fs: &mut Fs<D>, host: &Path, inner: &str) -> Result<()> {
     let mut entries: Vec<PathBuf> =
         fs::read_dir(host).map_err(|e| format!("{}: {e}", host.display()))?.filter_map(|e| e.ok().map(|e| e.path())).collect();
@@ -171,7 +172,10 @@ fn copy_tree<D: BlockDevice>(fs: &mut Fs<D>, host: &Path, inner: &str) -> Result
     for path in entries {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         let target = format!("{inner}/{name}");
-        if path.is_dir() {
+        if path.is_symlink() {
+            let to = fs::read_link(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            fs.symlink(&target, &to.to_string_lossy()).map_err(|e| format!("{target}: {e}"))?;
+        } else if path.is_dir() {
             fs.create_dirs(&target).map_err(|e| format!("{target}: {e}"))?;
             copy_tree(fs, &path, &target)?;
         } else {
@@ -295,6 +299,13 @@ impl Inputs {
         }
         let sys = fs.lookup("system").map_err(fserr)?;
         fs.set_flags(sys, justfs::FLAG_SYSTEM).map_err(fserr)?;
+        // The Linux file tree (from tools/linux/debroot.py) is for Linux
+        // programs; the Files app does not show it.
+        for name in ["bin", "sbin", "lib", "lib64", "usr"] {
+            if let Ok(id) = fs.lookup_link(name) {
+                fs.set_flags(id, justfs::FLAG_HIDDEN).map_err(fserr)?;
+            }
+        }
         fs.sync().map_err(fserr)
     }
 

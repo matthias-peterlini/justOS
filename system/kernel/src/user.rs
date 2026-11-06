@@ -107,6 +107,7 @@ pub(crate) fn fs_error(e: fs::Error) -> Error {
         fs::Error::NameTooLong | fs::Error::InvalidName => Error::InvalidName,
         fs::Error::ReadOnly => Error::ReadOnly,
         fs::Error::Corrupt | fs::Error::Io => Error::Io,
+        fs::Error::Loop => Error::NotFound,
     }
 }
 

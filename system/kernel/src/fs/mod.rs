@@ -295,6 +295,10 @@ pub struct Stat {
     pub kind: Kind,
     pub size: u64,
     pub modified: u64,
+    /// The node on its volume (the same for every path that reaches it).
+    pub node: u32,
+    /// Marked hidden (the Files app leaves it out).
+    pub hidden: bool,
 }
 
 pub fn stat(path: &Path) -> Result<Stat> {
@@ -302,7 +306,33 @@ pub fn stat(path: &Path) -> Result<Stat> {
     let mut fs = v.fs.lock();
     let id = fs.lookup(&path.inner)?;
     let n = fs.node(id)?;
-    Ok(Stat { kind: n.kind, size: n.size, modified: n.modified })
+    Ok(Stat { kind: n.kind, size: n.size, modified: n.modified, node: id, hidden: n.flags & justfs::FLAG_HIDDEN != 0 })
+}
+
+/// Like [`stat`], but a symbolic link at the end of the path describes
+/// itself (kind [`Kind::Link`]).
+pub fn lstat(path: &Path) -> Result<Stat> {
+    let v = vol(path)?;
+    let mut fs = v.fs.lock();
+    let id = fs.lookup_link(&path.inner)?;
+    let n = fs.node(id)?;
+    Ok(Stat { kind: n.kind, size: n.size, modified: n.modified, node: id, hidden: n.flags & justfs::FLAG_HIDDEN != 0 })
+}
+
+/// Creates a symbolic link at `path` that points to `target`.
+pub fn symlink(path: &Path, target: &str) -> Result<()> {
+    let v = vol(path)?;
+    let mut fs = v.fs.lock();
+    fs.symlink(&path.inner, target)?;
+    fs.sync()
+}
+
+/// Where the symbolic link at `path` points.
+pub fn read_link(path: &Path) -> Result<String> {
+    let v = vol(path)?;
+    let mut fs = v.fs.lock();
+    let id = fs.lookup_link(&path.inner)?;
+    fs.read_link(id)
 }
 
 pub fn exists(path: &Path) -> bool {
@@ -373,10 +403,18 @@ pub fn list_dir(path: &Path) -> Result<Vec<(DirEntry, Stat)>> {
     let id = fs.lookup(&path.inner)?;
     let mut out = Vec::new();
     for e in fs.read_dir(id)? {
-        let n = fs.node(e.node)?;
-        out.push((e, Stat { kind: n.kind, size: n.size, modified: n.modified }));
+        // A link is listed as what it points to (a dangling one as a link),
+        // hidden if the link itself is.
+        let hidden = fs.node(e.node)?.flags & justfs::FLAG_HIDDEN != 0;
+        let mut node = e.node;
+        if e.kind == Kind::Link {
+            let full = alloc::format!("{}/{}", path.inner.trim_end_matches('/'), e.name);
+            node = fs.lookup(&full).unwrap_or(e.node);
+        }
+        let n = fs.node(node)?;
+        out.push((e, Stat { kind: n.kind, size: n.size, modified: n.modified, node, hidden }));
     }
-    out.sort_by(|a, b| (a.0.kind != Kind::Dir).cmp(&(b.0.kind != Kind::Dir)).then(a.0.name.to_lowercase().cmp(&b.0.name.to_lowercase())));
+    out.sort_by(|a, b| (a.1.kind != Kind::Dir).cmp(&(b.1.kind != Kind::Dir)).then(a.0.name.to_lowercase().cmp(&b.0.name.to_lowercase())));
     Ok(out)
 }
 
@@ -395,9 +433,10 @@ pub fn remove(path: &Path) -> Result<()> {
     fs.sync()
 }
 
-/// Removes a file or a folder with everything in it.
+/// Removes a file or a folder with everything in it (a link to a folder
+/// goes, the folder stays).
 pub fn remove_all(path: &Path) -> Result<()> {
-    if is_dir(path) {
+    if lstat(path).is_ok_and(|s| s.kind == Kind::Dir) {
         for (e, _) in list_dir(path)? {
             remove_all(&path.join(&e.name))?;
         }

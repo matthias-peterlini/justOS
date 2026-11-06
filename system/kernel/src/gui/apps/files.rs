@@ -164,7 +164,7 @@ impl Files {
 
     fn reload(&mut self) {
         self.items = fs::list_dir(&self.dir)
-            .map(|list| list.into_iter().map(|(e, st)| Item { name: e.name, dir: st.kind == justfs::Kind::Dir }).collect())
+            .map(|list| list.into_iter().filter(|(_, st)| !st.hidden).map(|(e, st)| Item { name: e.name, dir: st.kind == justfs::Kind::Dir }).collect())
             .unwrap_or_default();
         self.selection.clear();
         self.selected = None;

@@ -79,8 +79,9 @@ fotocamera e microfono, come su un telefono.
 
 **Esegue anche gli altri**
 
-Programmi Linux statici, Windows x64 (anche con finestre), Java e app
-Android girano accanto alle app di JustOS, senza modifiche.
+Programmi Linux (statici o con la glibc di Debian), Windows x64 (anche
+con finestre), Java e app Android girano accanto alle app di JustOS, senza
+modifiche.
 
 </td>
 </tr>
@@ -203,7 +204,7 @@ Secure Boot va disattivato.
 | **Interfaccia** | splash, configurazione guidata, scrivania con dock, Applicazioni, centro di controllo, notifiche, ricerca globale, desktop virtuali, snap delle finestre, trascinamento dei file, HiDPI, animazioni | [gui](docs/gui.md) |
 | **Sicurezza** | identità delle app, sandbox, permessi, password con sale e blocco automatico | [roadmap](docs/roadmap.md#le-basi-comuni) |
 | **Programmi** | in modalità utente, ognuno nel suo spazio di indirizzi, a riga di comando o con finestre proprie (`justui`) | [programmi](docs/programmi.md) |
-| **Compatibilità** | eseguibili ELF statici Linux, `.exe` Windows x64 (console e finestre), programmi Java e app Android (`.dex`, `.apk`) | [compatibilità](docs/compat.md) |
+| **Compatibilità** | eseguibili ELF Linux (statici o dinamici con la glibc), `.exe` Windows x64 (console e finestre), programmi Java e app Android (`.dex`, `.apk`) | [compatibilità](docs/compat.md) |
 | **ArcScript** | il linguaggio di JustOS: `arcc` compila ed esegue `.as` e pacchetti `.arc`; ArcStudio è l'IDE con anteprima dal vivo | [ArcScript](docs/arcscript.md#arcstudio) |
 | **Rete** | ARP, IPv4, ICMP, UDP, TCP, DHCP, DNS; TLS 1.3 con certificati verificati e HTTP(S) | |
 | **Web** | `justweb` (HTML, CSS con flexbox, grid, tabelle e media query; PNG, JPEG e GIF) e `justjs` (JavaScript con il DOM, gli eventi, i timer e `fetch`) | [gui](docs/gui.md#il-motore-web) |

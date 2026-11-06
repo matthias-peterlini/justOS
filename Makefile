@@ -53,6 +53,11 @@ PACKAGES := $(DRIVERS:%=$(BUILD)/drivers/%.adp)
 APPS     := $(notdir $(wildcard system/apps/*))
 # Programs of the store (sys:/store), installed with the Negozio app.
 STORE    := $(notdir $(wildcard system/store/*))
+# What dynamically linked Linux programs need, from Debian's packages
+# (tools/linux/debroot.py): the dynamic loader and glibc to start with.
+LINUX_PKGS ?= libc6
+LINUX_DIST ?= trixie
+LINUX    := $(BUILD)/linux
 ROOT     := $(BUILD)/root
 IMAGE    := $(BUILD)/justos.img
 ISO      := $(BUILD)/justos.iso
@@ -68,7 +73,7 @@ ifeq ($(PROFILE),release)
 CARGO_PROFILE := --release
 endif
 
-.PHONY: photos all uefi system tools root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript test-compat test-audio test-display test-acpi test-net test-linux test-update shots assets check updates clean $(PACKAGES)
+.PHONY: photos all uefi system tools root linux-root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript test-compat test-audio test-display test-acpi test-net test-linux test-update shots assets check updates clean $(PACKAGES)
 
 all: image
 
@@ -93,10 +98,21 @@ $(PACKAGES): $(BUILD)/drivers/%.adp: system tools
 	@mkdir -p $(BUILD)/drivers
 	$(JUSTTOOL) pack system/drivers/$*/driver.manifest $(TARGET)/$* $@
 
-# The files of the system volume: rootfs/ plus the programs.
-root: system
+# The Linux libraries, unpacked from Debian's packages (downloads are kept
+# in build/debcache, so this runs offline once they are there).
+$(LINUX)/usr/PACKAGES: tools/linux/debroot.py
+	tools/linux/debroot.py --out $(LINUX) --cache $(BUILD)/debcache --dist $(LINUX_DIST) $(LINUX_PKGS)
+
+linux-root:
+	rm -f $(LINUX)/usr/PACKAGES
+	$(MAKE) $(LINUX)/usr/PACKAGES
+
+# The files of the system volume: rootfs/ plus the programs and the Linux
+# libraries.
+root: system $(LINUX)/usr/PACKAGES
 	rm -rf $(ROOT)
 	mkdir -p $(ROOT)/apps
+	cp -a $(LINUX)/. $(ROOT)/
 	cp -r rootfs/. $(ROOT)/
 	for app in $(APPS); do cp $(TARGET)/$$app $(ROOT)/apps/$$app.app; done
 	for p in $(STORE); do mkdir -p $(ROOT)/store/$$p && cp $(TARGET)/$$p $(ROOT)/store/$$p/app \

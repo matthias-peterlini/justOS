@@ -387,6 +387,7 @@ pub fn write_desc(d: &Desc, data: &[u8]) -> i64 {
     match &d.kind {
         Kind::File { path, pos, append } => {
             let at = if *append { fs::stat(path).map(|s| s.size).unwrap_or(0) } else { *pos.lock() };
+            super::mm::forget_file(path);
             match fs::write_at(path, at, data) {
                 Ok(()) => {
                     *pos.lock() = at + data.len() as u64;
@@ -485,10 +486,13 @@ pub fn sys_pwrite(fd: i32, ptr: u64, len: u64, off: u64) -> i64 {
         Err(e) => return e,
     };
     match &d.kind {
-        Kind::File { path, .. } => match fs::write_at(path, off, data) {
-            Ok(()) => data.len() as i64,
-            Err(e) => -errno(user::fs_error(e)),
-        },
+        Kind::File { path, .. } => {
+            super::mm::forget_file(path);
+            match fs::write_at(path, off, data) {
+                Ok(()) => data.len() as i64,
+                Err(e) => -errno(user::fs_error(e)),
+            }
+        }
         _ => -err::ESPIPE,
     }
 }
@@ -529,6 +533,7 @@ pub fn sys_ftruncate(fd: i32, len: u64) -> i64 {
 }
 
 pub fn truncate_path(path: &Path, len: u64) -> i64 {
+    super::mm::forget_file(path);
     let mut data = match fs::read_file(path) {
         Ok(d) => d,
         Err(e) => return -errno(user::fs_error(e)),
@@ -552,16 +557,34 @@ pub struct StatInfo {
 }
 
 pub fn stat_of_path(path: &Path) -> Result<StatInfo, i64> {
-    let st = fs::stat(path).map_err(|e| -errno(user::fs_error(e)))?;
-    // Names without an extension are programs (Linux ones are).
+    stat_info(path, fs::stat(path))
+}
+
+/// Like [`stat_of_path`], but a link describes itself.
+pub fn lstat_of_path(path: &Path) -> Result<StatInfo, i64> {
+    stat_info(path, fs::lstat(path))
+}
+
+fn stat_info(path: &Path, st: Result<fs::Stat, justfs::Error>) -> Result<StatInfo, i64> {
+    let st = st.map_err(|e| -errno(user::fs_error(e)))?;
+    // Names without an extension are programs (Linux ones are); the
+    // shared libraries' names (libc.so.6) look like programs too.
     let mode = if st.kind == justfs::Kind::Dir {
         0o040755
+    } else if st.kind == justfs::Kind::Link {
+        0o120777
+    } else if path.name().contains(".so") {
+        0o100755
     } else if path.name().contains('.') {
         0o100644
     } else {
         0o100755
     };
-    let ino = alloc::format!("{path}").bytes().fold(1469598103934665603u64, |h, b| (h ^ b as u64).wrapping_mul(1099511628211));
+    // The inode: the node, with the volume in the high bits (two paths to
+    // one file, through links, give the same number, as the dynamic loader
+    // expects when it checks whether a library is already loaded).
+    let vol = path.volume.to_ascii_lowercase().bytes().fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64));
+    let ino = (vol << 32) | st.node as u64;
     Ok(StatInfo { mode, size: st.size, time: st.modified + super::UNIX_2000, ino })
 }
 
@@ -610,6 +633,9 @@ fn path_arg(dirfd: i32, ptr: u64) -> Result<(Path, String), i64> {
     Ok((linux_path(&text)?, text))
 }
 
+/// Don't follow a symbolic link at the end of the path.
+pub const AT_SYMLINK_NOFOLLOW: u64 = 0x100;
+
 pub fn sys_newfstatat(dirfd: i32, path_ptr: u64, buf: u64, flags: u64) -> i64 {
     const AT_EMPTY_PATH: u64 = 0x1000;
     let text = user::user_cstr(path_ptr, 4096).unwrap_or_default();
@@ -627,7 +653,8 @@ pub fn sys_newfstatat(dirfd: i32, path_ptr: u64, buf: u64, flags: u64) -> i64 {
         Ok(p) => p,
         Err(e) => return e,
     };
-    match stat_of_path(&path) {
+    let info = if flags & AT_SYMLINK_NOFOLLOW != 0 { lstat_of_path(&path) } else { stat_of_path(&path) };
+    match info {
         Ok(s) => write_stat(buf, &s),
         Err(e) => e,
     }
@@ -653,6 +680,7 @@ pub fn sys_statx(dirfd: i32, path_ptr: u64, flags: u64, buf: u64) -> i64 {
         stat_of_desc(&Desc::new(kind, 0))
     } else {
         match path_arg(dirfd, path_ptr) {
+            Ok((p, _)) if flags & AT_SYMLINK_NOFOLLOW != 0 => lstat_of_path(&p),
             Ok((p, _)) => stat_of_path(&p),
             Err(e) => return e,
         }
@@ -782,10 +810,14 @@ pub fn sys_readlinkat(dirfd: i32, path_ptr: u64, buf: u64, cap: u64) -> i64 {
                 None => return -err::ENOENT,
             }
         }
-        _ => {
-            let _ = dirfd;
-            return -err::EINVAL; // nothing here is a symbolic link
-        }
+        _ => match path_arg(dirfd, path_ptr) {
+            Ok((p, _)) => match fs::read_link(&p) {
+                Ok(t) => t,
+                Err(justfs::Error::InvalidName) => return -err::EINVAL, // not a link
+                Err(e) => return -errno(user::fs_error(e)),
+            },
+            Err(e) => return e,
+        },
     };
     let out = match user_bytes(buf, cap) {
         Ok(b) => b,
@@ -794,6 +826,22 @@ pub fn sys_readlinkat(dirfd: i32, path_ptr: u64, buf: u64, cap: u64) -> i64 {
     let n = target.len().min(out.len());
     out[..n].copy_from_slice(&target.as_bytes()[..n]);
     n as i64
+}
+
+/// symlink / symlinkat: a link at `path` pointing to `target`.
+pub fn sys_symlinkat(target_ptr: u64, dirfd: i32, path_ptr: u64) -> i64 {
+    let target = match user::user_cstr(target_ptr, 4096) {
+        Ok(t) => t,
+        Err(e) => return -errno(e),
+    };
+    let (path, _) = match path_arg(dirfd, path_ptr) {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+    match fs::symlink(&path, &target) {
+        Ok(()) => 0,
+        Err(e) => -errno(user::fs_error(e)),
+    }
 }
 
 // ----------------------------------------------------------------------------

@@ -10,8 +10,10 @@
 //! process's JustOS volume), the console as a terminal ([`tty`]), memory with
 //! demand paging ([`mm`]), threads and futexes ([`thread`]), pipes and
 //! eventfds ([`fd`]), TCP and UDP sockets ([`sock`]), poll, select and epoll
-//! ([`poll`]), clocks and randomness. What is not: new processes (fork,
-//! exec), shared libraries, asynchronous signal delivery.
+//! ([`poll`]), clocks and randomness. Dynamically linked programs start in
+//! the dynamic loader they name (glibc's ld-linux-x86-64.so.2, found on the
+//! volume like any file), which maps their shared libraries with `mmap`.
+//! What is not: new processes (fork, exec), asynchronous signal delivery.
 
 pub mod fd;
 pub mod mm;
@@ -195,18 +197,19 @@ pub fn user_bytes<'a>(ptr: u64, len: u64) -> Result<&'a mut [u8], i64> {
 }
 
 // ----------------------------------------------------------------------------
-// Loading a static executable
+// Loading an executable
 
 /// Loads a Linux program into the current (empty) address space and returns
-/// its entry point and the initial stack pointer. The stack holds argc, the
+/// where to start and the initial stack pointer. The stack holds argc, the
 /// argument and environment pointers and the auxiliary vector, as the System
-/// V ABI lays them out.
+/// V ABI lays them out. A dynamically linked program starts in its dynamic
+/// loader, which finds the program through the auxiliary vector.
 pub fn load(elf: &[u8], name: &str, args: &str, exe: &str) -> Result<(u64, u64), JustError> {
-    if needs_interpreter(elf) {
-        crate::println!("\x1b[91m{name}: this program needs Linux shared libraries; JustOS runs static programs only\x1b[0m");
-        return Err(JustError::BadProgram);
-    }
-    let info = map_segments(elf).map_err(|_| JustError::BadProgram)?;
+    let info = map_segments(elf, PIE_BASE).map_err(|_| JustError::BadProgram)?;
+    let interp = match interpreter(elf) {
+        Some(path) => Some(load_interpreter(name, &path)?),
+        None => None,
+    };
     let argv = core::iter::once(name.to_string()).chain(justrt_split(args)).collect::<Vec<_>>();
     // The Linux view of the program's path ("/apps/rg").
     let exe_linux = match exe.split_once(':') {
@@ -219,19 +222,52 @@ pub fn load(elf: &[u8], name: &str, args: &str, exe: &str) -> Result<(u64, u64),
         st.brk_start = info.brk;
         st.brk_cur = info.brk;
     });
-    let stack = build_stack(&info, &argv, &exe_linux)?;
-    Ok((info.entry, stack))
+    let interp_base = interp.as_ref().map_or(0, |i| i.base);
+    let stack = build_stack(&info, interp_base, &argv, &exe_linux)?;
+    Ok((interp.map_or(info.entry, |i| i.entry), stack))
 }
 
-/// Does the ELF ask for a dynamic loader (PT_INTERP)?
-fn needs_interpreter(elf: &[u8]) -> bool {
+/// The dynamic loader an ELF asks for (its PT_INTERP), if any.
+fn interpreter(elf: &[u8]) -> Option<String> {
     const PT_INTERP: u32 = 3;
-    let (Some(phoff), Some(phent), Some(phnum)) = (u64_at(elf, 32), u16_at(elf, 54), u16_at(elf, 56)) else { return false };
-    (0..phnum as u64).any(|i| u32_at(elf, (phoff + i * phent as u64) as usize) == Some(PT_INTERP))
+    let phoff = u64_at(elf, 32)?;
+    let phent = u16_at(elf, 54)? as u64;
+    let phnum = u16_at(elf, 56)? as u64;
+    (0..phnum).find_map(|i| {
+        let p = (phoff + i * phent) as usize;
+        if u32_at(elf, p)? != PT_INTERP {
+            return None;
+        }
+        let off = u64_at(elf, p + 8)? as usize;
+        let len = u64_at(elf, p + 32)? as usize;
+        let raw = elf.get(off..off.checked_add(len)?)?;
+        let raw = raw.split(|&b| b == 0).next()?;
+        core::str::from_utf8(raw).ok().map(String::from)
+    })
+}
+
+/// Where a program built as a PIE goes (its lowest page).
+const PIE_BASE: u64 = 0x10_0000;
+/// Where the dynamic loader goes: above the mmap area, below the stack.
+const INTERP_BASE: u64 = 0x7000_0000_0000;
+
+/// Maps the dynamic loader `path` (a Linux path on the program's volume).
+fn load_interpreter(name: &str, path: &str) -> Result<Loaded, JustError> {
+    let Some(bytes) = linux_path(path).ok().and_then(|p| crate::fs::read_file(&p).ok()) else {
+        crate::println!("\x1b[91m{name}: needs {path}, which is not on this volume (are the Linux libraries installed?)\x1b[0m");
+        return Err(JustError::BadProgram);
+    };
+    if u16_at(&bytes, 16) != Some(3) || interpreter(&bytes).is_some() {
+        crate::println!("\x1b[91m{name}: {path} is not a dynamic loader\x1b[0m");
+        return Err(JustError::BadProgram);
+    }
+    map_segments(&bytes, INTERP_BASE).map_err(|_| JustError::BadProgram)
 }
 
 struct Loaded {
     entry: u64,
+    /// How far the ELF was moved from its own addresses (0 for ET_EXEC).
+    base: u64,
     phdr: u64,
     phent: u64,
     phnum: u64,
@@ -252,22 +288,22 @@ fn u64_at(b: &[u8], o: usize) -> Option<u64> {
     Some(u64::from_le_bytes(b.get(o..o + 8)?.try_into().ok()?))
 }
 
-/// Maps the loadable segments of a static ELF (ET_EXEC at its own addresses,
-/// or a static PIE rebased above 0) and returns where the headers landed.
-fn map_segments(elf: &[u8]) -> Result<Loaded, ()> {
+/// Maps the loadable segments of an ELF (ET_EXEC at its own addresses, a
+/// PIE or shared object moved so its lowest page is at `pie_base`) and
+/// returns where the headers landed.
+fn map_segments(elf: &[u8], pie_base: u64) -> Result<Loaded, ()> {
     if elf.len() < 64 || &elf[..4] != b"\x7fELF" || elf[4] != 2 || elf[5] != 1 {
         return Err(());
     }
     let etype = u16_at(elf, 16).ok_or(())?;
     if etype != 2 && etype != 3 {
-        return Err(()); // only ET_EXEC and ET_DYN (static PIE)
+        return Err(()); // only ET_EXEC and ET_DYN (PIE)
     }
     if u16_at(elf, 18) != Some(0x3E) {
         return Err(()); // not x86-64
     }
-    // A PIE is rebased so its lowest page sits here; an ET_EXEC keeps its
-    // own addresses (bias 0).
-    const PIE_BASE: u64 = 0x10_0000;
+    // A PIE is moved so its lowest page sits at pie_base; an ET_EXEC keeps
+    // its own addresses (bias 0).
     let entry = u64_at(elf, 24).ok_or(())?;
     let phoff = u64_at(elf, 32).ok_or(())?;
     let phentsize = u16_at(elf, 54).ok_or(())? as u64;
@@ -283,7 +319,7 @@ fn map_segments(elf: &[u8]) -> Result<Loaded, ()> {
             min_vaddr = min_vaddr.min(u64_at(elf, p + 16).ok_or(())?);
         }
     }
-    let bias = if etype == 3 { PIE_BASE.wrapping_sub(min_vaddr & !(PAGE_SIZE - 1)) } else { 0 };
+    let bias = if etype == 3 { pie_base.wrapping_sub(min_vaddr & !(PAGE_SIZE - 1)) } else { 0 };
 
     let mut phdr = 0;
     let mut top = 0u64;
@@ -322,7 +358,7 @@ fn map_segments(elf: &[u8]) -> Result<Loaded, ()> {
     }
     // The break starts a little after the program (a gap catches strays).
     let brk = if top != 0 { mem::align_up(top, PAGE_SIZE) + 16 * PAGE_SIZE } else { BRK_BASE };
-    Ok(Loaded { entry: entry.wrapping_add(bias), phdr, phent: phentsize, phnum, brk })
+    Ok(Loaded { entry: entry.wrapping_add(bias), base: bias, phdr, phent: phentsize, phnum, brk })
 }
 
 /// Maps pages for a range, skipping any page already present (segments can
@@ -376,6 +412,8 @@ const AT_PHDR: u64 = 3;
 const AT_PHENT: u64 = 4;
 const AT_PHNUM: u64 = 5;
 const AT_PAGESZ: u64 = 6;
+const AT_BASE: u64 = 7;
+const AT_FLAGS: u64 = 8;
 const AT_ENTRY: u64 = 9;
 const AT_RANDOM: u64 = 25;
 const AT_UID: u64 = 11;
@@ -390,7 +428,8 @@ const AT_EXECFN: u64 = 31;
 
 /// Builds the initial stack: argc, argv, envp, the auxiliary vector and the
 /// strings they point at. Returns the stack pointer to start the program on.
-fn build_stack(info: &Loaded, argv: &[String], exe: &str) -> Result<u64, JustError> {
+/// `interp_base` is where the dynamic loader went (0: none).
+fn build_stack(info: &Loaded, interp_base: u64, argv: &[String], exe: &str) -> Result<u64, JustError> {
     const PAGES: u64 = 64;
     let top = justdk::syscall::USER_STACK_TOP;
     let bottom = top - PAGES * PAGE_SIZE;
@@ -443,6 +482,8 @@ fn build_stack(info: &Loaded, argv: &[String], exe: &str) -> Result<u64, JustErr
         (AT_PHENT, info.phent),
         (AT_PHNUM, info.phnum),
         (AT_PAGESZ, PAGE_SIZE),
+        (AT_BASE, interp_base),
+        (AT_FLAGS, 0),
         (AT_ENTRY, info.entry),
         (AT_RANDOM, rand_at),
         (AT_UID, 0),
@@ -482,7 +523,8 @@ pub fn syscall(frame: &mut TrapFrame) {
     } else {
         dispatch(n, a)
     };
-    if ret == -err::ENOSYS {
+    // clone3 is left to fail on purpose: callers fall back to clone.
+    if ret == -err::ENOSYS && n != 435 {
         crate::debug!("linux", "{}: unimplemented syscall {n}", user::current_name());
     }
     frame.rax = ret as u64;
@@ -499,7 +541,8 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         1 => fd::sys_write(fd0, a[1], a[2]),
         2 => fd::sys_openat(fd::AT_FDCWD, a[0], a[1] as u32),
         3 => fd::sys_close(fd0),
-        4 | 6 => fd::sys_newfstatat(fd::AT_FDCWD, a[0], a[1], 0), // stat, lstat
+        4 => fd::sys_newfstatat(fd::AT_FDCWD, a[0], a[1], 0),         // stat
+        6 => fd::sys_newfstatat(fd::AT_FDCWD, a[0], a[1], fd::AT_SYMLINK_NOFOLLOW), // lstat
         5 => fd::sys_fstat(fd0, a[1]),
         7 => poll::sys_poll(a[0], a[1], a[2] as i32 as i64),
         8 => fd::sys_lseek(fd0, a[1] as i64, a[2] as i32),
@@ -563,7 +606,8 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         82 => fd::sys_renameat(fd::AT_FDCWD, a[0], fd::AT_FDCWD, a[1]),
         83 => fd::sys_mkdirat(fd::AT_FDCWD, a[0]),
         84 | 87 => fd::sys_unlinkat(fd::AT_FDCWD, a[0]),
-        86 | 88 => -err::EPERM, // link, symlink
+        86 => -err::EPERM, // link: no hard links
+        88 => fd::sys_symlinkat(a[0], fd::AT_FDCWD, a[1]),
         89 => fd::sys_readlinkat(fd::AT_FDCWD, a[0], a[1], a[2]),
         90..=94 => 0, // chmod, fchmod, chown, fchown, lchown
         95 => 0o022,  // umask
@@ -603,7 +647,8 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         262 => fd::sys_newfstatat(fd0, a[1], a[2], a[3]),
         263 => fd::sys_unlinkat(fd0, a[1]),
         264 | 316 => fd::sys_renameat(fd0, a[1], a[2] as i32, a[3]),
-        265 | 266 => -err::EPERM, // linkat, symlinkat
+        265 => -err::EPERM, // linkat
+        266 => fd::sys_symlinkat(a[0], a[1] as i32, a[2]),
         267 => fd::sys_readlinkat(fd0, a[1], a[2], a[3]),
         268 | 260 | 280 => 0,     // fchmodat, fchownat, utimensat
         269 | 439 => fd::sys_faccessat(fd0, a[1]),

@@ -9,9 +9,11 @@
 //! data_start ..           file and directory contents
 //! ```
 //!
-//! A node (file or directory) maps its contents with up to 11 extents kept in
-//! the node plus 512 more in one indirect block. A directory's contents are
-//! 64-byte entries. Names are case-preserving and compared without regard to
+//! A node (file, directory or symbolic link) maps its contents with up to 11
+//! extents kept in the node plus 512 more in one indirect block. A
+//! directory's contents are 64-byte entries; a link's contents are the path
+//! it points to, followed when a path is looked up (an absolute target from
+//! the volume's root, a relative one from the link's folder). Names are case-preserving and compared without regard to
 //! ASCII case (`Drivers` and `drivers` are the same name); `/` separates path
 //! components and names cannot contain `/`, `:` or control characters.
 //!
@@ -55,6 +57,8 @@ pub enum Error {
     ReadOnly,
     Corrupt,
     Io,
+    /// A path went through too many symbolic links (or a loop of them).
+    Loop,
 }
 
 impl Error {
@@ -73,6 +77,7 @@ impl Error {
             Error::ReadOnly => "read-only volume",
             Error::Corrupt => "corrupt file system",
             Error::Io => "I/O error",
+            Error::Loop => "too many links",
         }
     }
 }
@@ -136,6 +141,8 @@ pub enum Kind {
     Free = 0,
     File = 1,
     Dir = 2,
+    /// A symbolic link: its contents are the path it points to.
+    Link = 3,
 }
 
 impl Kind {
@@ -143,6 +150,7 @@ impl Kind {
         match v {
             1 => Kind::File,
             2 => Kind::Dir,
+            3 => Kind::Link,
             _ => Kind::Free,
         }
     }
@@ -226,7 +234,14 @@ impl Node {
     pub fn is_dir(&self) -> bool {
         self.kind == Kind::Dir
     }
+
+    pub fn is_link(&self) -> bool {
+        self.kind == Kind::Link
+    }
 }
+
+/// How many symbolic links one lookup may go through (as on Linux).
+pub const MAX_LINKS: u32 = 40;
 
 /// One entry of a directory listing.
 #[derive(Clone, Debug)]
@@ -842,23 +857,72 @@ impl<D: BlockDevice> Fs<D> {
 
     /// Looks up one name in a directory.
     pub fn find(&mut self, dir: NodeId, name: &str) -> Result<NodeId> {
-        self.read_dir(dir)?.into_iter().find(|e| same_name(&e.name, name)).map(|e| e.node).ok_or(Error::NotFound)
+        self.find_entry(dir, name).map(|(id, _)| id)
     }
 
-    /// Resolves a `/`-separated path from the root. `""` and `"/"` are the root.
+    /// Looks up one name in a directory; returns its node and kind.
+    fn find_entry(&mut self, dir: NodeId, name: &str) -> Result<(NodeId, Kind)> {
+        self.read_dir(dir)?.into_iter().find(|e| same_name(&e.name, name)).map(|e| (e.node, e.kind)).ok_or(Error::NotFound)
+    }
+
+    /// Resolves a `/`-separated path from the root, following symbolic
+    /// links. `""` and `"/"` are the root.
     pub fn lookup(&mut self, path: &str) -> Result<NodeId> {
-        let mut id = ROOT;
-        for part in path.split('/').filter(|p| !p.is_empty() && *p != ".") {
+        let mut budget = MAX_LINKS;
+        self.walk(ROOT, path, true, &mut budget)
+    }
+
+    /// Like [`Fs::lookup`], but a link at the end of the path is returned
+    /// itself rather than followed (links on the way are still followed).
+    pub fn lookup_link(&mut self, path: &str) -> Result<NodeId> {
+        let mut budget = MAX_LINKS;
+        self.walk(ROOT, path, false, &mut budget)
+    }
+
+    /// Walks `path` from the folder `from` (from the root if the path starts
+    /// with `/`), spending one of `budget` on each link it follows.
+    fn walk(&mut self, from: NodeId, path: &str, follow_last: bool, budget: &mut u32) -> Result<NodeId> {
+        let mut id = if path.starts_with('/') { ROOT } else { from };
+        let mut parts = path.split('/').filter(|p| !p.is_empty() && *p != ".").peekable();
+        while let Some(part) = parts.next() {
             if part == ".." {
                 id = self.node(id)?.parent;
                 continue;
             }
-            let node = self.node(id)?;
-            if !node.is_dir() {
-                return Err(Error::NotDir);
+            let dir = id;
+            let (child, kind) = self.find_entry(dir, part)?;
+            id = child;
+            if kind == Kind::Link && (parts.peek().is_some() || follow_last) {
+                if *budget == 0 {
+                    return Err(Error::Loop);
+                }
+                *budget -= 1;
+                let target = self.read_link(child)?;
+                id = self.walk(dir, &target, true, budget)?;
             }
-            id = self.find(id, part)?;
         }
+        Ok(id)
+    }
+
+    /// Where a symbolic link points.
+    pub fn read_link(&mut self, id: NodeId) -> Result<String> {
+        let node = self.node(id)?;
+        if !node.is_link() {
+            return Err(Error::InvalidName);
+        }
+        let mut raw = vec![0u8; node.size as usize];
+        self.read_node(&node, 0, &mut raw)?;
+        Ok(String::from_utf8_lossy(&raw).into_owned())
+    }
+
+    /// Creates a symbolic link at `path` pointing to `target`.
+    pub fn symlink(&mut self, path: &str, target: &str) -> Result<NodeId> {
+        if target.is_empty() || target.len() > 4096 {
+            return Err(Error::InvalidName);
+        }
+        let (dir, name) = self.lookup_parent(path)?;
+        let id = self.create(dir, name, Kind::Link)?;
+        self.write_all(id, target.as_bytes())?;
         Ok(id)
     }
 
@@ -994,11 +1058,15 @@ impl<D: BlockDevice> Fs<D> {
     /// Creates or replaces the file at `path` with `data`.
     pub fn write_file(&mut self, path: &str, data: &[u8]) -> Result<NodeId> {
         let (dir, name) = self.lookup_parent(path)?;
-        let id = match self.find(dir, name) {
-            Ok(id) => id,
+        let id = match self.find_entry(dir, name) {
+            Ok((_, Kind::Link)) => self.lookup(path)?,
+            Ok((id, _)) => id,
             Err(Error::NotFound) => self.create(dir, name, Kind::File)?,
             Err(e) => return Err(e),
         };
+        if self.node(id)?.is_dir() {
+            return Err(Error::IsDir);
+        }
         self.write_all(id, data)?;
         Ok(id)
     }
@@ -1122,6 +1190,40 @@ mod tests {
 
     fn fs(blocks: usize) -> Fs<MemDisk> {
         Fs::format(MemDisk::new(blocks), "Test", &NoClock).unwrap()
+    }
+
+    #[test]
+    fn symbolic_links() {
+        let mut fs = fs(512);
+        fs.create_dirs("usr/lib/x86_64-linux-gnu").unwrap();
+        fs.write_file("usr/lib/x86_64-linux-gnu/libz.so.1.3", b"zlib").unwrap();
+        fs.symlink("usr/lib/x86_64-linux-gnu/libz.so.1", "libz.so.1.3").unwrap();
+        fs.symlink("lib", "usr/lib").unwrap();
+        fs.create_dirs("usr/lib64").unwrap();
+        fs.symlink("usr/lib64/libz.so", "../lib/x86_64-linux-gnu/libz.so.1").unwrap();
+        fs.symlink("abs", "/usr/lib/x86_64-linux-gnu").unwrap();
+        // Links in the middle and at the end of paths, relative and absolute.
+        assert_eq!(fs.read_file("lib/x86_64-linux-gnu/libz.so.1").unwrap(), b"zlib");
+        assert_eq!(fs.read_file("/usr/lib64/libz.so").unwrap(), b"zlib");
+        assert_eq!(fs.read_file("abs/libz.so.1.3").unwrap(), b"zlib");
+        let dir = fs.lookup("lib").unwrap();
+        assert!(fs.node(dir).unwrap().is_dir());
+        let link = fs.lookup_link("lib").unwrap();
+        assert!(fs.node(link).unwrap().is_link());
+        assert_eq!(fs.read_link(link).unwrap(), "usr/lib");
+        // Writing through a link changes the target.
+        fs.write_file("lib/x86_64-linux-gnu/libz.so.1", b"zlib 2").unwrap();
+        assert_eq!(fs.read_file("usr/lib/x86_64-linux-gnu/libz.so.1.3").unwrap(), b"zlib 2");
+        // Loops end with an error, dangling links say not found.
+        fs.symlink("a", "b").unwrap();
+        fs.symlink("b", "a").unwrap();
+        assert_eq!(fs.lookup("a"), Err(Error::Loop));
+        fs.symlink("gone", "nowhere").unwrap();
+        assert_eq!(fs.lookup("gone"), Err(Error::NotFound));
+        // Removing a link leaves the target.
+        fs.remove(ROOT, "lib").unwrap();
+        assert!(fs.lookup("usr/lib").is_ok());
+        assert_eq!(fs.check().unwrap(), 0);
     }
 
     #[test]

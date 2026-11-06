@@ -8,8 +8,11 @@ use super::{err, with_state, LinuxState};
 use crate::arch::cpu;
 use crate::mem::{self, frame, paging, PAGE_SIZE};
 use crate::user;
+use crate::fs::Path;
+use crate::sync::IrqLock;
 use alloc::collections::BTreeMap;
-use alloc::sync::Arc;
+use alloc::string::String;
+use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use crate::user::USER_TOP;
 
@@ -91,10 +94,45 @@ fn find_gap(st: &LinuxState, from: u64, len: u64) -> Option<u64> {
     }
 }
 
+/// Files that are mapped somewhere, by path, size and change time: the
+/// dynamic loader maps each library four or five times, and every process
+/// maps the same libc, so they share one copy of its bytes while any
+/// mapping of it lives.
+static MAPPED: IrqLock<Vec<Mapped>> = IrqLock::new(Vec::new());
+
+struct Mapped {
+    key: String,
+    size: u64,
+    modified: u64,
+    data: Weak<Vec<u8>>,
+}
+
+fn map_key(path: &Path) -> String {
+    alloc::format!("{path}").to_ascii_lowercase()
+}
+
 /// Reads a whole file for a mapping (shared between mappings of it).
 fn file_bytes(fd: i32) -> Result<Arc<Vec<u8>>, i64> {
     let path = super::fd::file_path(fd).ok_or(-err::EBADF)?;
-    crate::fs::read_file(&path).map(Arc::new).map_err(|e| -super::errno(user::fs_error(e)))
+    let st = crate::fs::stat(&path).map_err(|e| -super::errno(user::fs_error(e)))?;
+    let key = map_key(&path);
+    {
+        let mut cache = MAPPED.lock();
+        cache.retain(|m| m.data.strong_count() > 0);
+        if let Some(data) = cache.iter().find(|m| m.key == key && m.size == st.size && m.modified == st.modified).and_then(|m| m.data.upgrade()) {
+            return Ok(data);
+        }
+    }
+    let data = crate::fs::read_file(&path).map(Arc::new).map_err(|e| -super::errno(user::fs_error(e)))?;
+    MAPPED.lock().push(Mapped { key, size: st.size, modified: st.modified, data: Arc::downgrade(&data) });
+    Ok(data)
+}
+
+/// Forgets the shared bytes of a file that is about to change (mappings
+/// already made keep their copy, as private mappings do).
+pub fn forget_file(path: &Path) {
+    let key = map_key(path);
+    MAPPED.lock().retain(|m| m.key != key);
 }
 
 pub fn sys_mmap(addr: u64, len: u64, prot: u32, flags: u32, fd: i32, off: u64) -> i64 {
