@@ -306,12 +306,12 @@ pub fn catalog() -> Vec<CatalogApp> {
 pub fn refresh_catalog() -> Result<usize, String> {
     let r = http::get(CATALOG_URL)?;
     if !r.ok() {
-        return Err(format!("the catalog is not available ({})", r.status));
+        return Err(format!("il catalogo non è disponibile ({})", r.status));
     }
-    let v = justjson::parse_bytes(&r.body).ok_or("the catalog is damaged")?;
+    let v = justjson::parse_bytes(&r.body).ok_or("il catalogo è danneggiato")?;
     let apps = parse_catalog(&v);
     if apps.is_empty() {
-        return Err("the catalog is empty".to_string());
+        return Err("il catalogo è vuoto".to_string());
     }
     if let Ok(p) = path(CATALOG_FILE) {
         let _ = fs::write_file(&p, &r.body);
@@ -336,12 +336,12 @@ fn github_json(url: &str) -> Result<Value, String> {
     let req = http::Request { method: "GET", url, headers: &[("Accept", "application/vnd.github+json")], body: None };
     let r = http::fetch(&req, &mut |_, _| true)?;
     if r.status == 403 || r.status == 429 {
-        return Err("GitHub asks to wait a little before searching again".to_string());
+        return Err("GitHub chiede di aspettare un po' prima di cercare di nuovo".to_string());
     }
     if !r.ok() {
-        return Err(format!("GitHub answered {}", r.status));
+        return Err(format!("GitHub ha risposto {}", r.status));
     }
-    justjson::parse_bytes(&r.body).ok_or_else(|| "GitHub sent something unreadable".to_string())
+    justjson::parse_bytes(&r.body).ok_or_else(|| "GitHub ha mandato una risposta illeggibile".to_string())
 }
 
 fn url_encode(s: &str) -> String {
@@ -486,7 +486,7 @@ pub fn start_install(app: CatalogApp) {
     });
     if spawned.is_none() {
         if let Some(j) = JOBS.lock().get_mut(&id) {
-            j.result = Some(Err("no memory to start the download".to_string()));
+            j.result = Some(Err("non c'è memoria per avviare il download".to_string()));
         }
     }
 }
@@ -523,7 +523,7 @@ pub fn download_release(app: &CatalogApp, phase: &mut dyn FnMut(&'static str), r
     phase("Scarico");
     let r = http::fetch(&http::Request::get(&url), report)?;
     if !r.ok() {
-        return Err(format!("the download failed ({})", r.status));
+        return Err(format!("il download non è riuscito ({})", r.status));
     }
     phase("Installo");
     let (_, program) = unpack(&r.body, &asset_name, &app.file, &app.command, app.platform)?;
@@ -763,23 +763,23 @@ fn entries(data: &[u8], name: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
     let files = |v: Vec<justzip::Entry>| v.into_iter().filter(|e| !e.dir && e.link.is_none()).map(|e| (e.name, e.data)).collect();
     let lower = name.to_ascii_lowercase();
     Ok(if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
-        let tar = justzip::gunzip(data).ok_or("the archive is damaged")?;
-        files(justzip::untar(&tar).ok_or("the archive is damaged")?)
+        let tar = justzip::gunzip(data).ok_or("l'archivio è danneggiato")?;
+        files(justzip::untar(&tar).ok_or("l'archivio è danneggiato")?)
     } else if lower.ends_with(".tar") {
-        files(justzip::untar(data).ok_or("the archive is damaged")?)
+        files(justzip::untar(data).ok_or("l'archivio è danneggiato")?)
     } else if lower.ends_with(".deb") {
-        let ar = justzip::unar(data).ok_or("the package is damaged")?;
-        let member = ar.iter().find(|e| e.name.starts_with("data.tar")).ok_or("the package has no data")?;
+        let ar = justzip::unar(data).ok_or("il pacchetto è danneggiato")?;
+        let member = ar.iter().find(|e| e.name.starts_with("data.tar")).ok_or("il pacchetto non contiene dati")?;
         let tar = match member.name.as_str() {
             "data.tar" => member.data.clone(),
-            "data.tar.gz" => justzip::gunzip(&member.data).ok_or("the package is damaged")?,
+            "data.tar.gz" => justzip::gunzip(&member.data).ok_or("il pacchetto è danneggiato")?,
             other => return Err(format!("{other}: questa compressione non è ancora supportata (solo gzip)")),
         };
-        files(justzip::untar(&tar).ok_or("the package is damaged")?)
+        files(justzip::untar(&tar).ok_or("il pacchetto è danneggiato")?)
     } else if lower.ends_with(".zip") {
-        files(justzip::unzip(data).ok_or("the archive is damaged")?)
+        files(justzip::unzip(data).ok_or("l'archivio è danneggiato")?)
     } else if lower.ends_with(".gz") {
-        alloc::vec![(name[..name.len() - 3].to_string(), justzip::gunzip(data).ok_or("the file is damaged")?)]
+        alloc::vec![(name[..name.len() - 3].to_string(), justzip::gunzip(data).ok_or("il file è danneggiato")?)]
     } else {
         alloc::vec![(name.to_string(), data.to_vec())]
     })
@@ -808,26 +808,26 @@ fn pick(entries: &[(String, Vec<u8>)], want: &str, command: &str, platform: Plat
         .or_else(|| entries.iter().find(|(n, d)| names(n).1 == command && is_program(d)))
         .or_else(|| entries.iter().find(|(n, d)| is_program(d) && (n.contains("bin/") || n.ends_with(".exe"))))
         .or_else(|| entries.iter().find(|(_, d)| is_program(d)))
-        .ok_or("no program for this computer in the download")?;
+        .ok_or("il download non contiene un programma per questo computer")?;
     let d = &pick.1;
     match platform {
         Platform::Windows => {
-            let pe = u32::from_le_bytes(d.get(0x3c..0x40).ok_or("not a Windows program")?.try_into().unwrap()) as usize;
+            let pe = u32::from_le_bytes(d.get(0x3c..0x40).ok_or("non è un programma Windows")?.try_into().unwrap()) as usize;
             let machine = d.get(pe + 4..pe + 6).map(|m| u16::from_le_bytes([m[0], m[1]]));
             if d.get(pe..pe + 4) != Some(b"PE\0\0") || machine != Some(0x8664) {
-                return Err("not a 64-bit Windows program".to_string());
+                return Err("non è un programma Windows a 64 bit".to_string());
             }
         }
         _ => {
             if d.len() < 64 || d[4] != 2 || u16::from_le_bytes([d[18], d[19]]) != 0x3E {
-                return Err("not a 64-bit Linux program".to_string());
+                return Err("non è un programma Linux a 64 bit".to_string());
             }
             let phoff = u64::from_le_bytes(d[32..40].try_into().unwrap()) as usize;
             let phent = u16::from_le_bytes([d[54], d[55]]) as usize;
             let phnum = u16::from_le_bytes([d[56], d[57]]) as usize;
             let dynamic = (0..phnum).any(|i| d.get(phoff + i * phent..phoff + i * phent + 4) == Some(&3u32.to_le_bytes()[..]));
             if dynamic {
-                return Err("this build needs Linux libraries (JustOS runs static programs)".to_string());
+                return Err("questa versione richiede librerie Linux (JustOS esegue solo programmi statici)".to_string());
             }
         }
     }

@@ -97,6 +97,9 @@ pub fn check_now(announce: bool) -> State {
     let result = match crate::store::github_release(REPO) {
         Ok((tag, _)) if newer(&tag, crate::VERSION) => State::Released(String::from(tag.trim_start_matches(['v', 'V']))),
         Ok(_) => State::UpToDate,
+        // The signed index answered and offers nothing newer: GitHub only
+        // adds releases published without it, and a repo with none answers 404.
+        Err(_) if indexed.is_ok() => State::UpToDate,
         Err(e) => State::Failed(indexed.err().unwrap_or(e)),
     };
     if let (true, State::Released(v)) = (announce, &result) {
