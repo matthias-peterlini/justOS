@@ -406,7 +406,7 @@ impl Canvas {
     }
 
     /// [`glow`](Self::glow), kept inside the rounded rectangle `r` (the rust
-    /// glow in the corner of a ticly card).
+    /// glow in the corner of a card).
     #[allow(clippy::too_many_arguments)]
     pub fn glow_round(&mut self, r: Rect, rad: i32, cx: i32, cy: i32, radius: i32, c: u32, strength: u32) {
         let s = self.scale;

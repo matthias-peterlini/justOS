@@ -1,13 +1,11 @@
-//! ticly browser: tabs, an address bar and web pages drawn by [`justweb`]
-//! (HTML and CSS, PNG, JPEG and GIF pictures, JavaScript), in the look of
-//! the ticly browser. A page loads on a thread of its own: the page, its
-//! stylesheets, then its pictures four at a time; the page is laid out
-//! again as they come in and when the window changes size. Its scripts run
-//! on another thread, which then hands them the page's events and timers.
-//! Cookies are kept while JustOS runs. The start page searches with
-//! DuckDuckGo and leads into ticly.
+//! Browser: tabs, an address bar and web pages drawn by [`justweb`] (HTML
+//! and CSS, PNG, JPEG and GIF pictures, JavaScript). A page loads on a
+//! thread of its own: the page, its stylesheets, then its pictures four at
+//! a time; the page is laid out again as they come in and when the window
+//! changes size. Its scripts run on another thread, which then hands them
+//! the page's events and timers. Cookies are kept while JustOS runs. The
+//! start page searches with DuckDuckGo and has a few sites one click away.
 
-use super::ticly as tui;
 use crate::dev::input::{Key, KeyEvent};
 use crate::fs;
 use crate::gui::gfx::{Canvas, Rect};
@@ -31,10 +29,14 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 const TABS_H: i32 = 46;
 const TOOLBAR_H: i32 = 54;
 const BAR_H: i32 = TABS_H + TOOLBAR_H;
-const CHROME: u32 = 0xFF0E_0B0C;
 const SEARCH: &str = "https://html.duckduckgo.com/html/?q=";
-const LOGIN: &str = "https://login.ticly.it/login";
-const WORKSPACE: &str = "https://do.ticly.cloud/";
+/// The sites on the start page: name, what is shown under it, address.
+const LINKS: [(&str, &str, &str); 4] = [
+    ("Wikipedia", "wikipedia.org", "https://it.wikipedia.org/"),
+    ("DuckDuckGo", "duckduckgo.com", "https://html.duckduckgo.com/html/"),
+    ("Hacker News", "ycombinator.com", "https://news.ycombinator.com/"),
+    ("JustOS", "github.com", "https://github.com/matthias-peterlini/justOS"),
+];
 const ACCEPT_PAGE: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
 const ACCEPT_LANGUAGE: &str = "it-IT,it;q=0.9,en;q=0.8";
 /// Laying out a deep page recurses a lot.
@@ -46,8 +48,6 @@ const SCRIPT_TICK_MS: u64 = 15;
 /// Threads fetching the pictures of a page.
 const PICTURE_THREADS: usize = 4;
 const MAX_TABS: usize = 12;
-const SIGN_UP_Q: &str = "Non hai ancora un account?";
-const SIGN_UP: &str = "Registrati gratis";
 
 // ---------------------------------------------------------------------------
 // Faces
@@ -245,13 +245,29 @@ fn escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
-/// A page of the browser's own, in the ticly look.
+/// What went wrong, said plainly: `e` is "host: reason".
+fn net_error(e: &str) -> String {
+    let host = e.split_once(": ").map(|(h, _)| h).unwrap_or("il sito");
+    if e.contains("host not found") || e.contains("no network") || e.contains("no route") {
+        format!("Non riesco a raggiungere {host}: controlla la connessione.")
+    } else if e.contains("timed out") {
+        format!("{host} non risponde: riprova tra poco.")
+    } else if e.contains("refused") || e.contains("reset") {
+        format!("{host} ha chiuso la connessione: riprova tra poco.")
+    } else if e.contains("certificate") {
+        format!("Il certificato di {host} non è valido.")
+    } else {
+        String::from(e)
+    }
+}
+
+/// A page of the browser's own, in the JustOS look.
 fn own_page(title: &str, heading: &str, text: &str) -> String {
     format!(
-        "<html><head><title>{}</title></head><body style='margin:0;background:#141011;color:#fff;font-family:sans-serif'>\
-         <div style='max-width:560px;margin:90px auto;padding:36px;border-radius:22px;background:#1f1817;border:1px solid #352b29'>\
-         <p style='font-size:22px;font-weight:bold;margin:0 0 18px'>ticly</p><h1 style='font-size:28px;margin:0 0 12px'>{}</h1>\
-         <p style='color:#b8aca7;line-height:1.5'>{}</p></div></body></html>",
+        "<html><head><title>{}</title></head><body style='margin:0;background:#2c2a30;color:#fff;font-family:sans-serif'>\
+         <div style='max-width:560px;margin:90px auto;padding:36px;border-radius:22px;background:#3a383f;border:1px solid #4a4850'>\
+         <p style='font-size:22px;font-weight:bold;margin:0 0 18px'>J<span style='color:#ff5a1f'>&#9646;</span></p><h1 style='font-size:28px;margin:0 0 12px'>{}</h1>\
+         <p style='color:#c9c6ce;line-height:1.5'>{}</p></div></body></html>",
         escape(title),
         escape(heading),
         escape(text)
@@ -647,8 +663,8 @@ impl Browser {
     // --- geometry of the chrome
 
     fn tab_rects(&self, area: Rect) -> Vec<Rect> {
-        let x0 = area.x + 112;
-        let avail = area.w - 112 - 70;
+        let x0 = area.x + 12;
+        let avail = area.w - 12 - 70;
         let n = self.tabs.len() as i32;
         let w = (avail / n.max(1) - 6).clamp(60, 230);
         (0..n).map(|i| Rect::new(x0 + i * (w + 6), area.y + 8, w, 32)).collect()
@@ -693,40 +709,29 @@ impl Browser {
 
     // --- geometry of the start page
 
-    fn start_cards(area: Rect) -> (Rect, Rect) {
+    fn start_card(area: Rect) -> Rect {
         let c = Self::content(area);
-        let w = (c.w - 64).min(980);
-        let h = 506.min(c.h - 32).max(380);
-        let lw = w * 575 / 1000;
-        let x = c.x + (c.w - w) / 2;
-        let y = c.y + (c.h - h) / 2;
-        (Rect::new(x, y, lw, h), Rect::new(x + lw + 14, y, w - lw - 14, h))
-    }
-
-    /// The top of the right card's content (centred in the card).
-    fn start_top(area: Rect) -> i32 {
-        let (_, r) = Self::start_cards(area);
-        r.y + ((r.h - 344) / 2).max(16)
+        let w = (c.w - 64).min(860);
+        let h = 340;
+        Rect::new(c.x + (c.w - w) / 2, c.y + ((c.h - h) / 2).max(16), w, h)
     }
 
     fn start_search(area: Rect) -> Rect {
-        let (_, r) = Self::start_cards(area);
-        Rect::new(r.x + 36, Self::start_top(area) + 26, r.w - 72, 46)
+        let r = Self::start_card(area);
+        Rect::new(r.x + 36, r.y + 138, r.w - 72 - 132, 46)
     }
 
-    /// Search, sign in, workspace, and the "sign up" link.
-    fn start_buttons(area: Rect) -> [Rect; 4] {
-        let (_, r) = Self::start_cards(area);
-        let top = Self::start_top(area);
-        let w = r.w - 72;
-        let (qw, rw) = (text::width(Font::Small, SIGN_UP_Q), text::width(Font::Strong, SIGN_UP));
-        let x = r.x + (r.w - qw - rw - 6) / 2;
-        [
-            Rect::new(r.x + 36, top + 90, w, 46),
-            Rect::new(r.x + 36, top + 198, w, 46),
-            Rect::new(r.x + 36, top + 256, w, 46),
-            Rect::new(x + qw + 6, top + 318, rw, 22),
-        ]
+    /// "Cerca", then the sites in [`LINKS`].
+    fn start_buttons(area: Rect) -> [Rect; 1 + LINKS.len()] {
+        let r = Self::start_card(area);
+        let s = Self::start_search(area);
+        let mut v = [Rect::new(s.right() + 12, s.y, 120, 46); 1 + LINKS.len()];
+        let n = LINKS.len() as i32;
+        let w = (r.w - 72 - 12 * (n - 1)) / n;
+        for (i, b) in v[1..].iter_mut().enumerate() {
+            *b = Rect::new(r.x + 36 + i as i32 * (w + 12), s.bottom() + 52, w, 64);
+        }
+        v
     }
 
     // --- navigation
@@ -912,19 +917,15 @@ impl Browser {
 
     fn draw_chrome(&mut self, c: &mut Canvas, area: Rect, focused: bool) {
         let bar = Rect::new(area.x, area.y, area.w, BAR_H);
-        c.fill(bar, CHROME);
-        c.glow_round(bar, 0, area.x + 60, area.y, 520, ui::GLOW, 150);
-        c.fill(Rect::new(area.x, bar.bottom() - 1, area.w, 1), 0x24FF_FFFF);
-        tui::wordmark(c, area.x + 20, area.y + 11, "");
+        c.fill(Rect::new(area.x, bar.bottom() - 1, area.w, 1), ui::SEPARATOR);
         // Tabs.
         let rects = self.tab_rects(area);
         for (i, r) in rects.iter().enumerate() {
             let active = i == self.cur;
             let t = &self.tabs[i];
-            c.fill_round(*r, 12, if active { 0xFF2A_201E } else if self.hover == Some(*r) { 0x1AFF_FFFF } else { 0x0AFF_FFFF });
+            c.fill_round(*r, 12, if active { ui::SELECTED } else if self.hover == Some(*r) { ui::PANEL_HOVER } else { ui::PANEL });
             if active {
-                c.glow_round(*r, 12, r.x + 20, r.y, r.w * 2 / 3, ui::GLOW, 90);
-                c.stroke_round(*r, 12, 1, 0x2EFF_FFFF);
+                c.stroke_round(*r, 12, 1, ui::BORDER);
             }
             // The site's letter in a little circle (a spinner while loading).
             let (cx, cy) = (r.x + 18, r.y + 16);
@@ -934,7 +935,7 @@ impl Browser {
                 let (dx, dy) = [(0, -6), (4, -4), (6, 0), (4, 4), (0, 6), (-4, 4), (-6, 0), (-4, -4)][a as usize];
                 c.fill_circle(cx + dx, cy + dy, 3, ui::ACCENT);
             } else {
-                c.fill_circle(cx, cy, 9, 0xFF3A_302D);
+                c.fill_circle(cx, cy, 9, 0x24FF_FFFF);
                 let letter: String = t.title.chars().next().map(|ch| ch.to_lowercase().collect()).unwrap_or_else(|| String::from("n"));
                 let (lh, _) = text::metrics(Font::Small);
                 text::draw_centered(c, Font::Small, cx, cy - lh / 2, &letter, TEXT_DIM);
@@ -972,7 +973,7 @@ impl Browser {
         }
         let ar = Self::address_rect(area);
         let editing = focused && self.focus == Focus::Address;
-        c.fill_round(ar, ar.h / 2, 0xFF12_0E0E);
+        c.fill_round(ar, ar.h / 2, ui::FIELD);
         c.stroke_round(ar, ar.h / 2, 1, if editing { 0x59FF_FFFF } else { 0x26FF_FFFF });
         let secure = t.url.starts_with("https://");
         if t.page.is_some() && !editing {
@@ -1033,74 +1034,31 @@ impl Browser {
     }
 
     fn draw_start(&mut self, c: &mut Canvas, blur: &Canvas, area: Rect, focused: bool) {
-        let content = Self::content(area);
-        c.blit_round(blur, content, 0, 0x5A0E_0A0A);
-        let (l, r) = Self::start_cards(area);
-        ui::card(c, blur, l, 22, ui::GLASS_STRONG);
+        let r = Self::start_card(area);
         ui::card(c, blur, r, 22, ui::GLASS_STRONG);
-        // Left: the welcome.
-        tui::wordmark(c, l.x + 36, l.y + 40, "");
-        let mut y = l.y + 92;
-        for line in text::wrap(Font::Title, "Bentornato nel tuo workspace.", l.w - 72).iter().take(2) {
-            text::draw(c, Font::Title, l.x + 36, y, line, TEXT);
-            y += 44;
-        }
-        y += 14;
-        let lead = "Un unico browser per la tua identità ticly: musica, chat, intelligenza artificiale e il tuo workspace, su un motore web scritto da zero per JustOS.";
-        for line in text::wrap(Font::Body, lead, l.w - 72).iter().take(4) {
-            text::draw(c, Font::Body, l.x + 36, y, line, TEXT_DIM);
-            y += 22;
-        }
-        let rows = [
-            (false, "Motore justweb", "HTML e CSS in Rust, nel kernel di JustOS, senza Chromium"),
-            (true, "Single Sign-On Ecosistema", "Una sessione attiva su tutti i servizi ticly"),
-        ];
-        let mut ry = (y + 22).max(l.bottom() - 186);
-        for (bolt, title, sub) in rows {
-            let rr = Rect::new(l.x + 36, ry, l.w - 72, 70);
-            if rr.bottom() > l.bottom() - 12 {
-                break;
-            }
-            c.fill_round(rr, 14, 0x0DFF_FFFF);
-            c.stroke_round(rr, 14, 1, ui::BORDER);
-            let ib = Rect::new(rr.x + 16, rr.y + 20, 30, 30);
-            c.fill_round(ib, 8, 0x14FF_FFFF);
-            c.stroke_round(ib, 8, 1, ui::BORDER);
-            let (cx, cy) = (ib.x + 15, ib.y + 15);
-            if bolt {
-                // A lightning bolt.
-                c.triangle([(cx + 2, cy - 9), (cx - 6, cy + 2), (cx + 1, cy + 1)], ui::ORANGE);
-                c.triangle([(cx - 1, cy - 1), (cx + 6, cy - 2), (cx - 2, cy + 9)], ui::ORANGE);
-            } else {
-                // A diamond.
-                c.triangle([(cx, cy - 7), (cx - 7, cy), (cx + 7, cy)], TEXT_DIM);
-                c.triangle([(cx - 7, cy), (cx + 7, cy), (cx, cy + 7)], TEXT_DIM);
-            }
-            text::draw(c, Font::Strong, rr.x + 60, rr.y + 15, title, TEXT);
-            text::draw(c, Font::Small, rr.x + 60, rr.y + 39, &text::fit(Font::Small, sub, rr.w - 76), TEXT_FAINT);
-            ry += 80;
-        }
-        // Right: search and ticly.
-        let top = Self::start_top(area);
-        ui::caps(c, r.x + 36, top, "Cerca nel web", TEXT_DIM);
-        text::draw_right(c, Font::Small, r.right() - 36, top - 2, "DuckDuckGo", TEXT_DIM);
+        crate::gui::splash::draw_mark(c, r.x + r.w / 2, r.y + 54, 34, 0xFFF2_EFE6);
+        text::draw_centered(c, Font::Title, r.x + r.w / 2, r.y + 84, "Dove vuoi andare?", TEXT);
         let sr = Self::start_search(area);
-        ui::text_field(c, sr, &text::fit(Font::Heading, &self.search, sr.w - 40), "Cerca o digita un indirizzo", focused && self.focus == Focus::Search && self.caret_on);
-        let [go, login, ws, reg] = Self::start_buttons(area);
-        ui::button(c, go, "Cerca →", true, self.hover == Some(go));
-        let oy = top + 164;
-        let ow = ui::caps_width("Oppure");
-        c.fill(Rect::new(r.x + 36, oy + 6, (r.w - 72 - ow) / 2 - 12, 1), ui::SEPARATOR);
-        ui::caps(c, r.x + (r.w - ow) / 2, oy, "Oppure", TEXT_FAINT);
-        c.fill(Rect::new(r.x + (r.w + ow) / 2 + 12, oy + 6, (r.w - 72 - ow) / 2 - 12, 1), ui::SEPARATOR);
-        ui::button(c, login, "Accedi a ticly", false, self.hover == Some(login));
-        ui::button(c, ws, "Apri il workspace do.ticly.cloud", false, self.hover == Some(ws));
-        text::draw(c, Font::Small, reg.x - 6 - text::width(Font::Small, SIGN_UP_Q), reg.y + 2, SIGN_UP_Q, TEXT_DIM);
-        text::draw(c, Font::Strong, reg.x, reg.y, SIGN_UP, TEXT);
-        c.fill(Rect::new(reg.x, reg.y + 19, reg.w, 1), if self.hover == Some(reg) { TEXT } else { 0x99FF_FFFF });
+        ui::text_field(c, sr, &text::fit(Font::Heading, &self.search, sr.w - 40), "Cerca con DuckDuckGo o scrivi un indirizzo", focused && self.focus == Focus::Search && self.caret_on);
+        let b = Self::start_buttons(area);
+        ui::button(c, b[0], "Cerca", true, self.hover == Some(b[0]));
+        ui::caps(c, r.x + 36, b[1].y - 26, "Siti", TEXT_DIM);
+        for (t, (name, host, _)) in b[1..].iter().zip(LINKS) {
+            let hover = self.hover == Some(*t);
+            c.fill_round(*t, 14, if hover { ui::PANEL_HOVER } else { ui::PANEL });
+            c.stroke_round(*t, 14, 1, ui::BORDER);
+            let badge = Rect::new(t.x + 14, t.y + 16, 32, 32);
+            c.fill_round(badge, 9, 0x1FFF_FFFF);
+            let (lh, _) = text::metrics(Font::Strong);
+            let letter: String = name.chars().take(1).collect();
+            text::draw_centered(c, Font::Strong, badge.x + 16, badge.y + (32 - lh) / 2, &letter, TEXT);
+            let w = t.w - 70;
+            text::draw(c, Font::Strong, t.x + 56, t.y + 13, &text::fit(Font::Strong, name, w), TEXT);
+            text::draw(c, Font::Small, t.x + 56, t.y + 36, &text::fit(Font::Small, host, w), TEXT_FAINT);
+        }
     }
 
-    fn draw_page(&mut self, c: &mut Canvas, area: Rect, focused: bool) {
+    fn draw_page(&mut self, c: &mut Canvas, blur: &Canvas, area: Rect, focused: bool) {
         let content = Self::content(area);
         let caret = focused && self.focus == Focus::Page && self.caret_on;
         let t = &mut self.tabs[self.cur];
@@ -1142,15 +1100,12 @@ impl Browser {
         match &t.view {
             Some(v) => c.blit(v, 0, 0, content),
             None => {
-                c.fill(content, 0xFF14_1011);
                 if let Some(e) = &t.error {
                     let card = Rect::new(content.x + (content.w - 520) / 2, content.y + 90, 520, 220);
-                    c.fill_round(card, 22, 0xFF1F_1817);
-                    c.stroke_round(card, 22, 1, ui::BORDER);
-                    c.glow_round(card, 22, card.x + 60, card.y, 300, ui::GLOW, 90);
-                    tui::wordmark(c, card.x + 32, card.y + 28, "");
+                    ui::card(c, blur, card, 22, ui::GLASS_STRONG);
+                    crate::gui::splash::draw_mark(c, card.x + 50, card.y + 40, 24, 0xFFF2_EFE6);
                     text::draw(c, Font::Heading, card.x + 32, card.y + 72, "Impossibile aprire la pagina", TEXT);
-                    let msg = tui::net_error(e);
+                    let msg = net_error(e);
                     for (i, l) in text::wrap(Font::Body, &msg, card.w - 64).iter().take(3).enumerate() {
                         text::draw(c, Font::Body, card.x + 32, card.y + 106 + i as i32 * 21, l, TEXT_DIM);
                     }
@@ -1324,11 +1279,11 @@ fn tail_fit(font: Font, s: &str, max: i32) -> String {
 
 impl App for Browser {
     fn title(&self) -> String {
-        String::from("ticly browser")
+        String::from("Browser")
     }
 
     fn icon(&self) -> &str {
-        "ticly-browser"
+        "browser"
     }
 
     fn kind(&self) -> &'static str {
@@ -1350,7 +1305,7 @@ impl App for Browser {
         if self.tabs[self.cur].page.is_none() {
             self.draw_start(c, blur, area, focused);
         } else {
-            self.draw_page(c, area, focused);
+            self.draw_page(c, blur, area, focused);
         }
         self.draw_chrome(c, area, focused);
         self.draw_overlays(c, blur, area, focused);
@@ -1444,18 +1399,16 @@ impl App for Browser {
         }
         // The start page.
         if self.tab().page.is_none() {
-            let [go, login, ws, reg] = Self::start_buttons(area);
+            let b = Self::start_buttons(area);
             if Self::start_search(area).contains(ax, ay) {
                 self.focus = Focus::Search;
-            } else if go.contains(ax, ay) {
+            } else if b[0].contains(ax, ay) {
                 if !self.search.trim().is_empty() {
                     let u = resolve(&core::mem::take(&mut self.search));
                     self.navigate(u);
                 }
-            } else if login.contains(ax, ay) || reg.contains(ax, ay) {
-                self.navigate(String::from(LOGIN));
-            } else if ws.contains(ax, ay) {
-                self.navigate(String::from(WORKSPACE));
+            } else if let Some(i) = b[1..].iter().position(|r| r.contains(ax, ay)) {
+                self.navigate(String::from(LINKS[i].2));
             }
             return Action::Redraw;
         }

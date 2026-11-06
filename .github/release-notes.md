@@ -14,7 +14,7 @@ La prima versione con il nome JustOS.
 - **Portatili**: batteria, alimentatore, coperchio e temperature, letti dal firmware con un interprete ACPI scritto da zero; sospensione in RAM dal menu, dal tasto e chiudendo il coperchio, con la schermata di blocco al risveglio.
 - **Schermi ad alta densità**: l'interfaccia a 2× da 2560×1440 in su, o a scelta nelle Impostazioni.
 - **Il desktop**: desktop virtuali e vista d'insieme (F3), finestre agganciate a metà e a quarti, ricerca globale con Ctrl+Spazio, file trascinati tra le finestre, schede in File (Ctrl+T), schermata di blocco con password.
-- **JavaScript nel ticly browser**: `justjs`, un interprete scritto da zero, con il DOM, gli eventi, i timer e `fetch`; basta per i siti semplici.
+- **JavaScript nel Browser**: `justjs`, un interprete scritto da zero, con il DOM, gli eventi, i timer e `fetch`; basta per i siti semplici.
 - **ArcStudio**, l'ambiente di sviluppo per ArcScript.
 - **Più programmi**: i programmi Windows aprono finestre semplici, l'app dalvik esegue programmi Android e Java semplici; un doppio clic installa pacchetti `.deb`, `.tar.gz`, `.tgz`, `.tar`, `.zip` e `.gz` con un programma Linux statico o Windows x64.
 - **Tutti i processori**: il kernel usa fino a 16 core.

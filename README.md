@@ -105,7 +105,7 @@ con un interprete ACPI scritto da zero.
 
 **Il web, a modo suo**
 
-Il ticly browser ha un motore HTML e CSS e un interprete JavaScript, anche
+Il Browser ha un motore HTML e CSS e un interprete JavaScript, anche
 questi scritti da zero.
 
 </td>
@@ -121,7 +121,7 @@ questi scritti da zero.
 </tr>
 <tr>
 <td><img src="docs/screenshots/schermo-intero.jpg" alt="ArcStudio a schermo intero"><br><b>Schermo intero</b>: ArcStudio prende tutto lo schermo, con l'ora nel titolo.</td>
-<td><img src="docs/screenshots/browser.jpg" alt="ticly browser"><br><b>ticly browser</b>: Wikipedia con il motore web di JustOS.</td>
+<td><img src="docs/screenshots/browser.jpg" alt="Browser"><br><b>Browser</b>: Wikipedia con il motore web di JustOS.</td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/negozio.jpg" alt="Negozio"><br><b>Negozio</b>: giochi e app, installati con un clic.</td>
@@ -186,8 +186,7 @@ Secure Boot va disattivato.
 
 | | |
 |---|---|
-| **Di serie** | File, Editor di testo, Note, Promemoria, Calendario, Orologio, Calcolatrice, Foto, Musica, Anteprima, Terminale, Monitor attività, Impostazioni, Info sistema, ArcStudio |
-| **ticly** | ticly browser, ticly Do (attività, note, calendario) e ticly AI (in anteprima: le risposte non sono ancora collegate), con un solo account salvato sul computer |
+| **Di serie** | Browser, File, Editor di testo, Note, Promemoria, Calendario, Orologio, Calcolatrice, Foto, Musica, Anteprima, Terminale, Monitor attività, Impostazioni, Info sistema, ArcStudio |
 | **Nel Negozio** | 2048, Campo minato, Serpente, Sudoku, Tris e Disegno; BusyBox e Lua per il Terminale; programmi Linux e Windows da GitHub. Le app si aggiornano da sole, da un indice firmato |
 | **Doppio clic** | un programma parte; un pacchetto `.deb`, `.tar.gz`, `.zip` o `.pkg` si installa da solo |
 

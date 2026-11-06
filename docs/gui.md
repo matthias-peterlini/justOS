@@ -44,7 +44,7 @@ Presa a modello da macOS:
   sui portatili, un anello verde con la carica della batteria (rosso
   quando è quasi scarica, con il fulmine quando è in carica). Un clic apre
   il **centro di controllo**, mentre lo sfondo si scurisce verso il basso:
-  l'account ticly (o il nome) e l'ingranaggio delle impostazioni, i
+  il nome di chi usa il computer e l'ingranaggio delle impostazioni, i
   riquadri *Rete* (blu quando è collegata), *Suono* e *Non disturbare*,
   due cursori verticali per volume e luminosità, *Spegni*, *Blocca*,
   *Riavvia* e, sui portatili, la carica in percentuale.
@@ -144,9 +144,7 @@ si ridisegna a ogni fotogramma.
 
 | App | Cosa fa |
 |---|---|
-| ticly Do | il workspace di ticly: panoramica, attività, note e calendario (mese, settimana, giorno) sugli stessi file di Promemoria, Note e Calendario; profilo dell'account |
-| ticly AI | l'interfaccia di ai.ticly.it con le chat salvate in `sys:/home/.ticly/ai`; per ora nessun modello risponde (il collegamento al servizio ticly arriverà) |
-| ticly browser | il browser di ticly: schede, barra degli indirizzi (indirizzi o ricerche DuckDuckGo), avanti/indietro, ricarica, pagina iniziale ticly, trova nella pagina (Ctrl+F), moduli, `<select>`, cookie; i file non visualizzabili vanno in `Scaricati` |
+| Browser | schede, barra degli indirizzi (indirizzi o ricerche DuckDuckGo), avanti/indietro, ricarica, pagina iniziale con la ricerca e qualche sito a un clic, trova nella pagina (Ctrl+F), moduli, `<select>`, cookie; i file non visualizzabili vanno in `Scaricati` |
 | File | sfoglia i volumi: risorse a sinistra, cartelle e file a destra; doppio clic apre una cartella o il file con l'app giusta; **schede** (Ctrl+T o il **+**, Ctrl+W chiude, Ctrl+Tab passa alla successiva, *Apri in una nuova scheda* sulle cartelle); tasto destro per aprire, rinominare (anche F2), spostare nel Cestino (Canc), creare una cartella; nel Cestino eliminare o svuotare; **selezione multipla** (Ctrl+clic, Maiusc+clic, Ctrl+A) e **trascinamento** tra cartelle, schede e finestre |
 | Editor di testo | file di testo con selezione, copia e incolla, scorrimento; Nuovo, Apri, Salva (Ctrl+N, Ctrl+O, Ctrl+S) con la scelta del file; alla chiusura salva da solo |
 | ArcStudio | l'IDE di ArcScript, preinstallato: esplora i progetti di `sys:/home/arcscript`, editor con numeri di riga, colori della sintassi, rientro automatico ed errori sottolineati mentre si scrive; **anteprima dal vivo** della `view` (il programma gira nella finestra e risponde a pulsanti, interruttori, cursori e campi), console con l'output di `print()`, pannello Problemi (un clic porta alla riga); Esegui (F5), Compila in `.arc` (Ctrl+B) e Nel terminale passano da `arcc`. I file `.as` si aprono qui |
@@ -164,15 +162,9 @@ si ridisegna a ogni fotogramma.
 | Info sistema | panoramica, dispositivi con i loro driver, dischi con lo spazio libero |
 | Terminale | la shell di JustOS: l'unico posto dove si vedono le righe di comando |
 
-L'account ticly per ora vive solo su questo computer: «Crea un account»
-(nome, e-mail, password) lo salva in `sys:/system/ticly/accounts.json`, con
-la password come HMAC-SHA-256 ripetuto 4096 volte con un sale casuale; chi
-ha fatto l'accesso è in `sys:/system/ticly/session`. Nessuna di queste app
-usa la rete.
-
 ### Il motore web
 
-Le pagine del ticly browser le disegna `justweb` (`system/libs/justweb`),
+Le pagine del Browser le disegna `justweb` (`system/libs/justweb`),
 scritto da zero come il resto: tokenizer e albero HTML con le regole di
 chiusura implicita, CSS con selettori, media query, `@import`, `@supports`,
 annidamento, variabili, `calc()`/`min()`/`max()`/`clamp()`; layout a blocchi

@@ -33,7 +33,7 @@ pub const CLOSE: u32 = 0xFFFF_5A1F;
 pub const BORDER: u32 = 0x29FF_FFFF;
 /// The glow in the corner of a card.
 pub const GLOW: u32 = 0xFF8A_3416;
-/// The highlight colour (text cursor, progress, focus): ticly's ember.
+/// The highlight colour (text cursor, progress, focus): the JustOS ember.
 pub const ACCENT: u32 = 0xFFE0_662E;
 pub const ORANGE: u32 = 0xFFFF_9F0A;
 pub const RED: u32 = 0xFFFF_5A4E;
@@ -41,7 +41,7 @@ pub const GREEN: u32 = 0xFF34_C46A;
 /// A panel inside a window (lists, sidebars).
 pub const PANEL: u32 = 0x0DFF_FFFF;
 pub const PANEL_HOVER: u32 = 0x1AFF_FFFF;
-/// The selected row or item: a lighter pane of glass, as in ticly's sidebars.
+/// The selected row or item: a lighter pane of glass.
 pub const SELECTED: u32 = 0x2EFF_FFFF;
 pub const SEPARATOR: u32 = 0x17FF_FFFF;
 /// The dark well of a text field.
@@ -232,7 +232,7 @@ pub fn segments(r: Rect, n: usize) -> alloc::vec::Vec<Rect> {
 
 /// Tabs in a pill: `labels`, with `sel` highlighted.
 pub fn segmented(c: &mut Canvas, r: Rect, labels: &[&str], sel: usize) {
-    // ticly's "Mese / Settimana / Giorno": a dark pill, the choice in white.
+    // "Mese / Settimana / Giorno": a dark pill, the choice in white.
     c.fill_round(r, r.h / 2, 0x99_0E0A0A);
     c.stroke_round(r, r.h / 2, 1, BORDER);
     let (lh, _) = text::metrics(Font::Strong);

@@ -1,4 +1,4 @@
-//! justjs: a small JavaScript interpreter for the ticly browser.
+//! justjs: a small JavaScript interpreter for the JustOS Browser.
 //!
 //! It walks the syntax tree directly. It covers most of ES2020 that real
 //! pages use (classes, arrows, destructuring, spread, template strings,

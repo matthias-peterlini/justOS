@@ -20,9 +20,6 @@ pub mod search;
 pub mod store;
 mod terminal;
 mod textedit;
-mod ticly;
-mod ticly_ai;
-mod ticly_do;
 mod viewer;
 
 use super::wm::App;
@@ -52,10 +49,8 @@ pub fn open_with(kind: &str, path: &str) -> Option<Box<dyn App>> {
 }
 
 /// The built-in apps: id, name, icon, window kind.
-pub const BUILT_IN: [(&str, &str, &str); 20] = [
-    ("ticly-do", "ticly Do", "ticly-do"),
-    ("ticly-ai", "ticly AI", "ticly-ai"),
-    ("browser", "ticly browser", "ticly-browser"),
+pub const BUILT_IN: [(&str, &str, &str); 18] = [
+    ("browser", "Browser", "browser"),
     ("files", "File", "files"),
     ("textedit", "Editor di testo", "text-editor"),
     ("arcstudio", "ArcStudio", "code"),
@@ -93,8 +88,6 @@ pub fn open(id: &str) -> Option<Box<dyn App>> {
         "photos" => Box::new(photos::Photos::new()),
         "music" => Box::new(music::Music::new()),
         "monitor" => Box::new(monitor::Monitor::new()),
-        "ticly-do" => Box::new(ticly_do::TiclyDo::new()),
-        "ticly-ai" => Box::new(ticly_ai::TiclyAi::new()),
         "browser" => Box::new(browser::Browser::new(None)),
         "trash" => {
             if let Ok(p) = fs::abs("sys:/home/Cestino") {

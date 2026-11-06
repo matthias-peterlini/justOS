@@ -2497,17 +2497,11 @@ impl Desktop {
         let (head, panel) = self.control_parts();
         let hover = self.control_hit(self.mouse.0, self.mouse.1);
         let lit = |h: ControlHit| hover == Some(h);
-        // The account, on the darkened wallpaper, and the settings.
-        let account = crate::ticly::account();
-        let (name, mail, initials) = match &account {
-            Some(a) => (if a.name.is_empty() { a.email.clone() } else { a.name.clone() }, a.email.clone(), a.initials()),
-            None => {
-                let n = settings::get().name;
-                let n = if n.is_empty() { String::from("Utente") } else { n };
-                let i: String = n.chars().take(1).flat_map(|ch| ch.to_uppercase()).collect();
-                (n, String::from("Nessun account ticly"), i)
-            }
-        };
+        // Who uses this computer, on the darkened wallpaper, and the settings.
+        let name = settings::get().name;
+        let name = if name.is_empty() { String::from("Utente") } else { name };
+        let initials: String = name.chars().take(1).flat_map(|ch| ch.to_uppercase()).collect();
+        let mail = String::from("Account locale");
         let sb = self.settings_btn();
         if lit(ControlHit::Account) {
             c.fill_round(Rect::new(head.x, head.y + 4, sb.x - 8 - head.x, head.h - 8), (head.h - 8) / 2, 0x1FFF_FFFF);

@@ -1761,7 +1761,7 @@ g.cancelAnimationFrame = id => clearTimeout(id);
 g.requestIdleCallback = f => setTimeout(() => f({ didTimeout: false, timeRemaining: () => 10 }), 1);
 g.cancelIdleCallback = id => clearTimeout(id);
 g.performance = { now: () => __now(), timeOrigin: Date.now() - __now(), mark() {}, measure() {}, getEntriesByName: () => [], getEntriesByType: () => [] };
-g.navigator = { userAgent: 'Mozilla/5.0 (JustOS; x86_64) ticly/1.0', appName: 'Netscape', appVersion: '5.0 (JustOS)', vendor: 'JustOS', language: 'it-IT', languages: ['it-IT', 'it', 'en'], platform: 'JustOS', onLine: true, cookieEnabled: false, doNotTrack: '1', hardwareConcurrency: 1, maxTouchPoints: 0, webdriver: false, clipboard: { writeText: () => Promise.resolve(), readText: () => Promise.resolve('') }, sendBeacon: () => true, serviceWorker: undefined };
+g.navigator = { userAgent: 'Mozilla/5.0 (JustOS; x86_64) justweb/1.0', appName: 'Netscape', appVersion: '5.0 (JustOS)', vendor: 'JustOS', language: 'it-IT', languages: ['it-IT', 'it', 'en'], platform: 'JustOS', onLine: true, cookieEnabled: false, doNotTrack: '1', hardwareConcurrency: 1, maxTouchPoints: 0, webdriver: false, clipboard: { writeText: () => Promise.resolve(), readText: () => Promise.resolve('') }, sendBeacon: () => true, serviceWorker: undefined };
 g.screen = { width: 1024, height: 768, availWidth: 1024, availHeight: 768, colorDepth: 32, pixelDepth: 32, orientation: { type: 'landscape-primary', angle: 0 } };
 g.devicePixelRatio = 1; g.scrollX = 0; g.scrollY = 0; g.pageXOffset = 0; g.pageYOffset = 0; g.name = ''; g.closed = false; g.isSecureContext = true; g.origin = location.origin;
 Object.defineProperty(g, 'innerWidth', { get: () => __viewport()[0] });

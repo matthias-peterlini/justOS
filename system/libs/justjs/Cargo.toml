@@ -1,6 +1,6 @@
 [package]
 name = "justjs"
-description = "JavaScript for JustOS: a parser and an interpreter for the ticly browser (no_std)"
+description = "JavaScript for JustOS: a parser and an interpreter for the Browser (no_std)"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

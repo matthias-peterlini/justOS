@@ -129,7 +129,7 @@ chiamate `WIN_CREATE`/`WIN_PRESENT`/`WIN_EVENT`.
 
 | Cosa | Stato |
 |---|---|
-| Browser | 🟡 ticly browser con `justweb`: HTML, CSS, immagini, moduli, cookie, HTTPS (`justtls`), JavaScript (`justjs`, interprete senza JIT) |
+| Browser | 🟡 Browser con `justweb`: HTML, CSS, immagini, moduli, cookie, HTTPS (`justtls`), JavaScript (`justjs`, interprete senza JIT) |
 | WebGL, DRM (Widevine) | ⬜ / ⛔ |
 | Negozio grafico con installazione in un clic | ✅ (`sys:/store`, pacchetti `.app`) |
 | Aggiornamenti delle app in background | ✅ indice firmato Ed25519, servizio `just.updates`, sezione Aggiornamenti del Negozio |

@@ -1,4 +1,4 @@
-//! A small web engine for the ticly browser on JustOS.
+//! A small web engine for the JustOS Browser.
 //!
 //! It reads HTML into a tree ([`html`], [`dom`]), applies CSS ([`css`],
 //! [`style`]), lays the page out in boxes and lines ([`layout`]) and paints

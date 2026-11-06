@@ -31,7 +31,6 @@ mod store;
 mod sync;
 mod sysupdate;
 mod task;
-mod ticly;
 mod time;
 mod update;
 mod user;
