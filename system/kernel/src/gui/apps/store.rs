@@ -766,7 +766,7 @@ impl App for Store {
                 let label = format!("{n}");
                 let w = text::width(Font::Small, &label) + 12;
                 let badge = Rect::new(r.right() - w - 8, r.y + 8, w, 20);
-                c.fill_round(badge, 10, 0xFFE0_662E);
+                c.fill_round(badge, 10, ui::ACCENT);
                 let (sh, _) = text::metrics(Font::Small);
                 text::draw_centered(c, Font::Small, badge.x + w / 2, badge.y + (20 - sh) / 2, &label, 0xFFFF_FFFF);
             }

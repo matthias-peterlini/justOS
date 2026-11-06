@@ -25,9 +25,8 @@ settings
 terminal
 files
 arc
-ticly-do
-ticly-ai
-ticly-browser
+messages
+camera
 info
 code
 help
@@ -80,3 +79,9 @@ g-play-dark
 g-pause-dark
 g-prev
 g-next
+g-sun
+g-moon
+g-bluetooth
+g-plane
+g-lock
+g-bell

@@ -33,9 +33,10 @@ pub const CLOSE: u32 = 0xFFFF_5A1F;
 pub const BORDER: u32 = 0x29FF_FFFF;
 /// The glow in the corner of a card.
 pub const GLOW: u32 = 0xFF8A_3416;
-/// The highlight colour (text cursor, progress, focus): the JustOS ember.
-pub const ACCENT: u32 = 0xFFE0_662E;
-pub const ORANGE: u32 = 0xFFFF_9F0A;
+/// The highlight colour (text cursor, progress, focus): the JustOS orange.
+pub const ACCENT: u32 = 0xFFFF_5A1F;
+/// The orange of things that call for attention, the same JustOS orange.
+pub const ORANGE: u32 = 0xFFFF_5A1F;
 pub const RED: u32 = 0xFFFF_5A4E;
 pub const GREEN: u32 = 0xFF34_C46A;
 /// A panel inside a window (lists, sidebars).
@@ -109,26 +110,6 @@ pub fn luminance(blur: &Canvas, r: Rect) -> u32 {
 /// A glyph icon (white in the atlas) drawn in another colour.
 pub fn glyph(c: &mut Canvas, name: &str, size: i32, x: i32, y: i32, color: u32) {
     super::res::draw_icon_tinted(c, name, size, x, y, color);
-}
-
-/// Status glyphs drawn with lines: the moon of "do not disturb" and the
-/// sun of brightness, `s` pixels square.
-pub fn draw_moon(c: &mut Canvas, x: i32, y: i32, s: i32, color: u32, bg: u32) {
-    let (cx, cy, r) = (x + s / 2, y + s / 2, s * 2 / 5);
-    c.fill_circle(cx, cy, r, color);
-    c.fill_circle(cx, cy, r - 2, bg);
-    c.fill_circle(cx + r * 2 / 3, cy - r / 2, r * 4 / 5, bg);
-}
-
-pub fn draw_sun(c: &mut Canvas, x: i32, y: i32, s: i32, color: u32) {
-    let (cx, cy) = (x + s / 2, y + s / 2);
-    let r = s / 5;
-    c.fill_circle(cx, cy, r, color);
-    let (a, b) = (s * 3 / 10, s * 9 / 20);
-    // Eight rays: the diagonals at 0.707 ~ 7/10.
-    for (ux, uy) in [(10, 0), (-10, 0), (0, 10), (0, -10), (7, 7), (-7, 7), (7, -7), (-7, -7)] {
-        c.line(cx + a * ux / 10, cy + a * uy / 10, cx + b * ux / 10, cy + b * uy / 10, 2, color);
-    }
 }
 
 /// Three round buttons on a light pill: minimise and full screen in dark

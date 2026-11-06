@@ -2186,7 +2186,7 @@ impl Desktop {
             let n = format!("{}", carry.paths.len());
             let w = (text::width(Font::Small, &n) + 12).max(22);
             let b = Rect::new(ix + 52 - w / 2, iy - 6, w, 22);
-            c.fill_round(b, 11, 0xFFFF_453A);
+            c.fill_round(b, 11, ui::ACCENT);
             let (sh, _) = text::metrics(Font::Small);
             text::draw_centered(c, Font::Small, b.x + b.w / 2, b.y + (b.h - sh) / 2, &n, TEXT);
         }
@@ -2544,7 +2544,7 @@ impl Desktop {
             match tile {
                 Tile::Network => ui::glyph(c, "g-wifi", 20, cx - 10, cy - 10, fg),
                 Tile::Sound => ui::glyph(c, if vol > 0 { "g-volume" } else { "g-mute" }, 20, cx - 10, cy - 10, fg),
-                Tile::Quiet => ui::draw_moon(c, cx - 10, cy - 10, 20, fg, knob),
+                Tile::Quiet => ui::glyph(c, "g-moon", 20, cx - 10, cy - 10, fg),
             }
             let tx = cx + rad + 10;
             let tw = r.right() - tx - 10;
@@ -2562,7 +2562,7 @@ impl Desktop {
             if i == 0 {
                 ui::glyph(c, if vol == 0 { "g-mute" } else { "g-volume" }, 24, gx, gy, ui::INK);
             } else {
-                ui::draw_sun(c, gx, gy, 24, ui::INK);
+                ui::glyph(c, "g-sun", 24, gx, gy, ui::INK);
             }
         }
         // Power off on a wide white pill; lock and restart; the battery.
@@ -2576,7 +2576,7 @@ impl Desktop {
             let (cx, cy) = (r.x + r.w / 2, r.y + r.h / 2);
             c.fill_circle(cx, cy, r.w / 2, if lit(h) { 0x40FF_FFFF } else { 0x29FF_FFFF });
             if h == ControlHit::Lock {
-                draw_lock(c, cx, cy, 22, TEXT);
+                ui::glyph(c, "g-lock", 22, cx - 11, cy - 11, TEXT);
             } else {
                 ui::glyph(c, "g-reload", 22, cx - 11, cy - 11, TEXT);
             }
@@ -2789,14 +2789,6 @@ fn draw_gear(c: &mut Canvas, cx: i32, cy: i32, r: i32, color: u32) {
         let a = r * 6 / 10;
         c.line(cx + a * ux / 10, cy + a * uy / 10, cx + r * ux / 10, cy + r * uy / 10, (r / 4).max(2), color);
     }
-}
-
-/// A padlock `s` tall, centred on (`cx`, `cy`).
-fn draw_lock(c: &mut Canvas, cx: i32, cy: i32, s: i32, color: u32) {
-    let sw = s / 2;
-    c.stroke_round(Rect::new(cx - sw / 2, cy - s / 2, sw, s / 2 + 4), sw / 2, 2, color);
-    let bw = s * 3 / 4;
-    c.fill_round(Rect::new(cx - bw / 2, cy - s / 16, bw, s * 9 / 16), 3, color);
 }
 
 /// The battery as a ring around (`cx`, `cy`): `track` all round, the

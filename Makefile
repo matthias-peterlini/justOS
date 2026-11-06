@@ -183,8 +183,8 @@ assets:
 	tools/assets/gen_fonts.py --sharp system/kernel/assets/fonts@2x.bin.gz
 	tools/assets/gen_fonts.py --web rootfs/system/webfonts.bin
 	tools/assets/gen_certs.py rootfs
-	tools/assets/gen_icons.py rootfs/system/gui
-	tools/assets/gen_icons.py --store system/store
+	tools/assets/gen_pixicons.py rootfs/system/gui
+	tools/assets/gen_pixicons.py --store system/store
 	tools/assets/gen_wallpapers.py rootfs/system/gui/wallpapers
 	tools/assets/gen_pixel.py rootfs/system/gui/wallpapers
 	tools/assets/gen_thumbs.py rootfs/system/gui/wallpapers

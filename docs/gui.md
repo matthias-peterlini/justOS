@@ -283,9 +283,14 @@ servono.
   `sys:/system/fonts.bin` per i programmi. Con `--sharp` gli stessi
   caratteri al doppio della misura (`fonts@2x.bin.gz`, per gli schermi ad
   alta densità; i programmi lo trovano in `sys:/system/fonts@2x.bin`).
-- `gen_icons.py` → `rootfs/system/gui/icons.qoi`: oltre 70 icone, disegnate
-  da zero nello stile JustOS (squircle con sfumatura e simbolo); con `--store`
-  le icone delle app del Negozio.
+- `gen_pixicons.py` → `rootfs/system/gui/icons.qoi`: le icone a pixel di
+  JustOS, quasi novanta, su una griglia: app in un riquadro di 20×20 celle
+  con la sfumatura, glifi di sistema in 12×12, angoli esterni arrotondati
+  di mezza cella e raccordi di 0,38 negli angoli interni (`pixgrid.py`).
+  Le icone di partenza sono gli SVG di `tools/assets/src/icone-justos`
+  (letti cella per cella); le altre sono disegnate nello script come
+  testo, un carattere per cella. Con `--store` le icone dei giochi del
+  Negozio. Basta Pillow.
 - `gen_pixel.py` → `rootfs/system/gui/wallpapers/pixel.qoi`: lo sfondo
   predefinito, le Dolomiti al tramonto in grandi pixel con il retino
   ordinato (Bayer) nei colori caldi di JustOS; basta Pillow.

@@ -241,7 +241,7 @@ impl App for Calendar {
             let (lx, ly) = (r.right() - 12, r.y + 6);
             if is_today {
                 let lw = text::width(Font::Strong, &label);
-                c.fill_circle(lx - lw / 2, ly + 10, 13, ui::RED);
+                c.fill_circle(lx - lw / 2, ly + 10, 13, ui::ORANGE);
                 text::draw_right(c, Font::Strong, lx, ly, &label, 0xFFFF_FFFF);
             } else {
                 let color = if hol.is_some() || slot % 7 == 6 { 0xFFFF_6961 } else if slot % 7 == 5 { TEXT_DIM } else { TEXT };
@@ -267,7 +267,7 @@ impl App for Calendar {
         let side = Rect::new(area.right() - SIDE - 6, area.y + 6, SIDE, area.h - 12);
         c.fill_round(side, 18, 0x22_00_00_00);
         let (y, m, d) = self.selected;
-        text::draw(c, Font::Body, side.x + 16, side.y + 16, WEEKDAYS[weekday(y, m, d)], ui::RED);
+        text::draw(c, Font::Body, side.x + 16, side.y + 16, WEEKDAYS[weekday(y, m, d)], ui::ORANGE);
         text::draw(c, Font::Title, side.x + 16, side.y + 36, &format!("{d} {}", MONTHS[(m as usize + 11) % 12]), TEXT);
         let mut ey = side.y + 92;
         if let Some(h) = holiday(y, m, d) {
