@@ -67,7 +67,10 @@ fi
     [ $C = 1 ] && printf '%s\n' 'ct: threads counter=400000' 'ct: poll=1 revents=1 data=pipe-ok' 'ct: mmap=mapped file contents' 'ct: big reservation ok 3' 'ct: http body=hello from the host' 'ct: getaddrinfo localhost=0'
     [ $R = 1 ] && printf '%s\n' 'rt: threads total=4999999' 'rt: file rust file' 'rt: http hello from the host' 'rt: slept true'
     [ $G = 1 ] && printf '%s\n' 'gt: goroutines sum 3599982' 'gt: slept true' 'gt: http 200 hello from the host'
-    [ $D = 1 ] && printf '%s\n' 'dt: glibc 2.' 'dt: threads 400000' 'dt: dlopen cos(0)=1.0' 'dt: argv0 dt'
+    [ $D = 1 ] && printf '%s\n' 'dt: glibc 2.' 'dt: threads 400000' 'dt: dlopen cos(0)=1.0' 'dt: argv0 dt' \
+        'dt: fork pipe=hello exit=7 global=1' 'dt: child says vforked home=/home' 'dt: vfork exit=3' \
+        'dt: child says spawned home=/home' 'dt: spawn err=0 exit=3' 'dt: spawn missing=2' \
+        'dt: shebang ./dt-script' 'dt: script err=0 exit=4' 'dt: no children -1 errno=10'
 } > expect.txt
 
 STEP_WAIT=${STEP_WAIT:-2} "$HERE/test.sh" justos.img session.txt > out.txt 2>&1

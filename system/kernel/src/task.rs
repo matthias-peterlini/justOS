@@ -544,6 +544,17 @@ pub fn leave_address_space() {
     unsafe { cpu::write_cr3(mem::paging::kernel_pml4()) };
 }
 
+/// Moves the running thread to another address space (`execve`).
+pub fn enter_address_space(cr3: u64) {
+    let mut s = SCHED.lock();
+    let cur = s.current();
+    if let Some(t) = s.threads.get_mut(&cur) {
+        t.cr3 = cr3;
+    }
+    // SAFETY: a new address space shares the kernel half.
+    unsafe { cpu::write_cr3(cr3) };
+}
+
 /// The running thread.
 pub fn current_tid() -> Tid {
     SCHED.lock().current()

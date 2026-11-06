@@ -1,5 +1,6 @@
-//! Threads of Linux programs: `clone` for threads sharing the address
-//! space (as pthreads and the Go and Rust runtimes create them), futexes,
+//! Threads and processes of Linux programs: `clone` for threads sharing the
+//! address space (as pthreads and the Go and Rust runtimes create them) and
+//! for new processes (fork, vfork, posix_spawn), futexes,
 //! thread exit with its `clear_child_tid` wake-up, and signals as far as a
 //! program without asynchronous signal delivery needs them: handlers are
 //! recorded, fatal signals sent to oneself end the process, others are
@@ -36,9 +37,11 @@ pub fn sys_gettid() -> i64 {
 }
 
 pub fn sys_clone(frame: &TrapFrame, flags: u64, stack: u64, ptid: u64, ctid: u64, tls: u64) -> i64 {
-    if flags & CLONE_VM == 0 || flags & CLONE_VFORK != 0 || flags & CLONE_THREAD == 0 {
-        // A new process (fork, vfork, posix_spawn) cannot be made here.
-        return -err::ENOSYS;
+    if flags & CLONE_THREAD == 0 {
+        return clone_process(frame, flags, stack, ptid, ctid, tls);
+    }
+    if flags & CLONE_VM == 0 {
+        return -err::EINVAL; // a thread shares the memory
     }
     let mut child = *frame;
     child.rax = 0;
@@ -71,6 +74,63 @@ pub fn sys_clone(frame: &TrapFrame, flags: u64, stack: u64, ptid: u64, ctid: u64
     // The child may now run.
     task::wake_new(tid);
     lt as i64
+}
+
+/// The signal a child sends its parent when it ends.
+const SIGCHLD: u64 = 17;
+
+pub fn sys_fork(frame: &TrapFrame) -> i64 {
+    clone_process(frame, SIGCHLD, 0, 0, 0, 0)
+}
+
+pub fn sys_vfork(frame: &TrapFrame) -> i64 {
+    clone_process(frame, CLONE_VM | CLONE_VFORK | SIGCHLD, 0, 0, 0, 0)
+}
+
+/// A new process. Without CLONE_VM (fork) it gets a copy of the memory;
+/// with it (vfork, posix_spawn) it runs in the caller's memory, on its own
+/// stack, and with CLONE_VFORK the caller waits until it execs or ends.
+fn clone_process(frame: &TrapFrame, flags: u64, stack: u64, ptid: u64, ctid: u64, tls: u64) -> i64 {
+    let share = flags & CLONE_VM != 0;
+    let mut child = *frame;
+    child.rax = 0;
+    if stack != 0 {
+        child.rsp = stack;
+    }
+    let fs = if flags & CLONE_SETTLS != 0 { tls } else { crate::arch::syscall::user_bases().0 };
+    let (pid, tid) = match user::fork(child, fs, share) {
+        Ok(v) => v,
+        Err(e) => return -super::errno(e),
+    };
+    super::fork_state(pid);
+    // The child's main thread has the process's id as its thread id.
+    let id = pid.to_le_bytes();
+    if flags & CLONE_PARENT_SETTID != 0 {
+        super::mm::populate(ptid, 4);
+        if let Ok(b) = user_bytes(ptid, 4) {
+            b.copy_from_slice(&id);
+        }
+    }
+    if flags & CLONE_CHILD_SETTID != 0 {
+        if share {
+            super::mm::populate(ctid, 4);
+            if let Ok(b) = user_bytes(ctid, 4) {
+                b.copy_from_slice(&id);
+            }
+        } else {
+            user::write_in(pid, ctid, &id);
+        }
+    }
+    if flags & CLONE_CHILD_CLEARTID != 0 {
+        super::with_state_of(pid, |st| {
+            st.clear_tid.insert(tid, ctid);
+        });
+    }
+    task::wake_new(tid);
+    if flags & CLONE_VFORK != 0 {
+        user::wait_vfork(pid);
+    }
+    pid as i64
 }
 
 pub fn sys_set_tid_address(ptr: u64) -> i64 {
@@ -388,7 +448,8 @@ fn deliver_self(sig: u64) -> i64 {
         if sig == SIGABRT {
             crate::println!("\x1b[91m{}: aborted\x1b[0m", user::current_name());
         }
-        user::terminate(128 + sig as i64);
+        // A negative code: a parent's wait4 sees the signal that ended it.
+        user::terminate(-(128 + sig as i64));
     }
     0
 }

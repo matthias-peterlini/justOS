@@ -178,6 +178,41 @@ pub fn new_address_space() -> Option<u64> {
     Some(pml4)
 }
 
+/// A new address space with a private copy of every user page of `src`
+/// (what `fork` gives the child). None when memory runs out.
+pub fn copy_address_space(src: u64) -> Option<u64> {
+    fn copy_level(src: u64, dst: u64, level: u32) -> bool {
+        let count = if level == 3 { 256 } else { 512 };
+        for i in 0..count {
+            let e = table(src)[i];
+            if e & PRESENT == 0 || (level > 0 && e & HUGE != 0) {
+                continue; // user memory is never mapped with huge pages
+            }
+            let Some(phys) = frame::alloc() else { return false };
+            table(dst)[i] = phys | (e & !ADDR_MASK);
+            if level == 0 {
+                // SAFETY: both frames are RAM reachable through the direct map.
+                unsafe {
+                    core::ptr::copy_nonoverlapping(phys_to_virt(e & ADDR_MASK) as *const u8, phys_to_virt(phys) as *mut u8, PAGE_SIZE as usize);
+                }
+            } else if !copy_level(e & ADDR_MASK, phys, level - 1) {
+                return false;
+            }
+        }
+        true
+    }
+    let dst = new_address_space()?;
+    let ok = {
+        let _guard = MAP_LOCK.lock();
+        copy_level(src, dst, 3)
+    };
+    if !ok {
+        free_address_space(dst);
+        return None;
+    }
+    Some(dst)
+}
+
 /// Frees the user half of an address space: page tables and mapped frames.
 pub fn free_address_space(pml4: u64) {
     fn free_level(t: u64, level: u32) {

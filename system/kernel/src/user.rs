@@ -89,6 +89,14 @@ struct Process {
     picked: Vec<(Path, bool)>,
     /// The program file it was started from.
     exe: Path,
+    /// The Linux process that made it with fork or vfork, which may wait
+    /// for it (None: started by JustOS, waited for with [`wait`]).
+    parent: Option<u32>,
+    /// A vfork child running in its parent's memory until it execs or
+    /// ends (the memory is not its own to free).
+    shared_vm: bool,
+    /// Its parent ended first: no one will wait for it.
+    orphan: bool,
 }
 
 static PROCS: IrqLock<BTreeMap<u32, Process>> = IrqLock::new(BTreeMap::new());
@@ -211,12 +219,7 @@ fn start(image: Vec<u8>, name: String, args: &str, cwd: Path, kind: Kind, exe: &
         return Err(Error::BadProgram);
     }
     let cr3 = paging::new_address_space().ok_or(Error::NoMemory)?;
-    let pid = {
-        let mut n = NEXT_PID.lock();
-        let pid = *n;
-        *n += 1;
-        pid
-    };
+    let pid = next_pid();
     PROCS.lock().insert(
         pid,
         Process {
@@ -233,6 +236,9 @@ fn start(image: Vec<u8>, name: String, args: &str, cwd: Path, kind: Kind, exe: &
             app,
             picked: Vec::new(),
             exe: exe.clone(),
+            parent: None,
+            shared_vm: false,
+            orphan: false,
         },
     );
     let start = Box::into_raw(Box::new(Start { image, args: String::from(args), kind, exe: alloc::format!("{exe}") }));
@@ -252,6 +258,199 @@ fn start(image: Vec<u8>, name: String, args: &str, cwd: Path, kind: Kind, exe: &
             paging::free_address_space(cr3);
             Err(Error::NoMemory)
         }
+    }
+}
+
+fn next_pid() -> u32 {
+    let mut n = NEXT_PID.lock();
+    let pid = *n;
+    *n += 1;
+    pid
+}
+
+/// fork and vfork: a new process whose first thread resumes user mode with
+/// the registers of `child` (the caller's, with the return value and stack
+/// set). It gets a copy of the caller's memory, or, with `share_vm`, the
+/// caller's memory itself until it execs or ends (the caller then waits in
+/// [`wait_vfork`]). Returns the child's pid and thread, created suspended:
+/// wake it with [`task::wake_new`] once its Linux state is set up.
+pub(crate) fn fork(child: TrapFrame, fs: u64, share_vm: bool) -> Result<(u32, Tid), Error> {
+    let me = task::current_pid();
+    let (name, cr3, cwd, app, picked, exe, heap_next) = {
+        let procs = PROCS.lock();
+        let p = procs.get(&me).ok_or(Error::Unknown)?;
+        (p.name.clone(), p.cr3, p.cwd.clone(), p.app.clone(), p.picked.clone(), p.exe.clone(), p.heap_next)
+    };
+    let child_cr3 = if share_vm { cr3 } else { paging::copy_address_space(cr3).ok_or(Error::NoMemory)? };
+    let pid = next_pid();
+    PROCS.lock().insert(
+        pid,
+        Process {
+            name: name.clone(),
+            cr3: child_cr3,
+            tid: 0,
+            threads: Vec::new(),
+            exit_code: None,
+            handles: Vec::new(),
+            heap_next,
+            cwd,
+            state: State::Running,
+            kill: false,
+            app,
+            picked,
+            exe,
+            parent: Some(me),
+            shared_vm: share_vm,
+            orphan: false,
+        },
+    );
+    let arg = Box::into_raw(Box::new(ThreadStart { frame: child, fs }));
+    match task::spawn_suspended(&name, thread_start, arg as *mut c_void, child_cr3, pid) {
+        Some(tid) => {
+            if let Some(p) = PROCS.lock().get_mut(&pid) {
+                p.tid = tid;
+                p.threads.push(tid);
+            }
+            Ok((pid, tid))
+        }
+        None => {
+            // SAFETY: not handed to any thread; take it back.
+            drop(unsafe { Box::from_raw(arg) });
+            PROCS.lock().remove(&pid);
+            if !share_vm {
+                paging::free_address_space(child_cr3);
+            }
+            Err(Error::NoMemory)
+        }
+    }
+}
+
+/// The parent of a vfork child: waits until the child execs or ends.
+pub(crate) fn wait_vfork(child: u32) {
+    EXITED.wait_for(|| match PROCS.lock().get(&child) {
+        Some(p) if p.shared_vm && p.state == State::Running => None,
+        _ => Some(()),
+    });
+}
+
+/// Writes `data` at `addr` in another process's memory (fork's
+/// CLONE_CHILD_SETTID). Pages it never touched are left alone.
+pub(crate) fn write_in(pid: u32, addr: u64, data: &[u8]) {
+    let Some(cr3) = PROCS.lock().get(&pid).map(|p| p.cr3) else { return };
+    for (i, b) in data.iter().enumerate() {
+        let at = addr + i as u64;
+        if at >= USER_TOP {
+            return;
+        }
+        if let Some(phys) = paging::translate_in(cr3, at) {
+            // SAFETY: a user page of that process, reached through the
+            // direct map.
+            unsafe { *(mem::phys_to_virt(phys) as *mut u8) = *b };
+        }
+    }
+}
+
+/// Is the calling thread its process's only one (as execve needs)?
+pub(crate) fn only_thread() -> bool {
+    let pid = task::current_pid();
+    PROCS.lock().get(&pid).is_some_and(|p| p.threads.len() <= 1)
+}
+
+/// execve: the calling process gets a fresh, empty address space and the
+/// new program's name. The old memory is freed (or, for a vfork child,
+/// left to the parent, which stops waiting). The caller loads the program.
+pub(crate) fn exec_address_space(name: &str, exe: &Path) -> Result<(), Error> {
+    let pid = task::current_pid();
+    let new = paging::new_address_space().ok_or(Error::NoMemory)?;
+    let (old, shared) = {
+        let mut procs = PROCS.lock();
+        let Some(p) = procs.get_mut(&pid) else {
+            paging::free_address_space(new);
+            return Err(Error::Unknown);
+        };
+        p.name = String::from(name);
+        p.exe = exe.clone();
+        (core::mem::replace(&mut p.cr3, new), core::mem::replace(&mut p.shared_vm, false))
+    };
+    task::enter_address_space(new);
+    if shared {
+        EXITED.notify_all();
+    } else {
+        paging::free_address_space(old);
+    }
+    Ok(())
+}
+
+/// Starts the program just loaded by exec: user mode at `entry` with the
+/// stack at `rsp` and every other register cleared.
+pub(crate) fn start_loaded(entry: u64, rsp: u64) -> ! {
+    let (_, gs) = crate::arch::syscall::user_bases();
+    crate::arch::syscall::set_user_bases(0, gs);
+    // SAFETY: the program was just loaded into this address space.
+    unsafe { enter_user(entry, rsp, 0, 0) }
+}
+
+/// The Linux parent of the calling process (1, as for an orphan, if none).
+pub(crate) fn parent_pid() -> u32 {
+    let pid = task::current_pid();
+    PROCS.lock().get(&pid).and_then(|p| p.parent).unwrap_or(1)
+}
+
+/// wait4: a child of the calling process that has ended (`want`: that one,
+/// or any), removed from the table with its exit code. Ok(None) with
+/// `nohang` when children are still running; Err(NotFound) if there are
+/// none; Err(Cancelled) if the caller is being stopped.
+pub(crate) fn wait_child(want: Option<u32>, nohang: bool) -> Result<Option<(u32, i64)>, Error> {
+    let me = task::current_pid();
+    EXITED.wait_for(|| {
+        let mut procs = PROCS.lock();
+        if procs.get(&me).is_some_and(|p| p.kill) {
+            return Some(Err(Error::Cancelled));
+        }
+        let mut any = false;
+        let mut ended = None;
+        for (&id, p) in procs.iter() {
+            if p.parent != Some(me) || want.is_some_and(|w| w != id) {
+                continue;
+            }
+            any = true;
+            if let State::Exited(code) = p.state {
+                ended = Some((id, code));
+                break;
+            }
+        }
+        match ended {
+            Some((id, code)) => {
+                procs.remove(&id);
+                Some(Ok(Some((id, code))))
+            }
+            None if !any => Some(Err(Error::NotFound)),
+            None if nohang => Some(Ok(None)),
+            None => None,
+        }
+    })
+}
+
+/// A process ended: its ended children go (no one will wait for them now),
+/// its running ones become orphans, and it goes too if its own parent is
+/// no longer there to wait for it.
+fn settle(pid: u32) {
+    let mut procs = PROCS.lock();
+    let children: Vec<u32> = procs.iter().filter(|(_, p)| p.parent == Some(pid)).map(|(&id, _)| id).collect();
+    for id in children {
+        if procs.get(&id).is_some_and(|p| matches!(p.state, State::Exited(_))) {
+            procs.remove(&id);
+        } else if let Some(p) = procs.get_mut(&id) {
+            p.parent = None;
+            p.orphan = true;
+        }
+    }
+    let gone = procs.get(&pid).is_some_and(|p| {
+        // Nobody waits for an orphan: it goes as soon as it ends.
+        p.orphan || p.parent.is_some_and(|parent| !procs.get(&parent).is_some_and(|q| q.state == State::Running))
+    });
+    if gone {
+        procs.remove(&pid);
     }
 }
 
@@ -369,7 +568,9 @@ pub(crate) fn terminate(code: i64) -> ! {
                 if p.threads.is_empty() {
                     p.state = State::Exited(code);
                     handles = core::mem::take(&mut p.handles);
-                    Some(core::mem::replace(&mut p.cr3, 0))
+                    let cr3 = core::mem::replace(&mut p.cr3, 0);
+                    // A vfork child's memory is its parent's.
+                    Some(if core::mem::replace(&mut p.shared_vm, false) { 0 } else { cr3 })
                 } else {
                     p.kill = true;
                     None
@@ -418,6 +619,7 @@ fn teardown(pid: u32, cr3: u64) -> ! {
         paging::free_address_space(cr3);
     }
     crate::gui::window::process_ended(pid);
+    settle(pid);
     EXITED.notify_all();
     task::exit();
 }
@@ -546,14 +748,25 @@ pub fn interrupt_foreground() -> bool {
     kill(pid)
 }
 
+/// Asks a process to stop, with the processes it made (fork) and theirs.
 pub fn kill(pid: u32) -> bool {
-    match PROCS.lock().get_mut(&pid) {
-        Some(p) if p.state == State::Running => {
-            p.kill = true;
-            true
+    let found = {
+        let mut procs = PROCS.lock();
+        let found = procs.get(&pid).is_some_and(|p| p.state == State::Running);
+        let mut todo = alloc::vec![pid];
+        while let Some(id) = todo.pop() {
+            if let Some(p) = procs.get_mut(&id) {
+                if p.state == State::Running {
+                    p.kill = true;
+                }
+            }
+            todo.extend(procs.iter().filter(|(_, c)| c.parent == Some(id)).map(|(&c, _)| c));
         }
-        _ => false,
-    }
+        found
+    };
+    // Wake those waiting for children or for a vfork child, so they see it.
+    EXITED.notify_all();
+    found
 }
 
 pub(crate) fn kill_requested() -> bool {

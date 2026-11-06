@@ -13,7 +13,9 @@
 //! ([`poll`]), clocks and randomness. Dynamically linked programs start in
 //! the dynamic loader they name (glibc's ld-linux-x86-64.so.2, found on the
 //! volume like any file), which maps their shared libraries with `mmap`.
-//! What is not: new processes (fork, exec), asynchronous signal delivery.
+//! New processes come from fork, vfork and posix_spawn, and execve
+//! replaces a program (scripts with `#!` too); parents wait for children
+//! with wait4. What is not: asynchronous signal delivery.
 
 pub mod fd;
 pub mod mm;
@@ -46,6 +48,8 @@ pub mod err {
     pub const ENOENT: i64 = 2;
     pub const ESRCH: i64 = 3;
     pub const EINTR: i64 = 4;
+    pub const E2BIG: i64 = 7;
+    pub const ENOEXEC: i64 = 8;
     pub const EBADF: i64 = 9;
     pub const ECHILD: i64 = 10;
     pub const EAGAIN: i64 = 11;
@@ -171,6 +175,34 @@ pub fn try_state<T>(f: impl FnOnce(&mut LinuxState) -> T) -> Option<T> {
     states.get_mut(&pid).map(f)
 }
 
+/// Runs `f` on another process's Linux state, if it has one.
+pub fn with_state_of<T>(pid: u32, f: impl FnOnce(&mut LinuxState) -> T) -> Option<T> {
+    STATES.lock().get_mut(&pid).map(f)
+}
+
+/// The Linux state of a child made by fork or vfork: a copy of the
+/// caller's, with the same open descriptions (as Linux shares them), memory
+/// areas and signal setup.
+pub fn fork_state(child: u32) {
+    let pid = task::current_pid();
+    let mut states = STATES.lock();
+    let copy = states.get(&pid).map(|st| LinuxState {
+        fds: st.fds.clone(),
+        brk_start: st.brk_start,
+        brk_cur: st.brk_cur,
+        mmap_next: st.mmap_next,
+        vmas: st.vmas.clone(),
+        clear_tid: BTreeMap::new(),
+        sigactions: st.sigactions,
+        sigmask: st.sigmask,
+        altstack: st.altstack,
+        exe: st.exe.clone(),
+    });
+    if let Some(c) = copy {
+        states.insert(child, c);
+    }
+}
+
 /// The program's path as Linux shows it.
 pub fn exe_path() -> String {
     with_state(|st| st.exe.clone())
@@ -205,11 +237,6 @@ pub fn user_bytes<'a>(ptr: u64, len: u64) -> Result<&'a mut [u8], i64> {
 /// V ABI lays them out. A dynamically linked program starts in its dynamic
 /// loader, which finds the program through the auxiliary vector.
 pub fn load(elf: &[u8], name: &str, args: &str, exe: &str) -> Result<(u64, u64), JustError> {
-    let info = map_segments(elf, PIE_BASE).map_err(|_| JustError::BadProgram)?;
-    let interp = match interpreter(elf) {
-        Some(path) => Some(load_interpreter(name, &path)?),
-        None => None,
-    };
     let argv = core::iter::once(name.to_string()).chain(justrt_split(args)).collect::<Vec<_>>();
     // The Linux view of the program's path ("/apps/rg").
     let exe_linux = match exe.split_once(':') {
@@ -217,14 +244,36 @@ pub fn load(elf: &[u8], name: &str, args: &str, exe: &str) -> Result<(u64, u64),
         None => exe.to_string(),
     };
     tty::reset();
+    load_program(elf, name, &argv, &default_env(), &exe_linux)
+}
+
+/// Maps a program (and the dynamic loader it names) into the current,
+/// empty address space and builds its stack with `argv` and `envp`.
+fn load_program(elf: &[u8], name: &str, argv: &[String], envp: &[String], exe_linux: &str) -> Result<(u64, u64), JustError> {
+    let info = map_segments(elf, PIE_BASE).map_err(|_| JustError::BadProgram)?;
+    let interp = match interpreter(elf) {
+        Some(path) => Some(load_interpreter(name, &path)?),
+        None => None,
+    };
     with_state(|st| {
-        st.exe = exe_linux.clone();
+        st.exe = exe_linux.to_string();
         st.brk_start = info.brk;
         st.brk_cur = info.brk;
     });
     let interp_base = interp.as_ref().map_or(0, |i| i.base);
-    let stack = build_stack(&info, interp_base, &argv, &exe_linux)?;
+    let stack = build_stack(&info, interp_base, argv, envp, exe_linux)?;
     Ok((interp.map_or(info.entry, |i| i.entry), stack))
+}
+
+/// The environment of a Linux program JustOS starts (one started by
+/// another Linux program gets what that one passes to execve).
+fn default_env() -> Vec<String> {
+    let (cols, rows) = crate::console::size();
+    ["PATH=/apps:/usr/local/bin:/usr/bin:/bin", "HOME=/home", "USER=root", "LANG=C.UTF-8", "TERM=xterm", "SHELL=/bin/sh", "TMPDIR=/home/tmp"]
+        .iter()
+        .map(|s| s.to_string())
+        .chain([alloc::format!("COLUMNS={cols}"), alloc::format!("LINES={rows}")])
+        .collect()
 }
 
 /// The dynamic loader an ELF asks for (its PT_INTERP), if any.
@@ -429,7 +478,7 @@ const AT_EXECFN: u64 = 31;
 /// Builds the initial stack: argc, argv, envp, the auxiliary vector and the
 /// strings they point at. Returns the stack pointer to start the program on.
 /// `interp_base` is where the dynamic loader went (0: none).
-fn build_stack(info: &Loaded, interp_base: u64, argv: &[String], exe: &str) -> Result<u64, JustError> {
+fn build_stack(info: &Loaded, interp_base: u64, argv: &[String], envp: &[String], exe: &str) -> Result<u64, JustError> {
     const PAGES: u64 = 64;
     let top = justdk::syscall::USER_STACK_TOP;
     let bottom = top - PAGES * PAGE_SIZE;
@@ -438,12 +487,6 @@ fn build_stack(info: &Loaded, interp_base: u64, argv: &[String], exe: &str) -> R
     with_state(|st| {
         st.vmas.insert(top - mm::STACK_RESERVE, mm::Vma { end: bottom, prot: mm::PROT_READ | mm::PROT_WRITE, file: None });
     });
-
-    let (cols, rows) = crate::console::size();
-    let columns = alloc::format!("COLUMNS={cols}");
-    let lines = alloc::format!("LINES={rows}");
-    let envp: [&str; 9] =
-        ["PATH=/apps:/bin:/usr/bin", "HOME=/home", "USER=root", "LANG=C.UTF-8", "TERM=xterm", "SHELL=/bin/sh", "TMPDIR=/home/tmp", &columns, &lines];
 
     // String area at the top; collect the addresses as we go.
     let mut p = top;
@@ -517,11 +560,12 @@ pub fn syscall(frame: &mut TrapFrame) {
     crate::arch::cpu::enable_irq();
     let n = frame.rax;
     let a = [frame.rdi, frame.rsi, frame.rdx, frame.r10, frame.r8, frame.r9];
-    let ret = if n == 56 {
-        // clone needs the caller's registers for the new thread.
-        thread::sys_clone(frame, a[0], a[1], a[2], a[3], a[4])
-    } else {
-        dispatch(n, a)
+    // clone, fork and vfork need the caller's registers for the child.
+    let ret = match n {
+        56 => thread::sys_clone(frame, a[0], a[1], a[2], a[3], a[4]),
+        57 => thread::sys_fork(frame),
+        58 => thread::sys_vfork(frame),
+        _ => dispatch(n, a),
     };
     // clone3 is left to fail on purpose: callers fall back to clone.
     if ret == -err::ENOSYS && n != 435 {
@@ -587,9 +631,9 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         53 => sock::sys_socketpair(a[3]),
         54 => 0, // setsockopt
         55 => sock::sys_getsockopt(fd0, a[1], a[2], a[3], a[4]),
-        57 | 58 | 59 => -err::ENOSYS, // fork, vfork, execve
+        59 => sys_execve(a[0], a[1], a[2]),
         60 => thread::sys_exit(a[0] as i64),
-        61 => -err::ECHILD, // wait4: no children
+        61 => sys_wait4(a[0] as i64, a[1], a[2]),
         62 => thread::sys_kill(a[0] as i64, a[1]),
         63 => sys_uname(a[0]),
         72 => fd::sys_fcntl(fd0, a[1], a[2]),
@@ -618,7 +662,7 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         100 => zero_out(a[0], 32), // times
         102 | 104 | 107 | 108 => 0, // getuid, getgid, geteuid, getegid: root
         105 | 106 | 109 | 112 | 113 | 114 | 116 | 117 | 119 => 0, // set*id, setpgid, setsid...
-        110 => 1,                                                 // getppid
+        110 => user::parent_pid() as i64,
         111 | 121 | 124 => task::current_pid() as i64,             // getpgrp, getpgid, getsid
         115 => 0,                                                 // getgroups: none
         118 | 120 => sys_getresid(a[0], a[1], a[2]),
@@ -639,6 +683,7 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         229 => sys_clock_getres(a[1]),
         230 => sys_clock_nanosleep(a[0], a[1], a[2]),
         231 => user::terminate(a[0] as i64),
+        247 => sys_waitid(a[0], a[1], a[2], a[3]),
         232 => poll::sys_epoll_wait(fd0, a[1], a[2] as i32, a[3] as i32 as i64),
         233 => poll::sys_epoll_ctl(fd0, a[1] as u32, a[2] as i32, a[3]),
         234 => thread::sys_tgkill(a[0] as i64, a[1] as i64, a[2]),
@@ -665,6 +710,7 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         302 => sys_prlimit(a[2], a[3]),
         309 => sys_getcpu(a[0], a[1]),
         318 => sys_getrandom(a[0], a[1]),
+        322 if a[0] as i32 == fd::AT_FDCWD || a[4] == 0 => sys_execve(a[1], a[2], a[3]), // execveat
         324 => 0, // membarrier
         332 => fd::sys_statx(fd0, a[1], a[2], a[4]),
         435 => -err::ENOSYS, // clone3: callers fall back to clone
@@ -689,6 +735,175 @@ fn zero_out(ptr: u64, len: u64) -> i64 {
         }
         Err(e) => e,
     }
+}
+
+// ----------------------------------------------------------------------------
+// New programs and their end
+
+/// A NULL-ended array of C strings in user memory (argv, envp).
+fn user_strings(ptr: u64) -> Result<Vec<String>, i64> {
+    let mut out = Vec::new();
+    if ptr == 0 {
+        return Ok(out);
+    }
+    for i in 0..65_536u64 {
+        let b = user_bytes(ptr + i * 8, 8)?;
+        let p = u64::from_le_bytes(b[..8].try_into().unwrap());
+        if p == 0 {
+            return Ok(out);
+        }
+        out.push(user::user_cstr(p, 128 * 1024).map_err(|e| -errno(e))?);
+    }
+    Err(-err::E2BIG)
+}
+
+/// execve: the process becomes another program. A script starting with
+/// `#!interpreter [arg]` runs the interpreter with the script's path. Past
+/// the checks there is no way back: if loading fails, the process ends.
+fn sys_execve(path_ptr: u64, argv_ptr: u64, envp_ptr: u64) -> i64 {
+    let text = match user::user_cstr(path_ptr, 4096) {
+        Ok(t) => t,
+        Err(e) => return -errno(e),
+    };
+    let (mut argv, envp) = match (user_strings(argv_ptr), user_strings(envp_ptr)) {
+        (Ok(a), Ok(e)) => (a, e),
+        (Err(e), _) | (_, Err(e)) => return e,
+    };
+    let read = |linux: &str| -> Result<(Path, Vec<u8>), i64> {
+        let path = linux_path(linux)?;
+        if crate::fs::is_dir(&path) {
+            return Err(-err::EACCES);
+        }
+        let data = crate::fs::read_file(&path).map_err(|e| -errno(user::fs_error(e)))?;
+        Ok((path, data))
+    };
+    let (mut path, mut image) = match read(&text) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    if image.starts_with(b"#!") {
+        let end = image.iter().position(|&b| b == b'\n').unwrap_or(image.len()).min(256);
+        let line = String::from_utf8_lossy(&image[2..end]).trim().to_string();
+        let (interp, arg) = match line.split_once([' ', '\t']) {
+            Some((i, a)) => (i.to_string(), a.trim().to_string()),
+            None => (line.clone(), String::new()),
+        };
+        if interp.is_empty() {
+            return -err::ENOEXEC;
+        }
+        let mut with = alloc::vec![interp.clone()];
+        if !arg.is_empty() {
+            with.push(arg);
+        }
+        with.push(text.clone());
+        with.extend(argv.into_iter().skip(1));
+        argv = with;
+        (path, image) = match read(&interp) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+    }
+    if image.len() < 64 || &image[..4] != b"\x7fELF" {
+        return -err::ENOEXEC;
+    }
+    if let Some(ld) = interpreter(&image) {
+        if !linux_path(&ld).is_ok_and(|p| crate::fs::exists(&p)) {
+            return -err::ENOENT;
+        }
+    }
+    if !user::only_thread() {
+        return -err::EAGAIN; // exec from a program with several threads: not yet
+    }
+    let name = text.rsplit('/').next().unwrap_or(&text).to_string();
+    if argv.is_empty() {
+        argv.push(name.clone());
+    }
+    if user::exec_address_space(&name, &path).is_err() {
+        return -err::ENOMEM;
+    }
+    reset_for_exec();
+    let loaded = load_program(&image, &name, &argv, &envp, &show_path(&path));
+    // Nothing on this stack is dropped once the new program starts.
+    drop((image, argv, envp, path, text, name));
+    match loaded {
+        Ok((entry, sp)) => user::start_loaded(entry, sp),
+        Err(_) => user::terminate(-(128 + 9)),
+    }
+}
+
+/// What execve keeps of the Linux state: descriptors without close-on-exec,
+/// the signal mask and ignored signals. The rest starts afresh.
+fn reset_for_exec() {
+    let closed: Vec<(Arc<fd::Desc>, bool)> = with_state(|st| {
+        let gone: Vec<i32> = st.fds.iter().filter(|(_, (_, cloexec))| *cloexec).map(|(&fd, _)| fd).collect();
+        let closed = gone.iter().filter_map(|fd| st.fds.remove(fd)).collect();
+        st.vmas = mm::new_map();
+        st.mmap_next = mm::MMAP_BASE;
+        st.clear_tid.clear();
+        for act in st.sigactions.iter_mut() {
+            // A handler's code is gone; SIG_DFL (0) and SIG_IGN (1) stay.
+            if u64::from_le_bytes(act[..8].try_into().unwrap()) > 1 {
+                *act = [0; 32];
+            }
+        }
+        st.altstack = [0; 24];
+        closed
+    });
+    // Closed outside the state lock: closing a socket talks to the network.
+    drop(closed);
+}
+
+/// The wait status of a child's exit code: a normal exit (code << 8), or
+/// the signal that ended it (codes -(128 + signal)).
+fn wait_status(code: i64) -> u32 {
+    if code < -128 {
+        ((-code - 128) & 0x7f) as u32
+    } else {
+        ((code as u32) & 0xff) << 8
+    }
+}
+
+fn sys_wait4(pid: i64, status: u64, options: u64) -> i64 {
+    const WNOHANG: u64 = 1;
+    let want = (pid > 0).then_some(pid as u32);
+    match user::wait_child(want, options & WNOHANG != 0) {
+        Ok(Some((child, code))) => {
+            if status != 0 {
+                if let Ok(b) = user_bytes(status, 4) {
+                    b.copy_from_slice(&wait_status(code).to_le_bytes());
+                }
+            }
+            child as i64
+        }
+        Ok(None) => 0,
+        Err(JustError::Cancelled) => -err::EINTR,
+        Err(_) => -err::ECHILD,
+    }
+}
+
+/// waitid with P_ALL or P_PID and WEXITED, filling a siginfo_t.
+fn sys_waitid(idtype: u64, id: u64, info: u64, options: u64) -> i64 {
+    const WNOHANG: u64 = 1;
+    const P_PID: u64 = 1;
+    let want = (idtype == P_PID).then_some(id as u32);
+    let got = match user::wait_child(want, options & WNOHANG != 0) {
+        Ok(g) => g,
+        Err(JustError::Cancelled) => return -err::EINTR,
+        Err(_) => return -err::ECHILD,
+    };
+    if info != 0 {
+        let Ok(b) = user_bytes(info, 128) else { return -err::EFAULT };
+        b.fill(0);
+        if let Some((child, code)) = got {
+            let killed = code < -128;
+            b[0..4].copy_from_slice(&17u32.to_le_bytes()); // si_signo: SIGCHLD
+            b[8..12].copy_from_slice(&(if killed { 2u32 } else { 1u32 }).to_le_bytes()); // CLD_KILLED / CLD_EXITED
+            b[16..20].copy_from_slice(&child.to_le_bytes());
+            let status = if killed { (-code - 128) as u32 } else { (code as u32) & 0xff };
+            b[24..28].copy_from_slice(&status.to_le_bytes());
+        }
+    }
+    0
 }
 
 // ----------------------------------------------------------------------------
