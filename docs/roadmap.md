@@ -94,7 +94,7 @@ framebuffer UEFI, tutti senza accelerazione 3D.
 | 120 Hz, VRR | ⬜ |
 | HiDPI (scala 2×) | ✅ automatica da 2560×1440, o scelta nelle Impostazioni |
 | Più monitor | ⬜ |
-| Dock, Applicazioni (Launchpad), barra in alto, centro di controllo | ✅ |
+| Dock con menu di sistema e stato, Applicazioni (Launchpad), centro di controllo | ✅ |
 | Centro notifiche con cronologia e *Non disturbare* | ✅ |
 | Ricerca globale (app, file, impostazioni, calcoli) con Ctrl+Spazio | ✅ |
 | Snap delle finestre (metà, quarti, tutto schermo) da mouse e tastiera | ✅ |
@@ -116,7 +116,7 @@ chiamate `WIN_CREATE`/`WIN_PRESENT`/`WIN_EVENT`.
    (125%, 150%) e una scala per ogni schermo.
 3. **Più monitor** (1–2 mesi): `dev::display` con più uscite (virtio-gpu ne
    ha fino a 16, il driver Intel le avrebbe); il desktop diventa una lista
-   di schermi con una barra ciascuno.
+   di schermi con l'ora e il dock su ognuno.
 4. **Accelerazione** (molti mesi): prima `virtio-gpu` con *virgl* (OpenGL
    tramite l'host, buona per le macchine virtuali), poi un driver nativo.
    Su hardware vero l'unica strada realistica è portare i driver DRM di
@@ -195,7 +195,7 @@ da caricare; poi servono WPA2/WPA3 (il supplicant: handshake a 4 vie, SAE).
 Piano: un solo chip, **Intel AX200/AX210** (il più diffuso nei portatili),
 con il firmware ufficiale ridistribuibile; il supplicant in Rust sopra
 `justtls`; un servizio `just.net` con porte IPC `scan`, `connect`, `status`
-e il menu nella barra (che c'è già per lo stato della rete). Stima: 4–6
+e le reti nel riquadro Rete del centro di controllo (che c'è già). Stima: 4–6
 mesi per un chip.
 
 **Bluetooth.** Più semplice del Wi-Fi a livello di driver (USB HCI è

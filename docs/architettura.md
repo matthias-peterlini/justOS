@@ -204,8 +204,8 @@ un solo posto.
 (`_PSR`), coperchio (`_LID`) e zone termiche (`_TMP`, `_CRT`) all'avvio, a
 ogni `Notify` e ogni 30 secondi (10 per le temperature). Avvisa al 10% e al
 5%, spegne il computer in modo pulito quando la batteria è vuota o una
-zona resta sopra la temperatura critica. Lo stato si vede nella barra in
-alto, nel centro di controllo, in Info sistema e con `acpi` nel Terminale
+zona resta sopra la temperatura critica. Lo stato si vede nel dock, nel
+centro di controllo, in Info sistema e con `acpi` nel Terminale
 (`acpi tree` mostra i dispositivi, `acpi eval` esegue un metodo).
 
 `make test-acpi` prova il pulsante di accensione su PIIX4 e Q35 e un
