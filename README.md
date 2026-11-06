@@ -1,108 +1,144 @@
 <div align="center">
 
-# JustOS
+<img src="docs/brand/banner.png" alt="JustOS" width="100%">
 
-**Un sistema operativo per PC x86-64 scritto da zero.**
+### Un sistema operativo per PC x86-64, scritto da zero in Rust.
 
-Boot loader, kernel, file system, driver, interfaccia grafica e linguaggio
-di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
+Boot loader, kernel, file system, driver, interfaccia grafica e linguaggio di
+programmazione: tutto progettato apposta, senza librerie esterne.
 
-[**Scarica l'ultima versione**](https://github.com/matthias-peterlini/justOS/releases/latest) ·
-[Documentazione](docs/) ·
-[Architettura](docs/architettura.md) ·
-[Compatibilità](docs/compat.md) ·
-[Roadmap](docs/roadmap.md)
-
+[![Versione](https://img.shields.io/github/v/release/matthias-peterlini/justOS?label=versione&color=ff5a1f)](https://github.com/matthias-peterlini/justOS/releases/latest)
 [![Build](https://github.com/matthias-peterlini/justOS/actions/workflows/build.yml/badge.svg)](https://github.com/matthias-peterlini/justOS/actions/workflows/build.yml)
+[![Licenza](https://img.shields.io/badge/licenza-GPL--3.0--or--later-171615)](LICENSE)
+[![Rust](https://img.shields.io/badge/scritto%20in-Rust-171615?logo=rust)](https://www.rust-lang.org)
 
-![La scrivania di JustOS](docs/screenshots/scrivania.jpg)
+**[Scarica il CD live](https://github.com/matthias-peterlini/justOS/releases/latest/download/justos.iso)** ·
+**[Immagine per chiavetta USB](https://github.com/matthias-peterlini/justOS/releases/latest/download/justos-img.zip)** ·
+[Novità](https://github.com/matthias-peterlini/justOS/releases/latest) ·
+[Documentazione](docs/) ·
+[Roadmap](docs/roadmap.md) ·
+[justos.dev](https://justos.dev)
+
+<br>
+
+<img src="docs/screenshots/scrivania.jpg" alt="La scrivania di JustOS">
+
+<sub>La scrivania: l'ora che fluttua sullo sfondo, il dock con il menu J▮ a sinistra e lo stato a destra.</sub>
 
 </div>
 
-## In breve
+<br>
 
-- **Si avvia ovunque**: la stessa immagine parte da BIOS e da UEFI, da
-  chiavetta USB, da disco o come CD live.
-- **Un avvio pulito**: niente righe di testo, solo il logo e una barra di
-  caricamento. Al primo avvio una configurazione guidata (nome, tastiera,
-  sfondo), poi direttamente la scrivania.
-- **Lo stile JustOS**: nessuna barra in alto, solo l'ora e la data che
-  fluttuano sullo sfondo. Il dock in vetro chiaro ha a sinistra il marchio
-  J▮ (il menu di sistema) e a destra lo stato (rete, suono, l'anello della
-  batteria) che apre il centro di controllo: account, rete, suono, non
-  disturbare, cursori verticali di volume e luminosità, spegni, blocca e
-  riavvia. Le finestre sono di vetro rosato, con il nome in alto a sinistra
-  e tre pulsanti tondi su una pillola chiara; a schermo intero (F11)
-  l'ora passa nella loro riga del titolo. Il carattere è Google Sans Flex;
-  icone, suoni e musica sono creati per JustOS; lo sfondo è un paesaggio a
-  pixel, e tra gli altri ci sono foto delle Dolomiti da Unsplash (autori
-  in `rootfs/system/gui/wallpapers/CREDITS.txt`).
-- **Al sicuro e aggiornato**: una password blocca lo schermo (all'avvio,
-  con logo+L o dopo qualche minuto di pausa), Stamp salva una schermata in
-  Immagini. JustOS si aggiorna da solo come un telefono: la versione nuova
-  va nell'altro dei due slot di sistema, parte al riavvio e, se non
-  funziona, si torna da soli alla precedente. Le app
-  del Negozio girano in una sandbox: vedono solo la propria cartella e i
-  file scelti dall'utente, e per le altre cartelle chiedono il permesso
-  («Disegno vuole usare la cartella Immagini»), che si rivede in
-  *Impostazioni → Privacy delle app*.
-- **Doppio clic e via**: un programma parte, un pacchetto (`.deb`,
-  `.tar.gz`, `.zip`, `.pkg` di macOS…) si installa da solo.
-- **Le app di ogni giorno**: File, Editor di testo, Note, Promemoria,
-  Calendario, Orologio, Calcolatrice, Foto, Musica, Monitor attività.
-- **Come Windows e macOS dove conta**: Ctrl+Spazio cerca app, file,
-  impostazioni e fa i conti (come Spotlight); le finestre si agganciano a
-  metà o a un quarto dello schermo trascinandole sul bordo o con
-  Ctrl+Alt+frecce (come lo Snap di Windows); i file si trascinano tra le
-  finestre, nel Cestino del dock o sull'icona di un'app (con Ctrl si
-  copiano invece di spostarli). Cosa manca ancora per essere
-  alla pari, e in che ordine arriverà, è nella [roadmap](docs/roadmap.md).
-- **L'ecosistema ticly**: ticly Do (attività, note, calendario), ticly AI
-  (in anteprima: le risposte non sono ancora collegate) e il ticly browser,
-  con un unico account ticly salvato sul computer; il browser usa un motore
-  web (HTML, CSS, immagini) scritto da zero.
-- **Un Negozio con app vere**: giochi (2048, Campo minato, Serpente, Sudoku,
-  Tris) e Disegno, programmi separati che si installano con un clic e aprono
-  le loro finestre, e si aggiornano da sole in background da un indice
-  firmato (Ed25519), quando le chiudi.
-- **I driver si installano da soli**: dischi SATA e NVMe, USB 1/2/3,
-  schede di rete Intel e Realtek, lettori di schede SD, audio HD e AC'97,
-  schede video delle macchine virtuali con cambio di risoluzione, e lo
-  schermo su ogni altra scheda (Intel, AMD, NVIDIA). Sugli schermi ad alta
-  densità l'interfaccia raddoppia, con il testo disegnato al doppio dei
-  pixel.
-- **Esegue programmi Linux, Windows e Android** senza modificarli, accanto
-  ai suoi: Linux x86-64 statici, Windows x64 da console e con finestre,
-  programmi Java e app Android (`.apk`, `.dex`) che costruiscono
-  l'interfaccia nel codice. Le app macOS non possono girare; i limiti sono
-  in [compatibilità](docs/compat.md#cosa-non-può-girare).
-- **Ha il suo linguaggio**, ArcScript, con compilatore e macchina virtuale
-  che girano su JustOS, e il suo IDE preinstallato, **ArcStudio**: errori
-  sottolineati mentre si scrive e l'anteprima dal vivo dell'interfaccia.
-- **Scritto da zero**: niente codice di Linux, Unix, DOS o Windows, nessuna
-  crate di terze parti. Solo il compilatore Rust e `core`/`alloc`.
+## Perché JustOS
+
+<table>
+<tr>
+<td width="33%" valign="top">
+
+**Scritto da zero**
+
+Niente codice di Linux, Unix, DOS o Windows, nessuna crate di terze parti:
+solo il compilatore Rust, `core` e `alloc`.
+
+</td>
+<td width="33%" valign="top">
+
+**Si avvia ovunque**
+
+La stessa immagine parte da BIOS e da UEFI, da una chiavetta USB, da un
+disco o come CD live.
+
+</td>
+<td width="33%" valign="top">
+
+**Pulito e veloce**
+
+Niente barra in alto: un dock di vetro chiaro, finestre rosate, animazioni
+morbide e l'interfaccia a 2× sugli schermi ad alta densità.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**Si aggiorna da solo**
+
+Come un telefono: la versione nuova va nell'altro slot di sistema e parte in
+prova. Se qualcosa va storto, si torna da soli a quella di prima.
+
+</td>
+<td valign="top">
+
+**App al sicuro**
+
+Ogni app vive nella sua sandbox e chiede il permesso per cartelle, rete,
+fotocamera e microfono, come su un telefono.
+
+</td>
+<td valign="top">
+
+**Esegue anche gli altri**
+
+Programmi Linux statici, Windows x64 (anche con finestre), Java e app
+Android girano accanto alle app di JustOS, senza modifiche.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**Ha il suo linguaggio**
+
+ArcScript, con compilatore e macchina virtuale, e l'IDE **ArcStudio** con
+gli errori sottolineati mentre scrivi e l'anteprima dal vivo.
+
+</td>
+<td valign="top">
+
+**Pronto per i portatili**
+
+Batteria, coperchio, temperature e sospensione in RAM, letti dal firmware
+con un interprete ACPI scritto da zero.
+
+</td>
+<td valign="top">
+
+**Il web, a modo suo**
+
+Il ticly browser ha un motore HTML e CSS e un interprete JavaScript, anche
+questi scritti da zero.
+
+</td>
+</tr>
+</table>
 
 ## Com'è
 
 <table>
 <tr>
 <td width="50%"><img src="docs/screenshots/centro-controllo.jpg" alt="Centro di controllo"><br><b>Centro di controllo</b>: account, rete, suono, volume e luminosità, spegni.</td>
-<td width="50%"><img src="docs/screenshots/notifiche.jpg" alt="Centro notifiche"><br><b>Centro notifiche</b>: il calendario e le notifiche ricevute.</td>
+<td width="50%"><img src="docs/screenshots/finestre.jpg" alt="Musica, Note e File"><br><b>Finestre</b>: Musica, Note e File insieme.</td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/schermo-intero.jpg" alt="ArcStudio a schermo intero"><br><b>Schermo intero</b>: ArcStudio prende tutto lo schermo, con l'ora nel titolo.</td>
 <td><img src="docs/screenshots/browser.jpg" alt="ticly browser"><br><b>ticly browser</b>: Wikipedia con il motore web di JustOS.</td>
 </tr>
 <tr>
+<td><img src="docs/screenshots/negozio.jpg" alt="Negozio"><br><b>Negozio</b>: giochi e app, installati con un clic.</td>
+<td><img src="docs/screenshots/applicazioni.jpg" alt="Applicazioni"><br><b>Applicazioni</b>: tutte le app, con ricerca (Ctrl+Spazio).</td>
+</tr>
+</table>
+
+<details>
+<summary><b>Altre schermate</b></summary>
+<br>
+<table>
+<tr>
 <td width="50%"><img src="docs/screenshots/avvio.jpg" alt="Avvio"><br><b>Avvio</b>: solo il logo e una barra di caricamento.</td>
 <td width="50%"><img src="docs/screenshots/benvenuto.jpg" alt="Primo avvio"><br><b>Primo avvio</b>: la configurazione guidata parte con INIZIA.</td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/applicazioni.jpg" alt="Applicazioni"><br><b>Applicazioni</b>: tutte le app, con ricerca (Ctrl+Spazio).</td>
-<td><img src="docs/screenshots/finestre.jpg" alt="Musica, Note e File"><br><b>Finestre</b>: Musica, Note e File insieme.</td>
-</tr>
-<tr>
-<td><img src="docs/screenshots/negozio.jpg" alt="Negozio"><br><b>Negozio</b>: giochi e app, installati con un clic.</td>
+<td><img src="docs/screenshots/notifiche.jpg" alt="Centro notifiche"><br><b>Centro notifiche</b>: il calendario e le notifiche ricevute.</td>
 <td><img src="docs/screenshots/negozio-app.jpg" alt="Una app nel Negozio"><br><b>La pagina di un'app</b>: descrizione, versione, dimensioni.</td>
 </tr>
 <tr>
@@ -114,44 +150,71 @@ di programmazione: tutto progettato apposta, in Rust, senza librerie esterne.
 <td><img src="docs/screenshots/impostazioni.jpg" alt="Impostazioni"><br><b>Impostazioni</b>: nome, tastiera, sfondo, schermo, password.</td>
 </tr>
 </table>
+</details>
 
-## Provarlo
+## Provarlo in un minuto
 
-Nelle [release](https://github.com/matthias-peterlini/justOS/releases)
-ci sono due file:
+1. **Scarica** [`justos.iso`](https://github.com/matthias-peterlini/justOS/releases/latest/download/justos.iso), il CD live (circa 70 MiB).
+2. **Avvialo** in una macchina virtuale:
+   - **QEMU**:
+     ```sh
+     qemu-system-x86_64 -m 512M -cdrom justos.iso -device ich9-intel-hda -device hda-output
+     ```
+   - **VirtualBox**: una macchina "Other/Unknown (64-bit)" con 512 MiB di memoria, senza disco, con `justos.iso` nel lettore CD.
+   - **VMware** e **Hyper-V** (prima generazione) vanno bene allo stesso modo.
+3. **Scegli** nome, tastiera e sfondo: dopo c'è la scrivania.
 
-| File | Cosa farne |
+Il CD live gira in memoria, quindi le modifiche si perdono allo spegnimento.
+Per tenerle, o per avviare un PC vero, c'è
+[`justos-img.zip`](https://github.com/matthias-peterlini/justOS/releases/latest/download/justos-img.zip):
+è un'immagine di disco da 256 MiB, che si scrive su una chiavetta USB con
+balenaEtcher, Rufus in modalità DD o `dd`. Parte con BIOS e con UEFI;
+Secure Boot va disattivato.
+
+### Scorciatoie da sapere
+
+| Tasti | Cosa fanno |
 |---|---|
-| `justos.iso` | **CD live**: si avvia in una macchina virtuale (VirtualBox, VMware, QEMU) o da un CD, con BIOS o UEFI. Il sistema gira in memoria e le modifiche si perdono allo spegnimento. |
-| `justos-img.zip` | **Immagine di disco** da scrivere su una chiavetta USB (balenaEtcher, Rufus in modalità DD, `dd`) per avviare un PC vero. Secure Boot va disattivato. |
+| **Ctrl+Spazio** | cerca app, file e impostazioni, e fa i conti |
+| **F3** | vista d'insieme e desktop virtuali |
+| **F11** | schermo intero |
+| **Alt+Tab** · **Ctrl+Q** | passa alla finestra successiva · chiude quella in primo piano |
+| **Ctrl+Alt+frecce** | aggancia la finestra a metà schermo, la ingrandisce, la ripristina |
+| **logo+L** · **Stamp** | blocca lo schermo · salva una schermata in Immagini |
 
-Il modo più veloce, con QEMU:
+## Cosa c'è
 
-```sh
-qemu-system-x86_64 -m 512M -cdrom justos.iso -device ich9-intel-hda -device hda-output
-```
+| | |
+|---|---|
+| **Di serie** | File, Editor di testo, Note, Promemoria, Calendario, Orologio, Calcolatrice, Foto, Musica, Anteprima, Terminale, Monitor attività, Impostazioni, Info sistema, ArcStudio |
+| **ticly** | ticly browser, ticly Do (attività, note, calendario) e ticly AI (in anteprima: le risposte non sono ancora collegate), con un solo account salvato sul computer |
+| **Nel Negozio** | 2048, Campo minato, Serpente, Sudoku, Tris e Disegno; BusyBox e Lua per il Terminale; programmi Linux e Windows da GitHub. Le app si aggiornano da sole, da un indice firmato |
+| **Doppio clic** | un programma parte; un pacchetto `.deb`, `.tar.gz`, `.zip` o `.pkg` si installa da solo |
 
-In VirtualBox basta una macchina "Other/Unknown (64-bit)" con 512 MiB di
-memoria e `justos.iso` nel lettore CD.
-
-## Cosa c'è dentro
+<details>
+<summary><b>Com'è fatto dentro</b></summary>
+<br>
 
 | Parte | Cosa fa | Dettagli |
 |---|---|---|
 | **JustBoot** | loader per BIOS (MBR + secondo stadio in assembly) e per UEFI (un'applicazione EFI in Rust); entrambi scelgono uno dei due slot di sistema (aggiornamenti A/B con ritorno indietro) e passano al kernel la stessa `BootInfo` | [architettura](docs/architettura.md#aggiornamenti-del-sistema-ab) |
-| **Kernel** | 64 bit, memoria virtuale a 4 livelli, scheduler preemptivo, thread, code di attesa, MSI/MSI-X, ACPI con un interprete AML scritto da zero (spegnimento, sospensione in RAM, batteria, temperature) | [architettura](docs/architettura.md#kernel) |
+| **Kernel** | 64 bit, memoria virtuale a 4 livelli, scheduler preemptivo su tutti i processori, thread, code di attesa, MSI/MSI-X, porte di messaggi tra programmi, ACPI con un interprete AML scritto da zero (spegnimento, sospensione in RAM, batteria, temperature) | [architettura](docs/architettura.md#kernel) |
 | **Driver** | pacchetti `.adp` indipendenti dal kernel: il kernel confronta i manifesti con l'hardware e carica il driver giusto da solo, all'avvio e a sistema avviato | [driver](docs/driver.md) |
 | **JustFS** | il file system nativo: blocchi da 4 KiB, extent, controllo di coerenza; volumi con nome (`sys:`, `ram:`, `chiavetta:`) | [architettura](docs/architettura.md#file-system-justfs) |
-| **Interfaccia** | splash, configurazione guidata, scrivania con dock, Launchpad, notifiche, ricerca globale, snap delle finestre e animazioni; le app di sistema, tra cui l'IDE ArcStudio | [gui](docs/gui.md) |
+| **Interfaccia** | splash, configurazione guidata, scrivania con dock, Applicazioni, centro di controllo, notifiche, ricerca globale, desktop virtuali, snap delle finestre, trascinamento dei file, HiDPI, animazioni | [gui](docs/gui.md) |
+| **Sicurezza** | identità delle app, sandbox, permessi, password con sale e blocco automatico | [roadmap](docs/roadmap.md#le-basi-comuni) |
 | **Programmi** | in modalità utente, ognuno nel suo spazio di indirizzi, a riga di comando o con finestre proprie (`justui`) | [programmi](docs/programmi.md) |
-| **Negozio** | 2048, Campo minato, Serpente, Sudoku, Tris, Disegno; BusyBox e Lua per il Terminale | [gui](docs/gui.md#il-negozio-e-le-app-installabili) |
-| **Compatibilità** | eseguibili ELF statici Linux, `.exe` Windows x64 (console e finestre), programmi Java e app Android (`.dex`, `.apk`); installazione di `.deb`, `.tar.gz`, `.zip` e `.pkg` con un doppio clic | [compatibilità](docs/compat.md) |
+| **Compatibilità** | eseguibili ELF statici Linux, `.exe` Windows x64 (console e finestre), programmi Java e app Android (`.dex`, `.apk`) | [compatibilità](docs/compat.md) |
 | **ArcScript** | il linguaggio di JustOS: `arcc` compila ed esegue `.as` e pacchetti `.arc`; ArcStudio è l'IDE con anteprima dal vivo | [ArcScript](docs/arcscript.md#arcstudio) |
 | **Rete** | ARP, IPv4, ICMP, UDP, TCP, DHCP, DNS; TLS 1.3 con certificati verificati e HTTP(S) | |
-| **Web** | `justweb`: HTML, CSS (flexbox, grid, tabelle, media query), PNG, JPEG e GIF, per il ticly browser | [gui](docs/gui.md#il-motore-web) |
-| **Shell** | una quarantina di comandi, cronologia, completamento con Tab | [primi passi](#primi-passi-nel-terminale) |
+| **Web** | `justweb` (HTML, CSS con flexbox, grid, tabelle e media query; PNG, JPEG e GIF) e `justjs` (JavaScript con il DOM, gli eventi, i timer e `fetch`) | [gui](docs/gui.md#il-motore-web) |
+| **Shell** | una quarantina di comandi, cronologia, completamento con Tab | qui sotto, nei primi passi |
 
-### Hardware
+</details>
+
+<details>
+<summary><b>Hardware supportato</b></summary>
+<br>
 
 | Tipo | Supportato |
 |---|---|
@@ -164,49 +227,13 @@ memoria e `justos.iso` nel lettore CD.
 | Input | tastiera e mouse PS/2 e USB, pulsante di accensione (ACPI) |
 | Portatili | batteria, alimentatore, coperchio, temperature ed embedded controller, dall'AML del firmware; sospensione in RAM (S3) dal menu, dal tasto o chiudendo il coperchio |
 
-Mancano ancora il Wi-Fi, la sospensione s2idle dei portatili più recenti,
-l'accelerazione e il cambio di risoluzione sulle schede video vere. Lo stato
-di ogni driver, provato o no, è in [docs/driver.md](docs/driver.md#hardware-supportato).
+Mancano ancora il Wi-Fi, il Bluetooth, la sospensione s2idle dei portatili
+più recenti, l'accelerazione e il cambio di risoluzione sulle schede video
+vere. Lo stato di ogni driver, provato o no, è in
+[docs/driver.md](docs/driver.md#hardware-supportato); cosa manca e in che
+ordine arriverà è nella [roadmap](docs/roadmap.md).
 
-## Compilare
-
-Servono Rust stable (`rustup` installa da solo la versione e i target
-giusti, grazie a `rust-toolchain.toml`), `nasm`, `qemu-system-x86_64` e,
-per provare l'avvio UEFI, OVMF.
-
-```sh
-make            # l'immagine di disco build/justos.img (BIOS e UEFI)
-make iso        # il CD live build/justos.iso
-make run        # avvia JustOS in QEMU (anche run-uefi, run-q35, run-nvme, run-iso)
-```
-
-I test girano tutti in QEMU, senza schermo:
-
-```sh
-make test           # una sessione di comandi scritta (anche test-uefi, test-iso)
-make test-drivers   # un avvio per ogni disco, scheda di rete, controller USB e lettore SD
-make test-audio     # suoni su ogni scheda audio emulata, registrati e controllati
-make test-display   # cambio di risoluzione e risveglio su ogni scheda video emulata
-make test-acpi      # pulsante di accensione, batteria, sospensione e risveglio
-make test-update    # aggiornamento nell'altro slot, prova, conferma, ritorno indietro
-SLEEP=1 make test-drivers  # gli stessi, dopo una sospensione (anche test-audio)
-make test-compat    # programmi Linux, Windows (anche con finestre), Java e Android
-make test-arcscript # programmi ArcScript
-make shots          # usa l'interfaccia (ogni app, il Negozio) e salva le schermate
-make check          # test delle librerie e dello strumento host
-```
-
-`make SIZE=1G` cambia la dimensione dell'immagine, `make MEMORY=2G` la
-memoria della macchina virtuale.
-
-## Su un PC vero
-
-`build/justos.img` (o `justos-img.zip` delle release) scritta su una
-chiavetta USB si avvia sia in modalità BIOS/legacy sia UEFI; il loader non
-è firmato, quindi Secure Boot va disattivato. Il disco di sistema può
-essere la chiavetta stessa.
-
-Da sapere prima di provarlo:
+Prima di provarlo su un PC vero:
 
 - il kernel usa tutti i processori (fino a 16) per i suoi thread, ma i
   programmi girano ancora tutti sul primo;
@@ -215,7 +242,11 @@ Da sapere prima di provarlo:
 - molti driver sono scritti dalla documentazione dei chip e provati in
   QEMU, non ancora su hardware vero.
 
-## Primi passi nel Terminale
+</details>
+
+<details>
+<summary><b>Primi passi nel Terminale</b></summary>
+<br>
 
 ```
 help                   tutti i comandi
@@ -236,7 +267,46 @@ hello.as               un programma ArcScript
 shutdown / restart
 ```
 
-## Struttura del repository
+</details>
+
+## Compilare
+
+Servono Rust stable (`rustup` installa da solo la versione e i target
+giusti, grazie a `rust-toolchain.toml`), `nasm`, `qemu-system-x86_64` e,
+per provare l'avvio UEFI, OVMF.
+
+```sh
+make            # l'immagine di disco build/justos.img (BIOS e UEFI)
+make iso        # il CD live build/justos.iso
+make run        # avvia JustOS in QEMU (anche run-uefi, run-q35, run-nvme, run-iso)
+```
+
+`make SIZE=1G` cambia la dimensione dell'immagine, `make MEMORY=2G` la
+memoria della macchina virtuale.
+
+<details>
+<summary><b>I test</b>: girano tutti in QEMU, senza schermo</summary>
+<br>
+
+```sh
+make test           # una sessione di comandi scritta (anche test-uefi, test-iso)
+make test-drivers   # un avvio per ogni disco, scheda di rete, controller USB e lettore SD
+make test-audio     # suoni su ogni scheda audio emulata, registrati e controllati
+make test-display   # cambio di risoluzione e risveglio su ogni scheda video emulata
+make test-acpi      # pulsante di accensione, batteria, sospensione e risveglio
+make test-update    # aggiornamento nell'altro slot, prova, conferma, ritorno indietro
+SLEEP=1 make test-drivers  # gli stessi, dopo una sospensione (anche test-audio)
+make test-compat    # programmi Linux, Windows (anche con finestre), Java e Android
+make test-arcscript # programmi ArcScript
+make shots          # usa l'interfaccia (ogni app, il Negozio) e salva le schermate
+make check          # test delle librerie e dello strumento host
+```
+
+</details>
+
+<details>
+<summary><b>Struttura del repository</b></summary>
+<br>
 
 | Percorso | Contenuto |
 |---|---|
@@ -247,11 +317,13 @@ shutdown / restart
 | `system/store/` | le app del Negozio (giochi e Disegno), con icona e scheda |
 | `system/libs/` | le librerie: ABI dei driver (`justdk`, `justdrv`), programmi (`justrt`), finestre (`justui`), disegno (`justgfx`), JustFS, USB, virtio, ArcScript, TLS (`justtls`), web (`justweb`), JavaScript (`justjs`), Dalvik (`justdex`) |
 | `tools/justtool/` | strumento host: crea pacchetti, immagini e CD, legge e scrive volumi JustFS |
-| `tools/assets/` | i generatori di caratteri, icone, sfondi, suoni e musica |
+| `tools/assets/` | i generatori di caratteri, icone, sfondi, suoni, musica e del banner di questa pagina |
 | `tools/qemu/` | modelli per QEMU di dispositivi che QEMU non ha (Realtek RTL8169, RTL8168, RTL8125) |
 | `rootfs/` | i file del volume di sistema |
 | `scripts/` | i test automatici in QEMU |
 | `docs/` | la documentazione |
+
+</details>
 
 ## Licenza
 
@@ -270,4 +342,7 @@ libere (SIL OFL), in `system/kernel/assets/LICENSES.md`; le foto degli
 sfondi sono di Unsplash (licenza Unsplash), con gli autori in
 `rootfs/system/gui/wallpapers/CREDITS.txt`.
 
-Sito: <https://justos.dev>
+<div align="center">
+<br>
+<sub>Scritto da zero, in Rust · <a href="https://justos.dev">justos.dev</a></sub>
+</div>
