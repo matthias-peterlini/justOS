@@ -62,7 +62,8 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("mem", "", "memory usage"),
     ("ps", "", "running programs and threads"),
     ("kill", "<pid>", "stop a program"),
-    ("where", "<tid> [samples]", "where a thread of a Linux program is (library+offset), sampled"),
+    ("cpus", "", "what each processor runs, and the TLB flushes programs cost"),
+    ("where", "<tid>|busy [samples]", "where a thread of a Linux program is (library+offset), sampled; busy: the four busiest"),
     ("ports", "", "named message ports and who owns them"),
     ("perms", "[allow|deny|ask <app> <perm>]", "what apps may use outside their sandbox"),
     ("updates", "[check|install <app>|all|auto on|off]", "updates of the installed apps"),
@@ -82,6 +83,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("log", "[lines]", "the system journal"),
     ("verbose", "[on|off]", "show debug messages on screen"),
     ("strace", "[on|off]", "log every system call of Linux programs (in the journal)"),
+    ("export", "[NAME=value | NAME=]", "environment of the Linux programs started from now on"),
     ("echo", "<text>", "print text"),
     ("clear", "", "clear the screen (also: cls)"),
     ("restart", "", "restart the computer (also: reboot)"),
@@ -574,6 +576,14 @@ impl Shell {
                     println!("{:>5} {:>4}  {:<9}  {:>5}ms  {}", t.tid, pid, t.state.name(), t.cpu_ms, t.name);
                 }
             }
+            "cpus" => {
+                let (running, ready) = task::on_cpus();
+                for (i, tid) in running.iter().enumerate() {
+                    println!("cpu {i}: thread {tid}");
+                }
+                let (flushes, ipis, spins) = crate::arch::smp::user_flush_stats();
+                println!("{ready} threads ready; program TLB flushes on other processors: {flushes} ({ipis} IPIs, {spins} spins waiting)");
+            }
             "where" => {
                 if need(1, "<tid> [samples]") {
                     self.where_thread(rest[0], rest.get(1).and_then(|n| n.parse().ok()).unwrap_or(1));
@@ -961,6 +971,19 @@ impl Shell {
                 crate::linux::TRACE.store(on, core::sync::atomic::Ordering::Relaxed);
                 println!("system call tracing {}", if on { "on" } else { "off" });
             }
+            "export" => {
+                if rest.is_empty() {
+                    for v in crate::linux::extra_env() {
+                        println!("{v}");
+                    }
+                }
+                for v in &rest {
+                    match v.split_once('=') {
+                        Some((name, value)) if !name.is_empty() => crate::linux::set_env(name, value),
+                        _ => println!("{ERR}export: {v}: NAME=value{RESET}"),
+                    }
+                }
+            }
             "echo" => println!("{}", rest.join(" ")),
             "clear" | "cls" => crate::console::clear(),
             "restart" | "reboot" => {
@@ -1067,8 +1090,18 @@ impl Shell {
 
     /// `where <tid> [samples]`: where a thread of a Linux program is, as a
     /// library and an offset in it; with samples, the places it was most
-    /// often, 10 ms apart (to find what a busy program is doing).
+    /// often, 10 ms apart (to find what a busy program is doing). `busy`
+    /// does it for the four program threads that used the most time.
     fn where_thread(&self, tid: &str, samples: usize) {
+        if tid == "busy" {
+            let mut all: Vec<task::ThreadInfo> = task::list().into_iter().filter(|t| t.pid != 0).collect();
+            all.sort_by(|a, b| b.cpu_ms.cmp(&a.cpu_ms));
+            for t in all.iter().take(4) {
+                println!("thread {} (process {}, {} ms):", t.tid, t.pid, t.cpu_ms);
+                self.where_thread(&alloc::format!("{}", t.tid), samples);
+            }
+            return;
+        }
         let Ok(tid) = tid.parse::<task::Tid>() else {
             println!("{ERR}usage: where <tid> [samples]{RESET}");
             return;

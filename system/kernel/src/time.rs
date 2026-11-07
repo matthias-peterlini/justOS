@@ -10,8 +10,38 @@ use core::sync::atomic::{AtomicU64, Ordering};
 static TICKS: AtomicU64 = AtomicU64::new(0);
 static BOOT_TIME: AtomicU64 = AtomicU64::new(0);
 
+/// The time stamp counter at the last tick, and how far it moves in one
+/// tick (measured against the tick every [`CALIBRATE`] ticks; 0 until
+/// then): what [`uptime_ns`] adds between ticks.
+static TICK_TSC: AtomicU64 = AtomicU64::new(0);
+static TSC_PER_TICK: AtomicU64 = AtomicU64::new(0);
+static CAL_TSC: AtomicU64 = AtomicU64::new(0);
+static CAL_TICKS: AtomicU64 = AtomicU64::new(0);
+const CALIBRATE: u64 = 256;
+/// The largest [`uptime_ns`] handed out, so that it never goes back (from
+/// one processor to another, or right across a tick).
+static LAST_NS: AtomicU64 = AtomicU64::new(0);
+
+fn rdtsc() -> u64 {
+    // SAFETY: reading the time stamp counter has no side effects.
+    unsafe { core::arch::x86_64::_rdtsc() }
+}
+
+/// The system timer interrupt, on the first processor.
 pub fn tick() {
-    TICKS.fetch_add(1, Ordering::Relaxed);
+    let n = TICKS.fetch_add(1, Ordering::Relaxed) + 1;
+    let tsc = rdtsc();
+    TICK_TSC.store(tsc, Ordering::Release);
+    let (cal_tsc, cal_ticks) = (CAL_TSC.load(Ordering::Relaxed), CAL_TICKS.load(Ordering::Relaxed));
+    if cal_ticks == 0 || tsc < cal_tsc {
+        // First tick, or the counter started again (after sleep).
+        CAL_TSC.store(tsc, Ordering::Relaxed);
+        CAL_TICKS.store(n, Ordering::Relaxed);
+    } else if n - cal_ticks >= CALIBRATE {
+        TSC_PER_TICK.store((tsc - cal_tsc) / (n - cal_ticks), Ordering::Relaxed);
+        CAL_TSC.store(tsc, Ordering::Relaxed);
+        CAL_TICKS.store(n, Ordering::Relaxed);
+    }
 }
 
 pub fn ticks() -> u64 {
@@ -22,6 +52,19 @@ pub fn uptime_ms() -> u64 {
     ticks() * 1000 / HZ
 }
 
+/// Nanoseconds since start: the tick, refined between ticks by the time
+/// stamp counter. Never smaller than a value returned before (Linux
+/// programs measure with it and take a step back for a broken clock).
+pub fn uptime_ns() -> u64 {
+    const NS_PER_TICK: u64 = 1_000_000_000 / HZ;
+    let n = ticks();
+    let since = rdtsc().saturating_sub(TICK_TSC.load(Ordering::Acquire));
+    let per = TSC_PER_TICK.load(Ordering::Relaxed);
+    let sub = if per == 0 { 0 } else { (since as u128 * NS_PER_TICK as u128 / per as u128).min(NS_PER_TICK as u128 - 1) as u64 };
+    let ns = n * NS_PER_TICK + sub;
+    LAST_NS.fetch_max(ns, Ordering::AcqRel).max(ns)
+}
+
 /// Seconds since 2000-01-01 00:00 (local time as kept by the CMOS clock).
 pub fn now() -> u64 {
     BOOT_TIME.load(Ordering::Relaxed) + uptime_ms() / 1000
@@ -30,6 +73,11 @@ pub fn now() -> u64 {
 /// Seconds since 1970-01-01 (Unix time), taking the clock as UTC.
 pub fn unix_now() -> u64 {
     now() + 946_684_800
+}
+
+/// The Unix time of the start (uptime 0).
+pub fn boot_unix() -> u64 {
+    BOOT_TIME.load(Ordering::Relaxed) + 946_684_800
 }
 
 fn cmos(reg: u8) -> u8 {

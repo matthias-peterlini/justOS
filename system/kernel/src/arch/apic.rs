@@ -139,6 +139,14 @@ pub fn send_startup(dest: u32, page: u8) {
     send(dest, 0x0000_4600 | page as u32);
 }
 
+/// An interrupt with `vector` to the processor whose local APIC is `dest`.
+pub fn send_to(dest: u32, vector: u8) {
+    // Two writes: nothing else on this processor may send in between.
+    let irq = crate::arch::cpu::irq_save();
+    send(dest, (1 << 14) | vector as u32);
+    crate::arch::cpu::irq_restore(irq);
+}
+
 /// An interrupt with `vector` to every processor but this one.
 pub fn send_others(vector: u8) {
     send(0, (0b11 << 18) | (1 << 14) | vector as u32);

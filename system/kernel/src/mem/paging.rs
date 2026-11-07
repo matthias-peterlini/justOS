@@ -17,7 +17,9 @@ pub const NO_CACHE: u64 = (1 << 4) | (1 << 3);
 pub const HUGE: u64 = 1 << 7;
 /// A bit of our own (the processor ignores it): the page's frame belongs
 /// to shared memory, not to this address space, so fork maps the same
-/// frame instead of copying it and nothing here ever frees it.
+/// frame instead of copying it and nothing here ever frees it. Without
+/// [`WRITE`] it is a page of a mapped file that the mapping has not
+/// written to (see `linux::mm::copy_on_write`).
 pub const SHARED: u64 = 1 << 9;
 pub const ADDR_MASK: u64 = 0x000F_FFFF_FFFF_F000;
 
@@ -64,6 +66,46 @@ pub fn map_in(pml4: u64, virt: u64, phys: u64, flags: u64) -> Option<()> {
     table(t)[index(virt, 0)] = (phys & ADDR_MASK) | flags | PRESENT;
     cpu::invlpg(virt);
     Some(())
+}
+
+/// Maps one 4 KiB page unless something is mapped there already (two
+/// threads may fault on the same page at once: the second must not replace
+/// what the first one made and may have written). Some(false) when it was
+/// taken, None when page tables could not be made.
+pub fn map_vacant_in(pml4: u64, virt: u64, phys: u64, flags: u64) -> Option<bool> {
+    let _guard = MAP_LOCK.lock();
+    let user = flags & USER != 0;
+    let mut t = pml4;
+    for level in (1..4).rev() {
+        t = next_table(&mut table(t)[index(virt, level)], user)?;
+    }
+    let e = &mut table(t)[index(virt, 0)];
+    if *e & PRESENT != 0 {
+        return Some(false);
+    }
+    *e = (phys & ADDR_MASK) | flags | PRESENT;
+    cpu::invlpg(virt);
+    Some(true)
+}
+
+/// Points a 4 KiB page somewhere else if its entry is still `old` (the
+/// accessed and dirty bits aside, which the processor sets on its own).
+pub fn replace_in(pml4: u64, virt: u64, old: u64, phys: u64, flags: u64) -> bool {
+    const SEEN: u64 = (1 << 5) | (1 << 6);
+    let _guard = MAP_LOCK.lock();
+    let Some((e, size)) = walk(pml4, virt) else { return false };
+    if size != PAGE_SIZE || *e & !SEEN != old & !SEEN {
+        return false;
+    }
+    *e = (phys & ADDR_MASK) | flags | PRESENT;
+    cpu::invlpg(virt);
+    true
+}
+
+/// The entry of a present 4 KiB page.
+pub fn entry_in(pml4: u64, virt: u64) -> Option<u64> {
+    let (e, size) = walk(pml4, virt)?;
+    (size == PAGE_SIZE).then_some(*e)
 }
 
 /// Maps one 4 KiB page in the kernel half.
@@ -235,8 +277,10 @@ pub fn copy_address_space(src: u64) -> Option<u64> {
 }
 
 /// Frees the user half of an address space: page tables and mapped frames
-/// (not the frames of shared pages).
+/// (not the frames of shared pages). Waits until no other processor has
+/// it loaded.
 pub fn free_address_space(pml4: u64) {
+    crate::arch::smp::wait_unloaded(pml4);
     fn free_level(t: u64, level: u32) {
         for &e in table(t).iter() {
             if e & PRESENT == 0 {

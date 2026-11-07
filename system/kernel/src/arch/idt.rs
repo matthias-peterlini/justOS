@@ -236,6 +236,7 @@ extern "C" fn trap_dispatch(frame: &mut TrapFrame) {
         super::smp::VEC_TIMER => {
             super::apic::eoi();
             crate::task::ap_tick();
+            crate::user::check_kill(frame);
         }
         super::smp::VEC_TLB => {
             super::smp::service();
@@ -252,6 +253,13 @@ fn exception(frame: &mut TrapFrame) {
         return;
     }
     let cr2 = cpu::read_cr2();
+    // The kernel writing to a Linux program's memory (a read into its
+    // buffer) where a page still maps a file's shared copy: the program
+    // gets its own copy, as its own write would. No lock but the page
+    // tables' is needed for that.
+    if vector == 14 && frame.error & 3 == 3 && cr2 < crate::user::USER_TOP && crate::linux::mm::copy_on_write(cr2) {
+        return;
+    }
     crate::console::panic_screen(format_args!(
         "{} (vector {}, error {:#x})\n  rip {:#018x}  rsp {:#018x}  rflags {:#x}\n  rax {:#018x}  rbx {:#018x}  rcx {:#018x}\n  rdx {:#018x}  rsi {:#018x}  rdi {:#018x}\n  rbp {:#018x}  cr2 {:#018x}  thread {}",
         EXCEPTIONS[vector],

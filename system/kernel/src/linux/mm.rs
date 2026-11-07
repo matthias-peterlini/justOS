@@ -1,10 +1,16 @@
 //! Memory of a Linux process: the program break and the areas `mmap`
 //! reserves. Pages are given out when first touched (demand paging): a
 //! reservation costs nothing until it is used, as runtimes such as Go's
-//! expect when they set aside gigabytes of address space. Private file
-//! mappings are filled from the file on first touch. Shared mappings of
-//! shared memory ([`super::shm`]: memfd, /dev/shm, MAP_SHARED |
+//! expect when they set aside gigabytes of address space. Shared mappings
+//! of shared memory ([`super::shm`]: memfd, /dev/shm, MAP_SHARED |
 //! MAP_ANONYMOUS) map its frames, the same ones in every process.
+//!
+//! A mapped file is read from the disk only where it is touched, a few
+//! pages at a time, into frames that every mapping of it shares
+//! ([`FileData`]): read-only until a mapping writes to a page, which then
+//! gets a copy of its own (copy on write). A browser maps a 160 MB library
+//! in each of its processes and uses a part of it; reading it all at the
+//! first `mmap` took a minute.
 
 use super::shm::Shm;
 use super::{err, with_state, LinuxState};
@@ -38,8 +44,8 @@ pub const STACK_RESERVE: u64 = 8 * 1024 * 1024;
 pub enum Backing {
     /// Zeroes.
     Anon,
-    /// A private copy of a file's bytes.
-    File(Arc<Vec<u8>>),
+    /// A file (private: what the mapping writes stays its own).
+    File(Arc<FileData>),
     /// Shared memory: the same frames for every mapping (true), or a
     /// private copy of each page made when it is first touched.
     Shm(Arc<Shm>, bool),
@@ -92,14 +98,24 @@ fn cut(st: &mut LinuxState, start: u64, end: u64) -> Vec<Vma> {
 /// Frees the pages of a range that were handed out.
 fn release_pages(start: u64, end: u64) {
     let cr3 = cpu::read_cr3();
+    let mut freed = Vec::new();
+    let mut any = false;
     let mut p = start;
     while p < end {
         if paging::user_accessible(cr3, p) {
+            any = true;
             if let Some(phys) = paging::unmap_owned_in(cr3, p) {
-                frame::free(phys);
+                freed.push(phys);
             }
         }
         p += PAGE_SIZE;
+    }
+    // Threads on other processors may still reach them through their TLBs.
+    if any {
+        crate::arch::smp::shootdown_user(cr3);
+    }
+    for phys in freed {
+        frame::free(phys);
     }
 }
 
@@ -119,45 +135,133 @@ fn find_gap(st: &LinuxState, from: u64, len: u64) -> Option<u64> {
     }
 }
 
-/// Files that are mapped somewhere, by path, size and change time: the
-/// dynamic loader maps each library four or five times, and every process
-/// maps the same libc, so they share one copy of its bytes while any
-/// mapping of it lives.
-static MAPPED: IrqLock<Vec<Mapped>> = IrqLock::new(Vec::new());
+/// Files that are mapped somewhere: the dynamic loader maps each library
+/// four or five times, and every process maps the same libc, so they share
+/// one [`FileData`] (by path, size and change time) while any mapping of
+/// it lives.
+static MAPPED: IrqLock<Vec<Weak<FileData>>> = IrqLock::new(Vec::new());
 
-struct Mapped {
+/// How many pages a fault reads from a file at once: the page and the ones
+/// after it (programs mostly go forward).
+const READ_AHEAD: u64 = 32;
+
+/// A mapped file: the pages read so far, each in a frame of its own that
+/// the mappings map read-only (marked [`paging::SHARED`], so unmapping or
+/// ending a process never frees it). They go with the last mapping.
+pub struct FileData {
+    path: Path,
     key: String,
+    /// The file as the program named it (/proc/self/maps shows it).
+    name: String,
     size: u64,
     modified: u64,
-    data: Weak<Vec<u8>>,
+    /// Frames by page number.
+    pages: IrqLock<BTreeMap<u64, u64>>,
+}
+
+impl FileData {
+    /// The frame holding page `n` of the file (zeroes past its end), read
+    /// along with the pages after it that are not here yet.
+    fn frame(&self, n: u64) -> Option<u64> {
+        if let Some(&f) = self.pages.lock().get(&n) {
+            return Some(f);
+        }
+        let last = self.size.div_ceil(PAGE_SIZE);
+        let count = if n >= last {
+            1
+        } else {
+            let p = self.pages.lock();
+            1 + (1..(last - n).min(READ_AHEAD)).take_while(|i| !p.contains_key(&(n + i))).count() as u64
+        };
+        // Read without holding a lock: the disk may take a while, and
+        // another thread may read the same pages meanwhile (the first one
+        // in keeps its frames).
+        let mut buf = alloc::vec![0u8; (count * PAGE_SIZE) as usize];
+        let mut done = 0;
+        while n < last && done < buf.len() {
+            match crate::fs::read_at(&self.path, n * PAGE_SIZE + done as u64, &mut buf[done..]) {
+                Ok(0) | Err(_) => break,
+                Ok(k) => done += k,
+            }
+        }
+        let mut p = self.pages.lock();
+        for i in 0..count {
+            if p.contains_key(&(n + i)) {
+                continue;
+            }
+            let Some(f) = frame::alloc() else { break };
+            // SAFETY: a frame just allocated, reached through the direct map.
+            unsafe { core::ptr::copy_nonoverlapping(buf.as_ptr().add((i * PAGE_SIZE) as usize), phys_to_virt(f) as *mut u8, PAGE_SIZE as usize) };
+            p.insert(n + i, f);
+        }
+        p.get(&n).copied()
+    }
+
+    /// Reads every page not read yet (before the file changes: mappings
+    /// made before keep what it was).
+    fn load_all(&self) {
+        let mut n = 0;
+        while n < self.size.div_ceil(PAGE_SIZE) {
+            if self.frame(n).is_none() {
+                return;
+            }
+            n += 1;
+        }
+    }
+}
+
+impl Drop for FileData {
+    fn drop(&mut self) {
+        for &f in self.pages.lock().values() {
+            frame::free(f);
+        }
+    }
+}
+
+/// An area the loader placed (see `LinuxState::images`).
+#[derive(Clone)]
+pub struct Image {
+    pub start: u64,
+    pub end: u64,
+    pub prot: u32,
+    pub off: u64,
+    pub name: Arc<str>,
 }
 
 fn map_key(path: &Path) -> String {
     alloc::format!("{path}").to_ascii_lowercase()
 }
 
-/// Reads a whole file for a mapping (shared between mappings of it).
-fn file_bytes(fd: i32) -> Result<Arc<Vec<u8>>, i64> {
+/// The file open as `fd`, for a mapping (shared between mappings of it).
+fn mapped_file(fd: i32) -> Result<Arc<FileData>, i64> {
     let path = super::fd::file_path(fd).ok_or(-err::EBADF)?;
     let st = crate::fs::stat(&path).map_err(|e| -super::errno(user::fs_error(e)))?;
     let key = map_key(&path);
-    {
-        let mut cache = MAPPED.lock();
-        cache.retain(|m| m.data.strong_count() > 0);
-        if let Some(data) = cache.iter().find(|m| m.key == key && m.size == st.size && m.modified == st.modified).and_then(|m| m.data.upgrade()) {
-            return Ok(data);
-        }
+    let mut cache = MAPPED.lock();
+    cache.retain(|m| m.strong_count() > 0);
+    if let Some(data) = cache.iter().filter_map(Weak::upgrade).find(|d| d.key == key && d.size == st.size && d.modified == st.modified) {
+        return Ok(data);
     }
-    let data = crate::fs::read_file(&path).map(Arc::new).map_err(|e| -super::errno(user::fs_error(e)))?;
-    MAPPED.lock().push(Mapped { key, size: st.size, modified: st.modified, data: Arc::downgrade(&data) });
+    let name = super::show_path(&path);
+    let data = Arc::new(FileData { path, key, name, size: st.size, modified: st.modified, pages: IrqLock::new(BTreeMap::new()) });
+    cache.push(Arc::downgrade(&data));
     Ok(data)
 }
 
-/// Forgets the shared bytes of a file that is about to change (mappings
-/// already made keep their copy, as private mappings do).
+/// A file that is about to change, be replaced or go: the mappings of it
+/// made so far keep it as it is now (as private mappings do), new ones
+/// read the new one.
 pub fn forget_file(path: &Path) {
     let key = map_key(path);
-    MAPPED.lock().retain(|m| m.key != key);
+    let gone: Vec<Arc<FileData>> = {
+        let mut cache = MAPPED.lock();
+        let gone = cache.iter().filter_map(Weak::upgrade).filter(|d| d.key == key).collect();
+        cache.retain(|m| m.upgrade().is_some_and(|d| d.key != key));
+        gone
+    };
+    for d in gone {
+        d.load_all();
+    }
 }
 
 pub fn sys_mmap(addr: u64, len: u64, prot: u32, flags: u32, fd: i32, off: u64) -> i64 {
@@ -179,7 +283,7 @@ pub fn sys_mmap(addr: u64, len: u64, prot: u32, flags: u32, fd: i32, off: u64) -
         match memfd {
             Some(shm) => (Backing::Shm(shm, shared), off),
             // A shared mapping of a file is a private copy here.
-            None => match file_bytes(fd) {
+            None => match mapped_file(fd) {
                 Ok(d) => (Backing::File(d), off),
                 Err(e) => return e,
             },
@@ -303,12 +407,14 @@ pub fn sys_mremap(old: u64, old_len: u64, new_len: u64, flags: u32) -> i64 {
     new
 }
 
-/// madvise: MADV_DONTNEED and MADV_FREE give pages back; inside reserved
-/// areas they come back as zeroes (or the file's bytes) when next touched.
+/// madvise: MADV_DONTNEED gives pages back; inside reserved areas they
+/// come back as zeroes (or the file's bytes) when next touched. MADV_FREE
+/// only allows that, for when memory is short: the pages stay (allocators
+/// call it all the time, and giving pages back costs a TLB flush on every
+/// processor running the program).
 pub fn sys_madvise(addr: u64, len: u64, advice: u64) -> i64 {
     const MADV_DONTNEED: u64 = 4;
-    const MADV_FREE: u64 = 8;
-    if advice != MADV_DONTNEED && advice != MADV_FREE {
+    if advice != MADV_DONTNEED {
         return 0;
     }
     if addr % PAGE_SIZE != 0 {
@@ -324,7 +430,7 @@ pub fn sys_madvise(addr: u64, len: u64, advice: u64) -> i64 {
 
 /// A page fault at `addr`: gives the page if an area allows it. Returns
 /// whether the access may be retried.
-pub fn fault(addr: u64, _write: bool) -> bool {
+pub fn fault(addr: u64, write: bool) -> bool {
     let page = addr & !(PAGE_SIZE - 1);
     let found = super::try_state(|st| {
         let (&s, v) = st.vmas.range(..=page).next_back()?;
@@ -333,36 +439,81 @@ pub fn fault(addr: u64, _write: bool) -> bool {
     .flatten();
     let Some((start, vma)) = found else { return false };
     let cr3 = cpu::read_cr3();
+    if let Some(e) = paging::entry_in(cr3, page) {
+        if write && e & paging::WRITE == 0 {
+            return copy_on_write(page);
+        }
+        return paging::user_accessible(cr3, page);
+    }
     if paging::translate_in(cr3, page).is_some() {
         return paging::user_accessible(cr3, page);
     }
     let at = vma.off + (page - start);
-    if let Backing::Shm(shm, true) = &vma.backing {
-        // The shared frame itself.
-        let Some(phys) = shm.frame(at / PAGE_SIZE) else { return false };
-        return paging::map_in(cr3, page, phys, paging::USER | paging::WRITE | paging::SHARED).is_some();
+    // A frame to map as it is (shared memory, or a file's page to read),
+    // or what this mapping's own page starts as: a copy of a frame or
+    // zeroes.
+    let (shared, copy_of) = match &vma.backing {
+        Backing::Anon => (None, None),
+        Backing::Shm(shm, true) => match shm.frame(at / PAGE_SIZE) {
+            Some(f) => (Some((f, paging::WRITE)), None),
+            None => return false,
+        },
+        Backing::Shm(shm, false) => (None, shm.existing(at / PAGE_SIZE)),
+        Backing::File(file) => match file.frame(at / PAGE_SIZE) {
+            Some(f) if write => (None, Some(f)),
+            Some(f) => (Some((f, 0)), None),
+            None => return false,
+        },
+    };
+    if let Some((f, write)) = shared {
+        return paging::map_vacant_in(cr3, page, f, paging::USER | paging::SHARED | write).is_some();
     }
     let Some(phys) = frame::alloc() else { return false };
-    if paging::map_in(cr3, page, phys, paging::USER | paging::WRITE).is_none() {
-        frame::free(phys);
+    if let Some(from) = copy_of {
+        // SAFETY: two frames reached through the direct map; the new one
+        // is not mapped anywhere yet.
+        unsafe { core::ptr::copy_nonoverlapping(phys_to_virt(from) as *const u8, phys_to_virt(phys) as *mut u8, PAGE_SIZE as usize) };
+    }
+    match paging::map_vacant_in(cr3, page, phys, paging::USER | paging::WRITE) {
+        Some(true) => true,
+        // Another thread made the page meanwhile: the access goes there.
+        Some(false) => {
+            frame::free(phys);
+            true
+        }
+        None => {
+            frame::free(phys);
+            false
+        }
+    }
+}
+
+/// A write to a page that maps a file's shared frame (read-only): the
+/// mapping gets a copy of its own, writable. Only the page tables are
+/// looked at (a read-only shared user page is nothing else), so the kernel
+/// can come here when it writes to a program's memory, whatever it holds.
+pub fn copy_on_write(addr: u64) -> bool {
+    let page = addr & !(PAGE_SIZE - 1);
+    let cr3 = cpu::read_cr3();
+    let Some(e) = paging::entry_in(cr3, page) else { return false };
+    if e & paging::USER == 0 {
         return false;
     }
-    match &vma.backing {
-        Backing::File(data) => {
-            let at = at as usize;
-            if at < data.len() {
-                let n = (data.len() - at).min(PAGE_SIZE as usize);
-                // SAFETY: the page was just mapped in this address space.
-                unsafe { core::ptr::copy_nonoverlapping(data.as_ptr().add(at), page as *mut u8, n) };
-            }
-        }
-        Backing::Shm(shm, false) => {
-            if let Some(f) = shm.existing(at / PAGE_SIZE) {
-                // SAFETY: the page was just mapped; the frame is the Shm's.
-                unsafe { core::ptr::copy_nonoverlapping(phys_to_virt(f) as *const u8, page as *mut u8, PAGE_SIZE as usize) };
-            }
-        }
-        _ => {}
+    if e & paging::WRITE != 0 {
+        return true; // another thread was first
+    }
+    if e & paging::SHARED == 0 {
+        return false;
+    }
+    let Some(phys) = frame::alloc() else { return false };
+    // SAFETY: the file's frame and a new one, through the direct map.
+    unsafe { core::ptr::copy_nonoverlapping(phys_to_virt(e & paging::ADDR_MASK) as *const u8, phys_to_virt(phys) as *mut u8, PAGE_SIZE as usize) };
+    if paging::replace_in(cr3, page, e, phys, paging::USER | paging::WRITE) {
+        // Other processors running this program may still read the
+        // file's frame through their TLBs.
+        crate::arch::smp::shootdown_user(cr3);
+    } else {
+        frame::free(phys);
     }
     true
 }
@@ -377,8 +528,10 @@ pub fn populate(ptr: u64, len: u64) {
     let end = ptr.saturating_add(len).min(USER_TOP);
     let mut p = ptr & !(PAGE_SIZE - 1);
     while p < end {
+        // A file's page comes read-only; if the kernel writes there, it
+        // makes the copy then.
         if !paging::user_accessible(cr3, p) {
-            fault(p, true);
+            fault(p, false);
         }
         p += PAGE_SIZE;
     }
@@ -387,30 +540,45 @@ pub fn populate(ptr: u64, len: u64) {
 /// What is at `addr` in a Linux process: the file mapped there and the
 /// offset in it (`libgtk-3.so.0+0x1234`), or the kind of memory.
 pub fn describe(pid: u32, addr: u64) -> String {
+    let image = super::with_state_of(pid, |st| st.images.iter().find(|i| i.start <= addr && addr < i.end).cloned()).flatten();
+    if let Some(i) = image.filter(|i| !i.name.starts_with('[')) {
+        return alloc::format!("{}+{:#x}", i.name.rsplit('/').next().unwrap_or(&i.name), addr - i.start + i.off);
+    }
     let found = super::with_state_of(pid, |st| {
         let (&start, v) = st.vmas.range(..=addr).next_back()?;
         (addr < v.end).then(|| match &v.backing {
-            Backing::File(data) => (Some(Arc::as_ptr(data)), addr - start + v.off),
-            _ => (None, addr - start),
+            Backing::File(f) => alloc::format!("{}+{:#x}", f.name.rsplit('/').next().unwrap_or(&f.name), addr - start + v.off),
+            _ => alloc::format!("{addr:#x} (memory, +{:#x})", addr - start),
         })
     })
     .flatten();
-    match found {
-        Some((Some(data), off)) => {
-            let cache = MAPPED.lock();
-            match cache.iter().find(|m| m.data.as_ptr() == data) {
-                Some(m) => alloc::format!("{}+{off:#x}", m.key.rsplit('/').next().unwrap_or(&m.key)),
-                None => alloc::format!("{addr:#x} (a file)"),
-            }
-        }
-        Some((None, off)) => alloc::format!("{addr:#x} (memory, +{off:#x})"),
-        None => alloc::format!("{addr:#x} (not mapped)"),
-    }
+    found.unwrap_or_else(|| alloc::format!("{addr:#x} (not mapped)"))
 }
 
-/// The areas, for /proc/self/maps.
-pub fn areas() -> Vec<(u64, u64, u32)> {
-    with_state(|st| st.vmas.iter().map(|(&s, v)| (s, v.end, v.prot)).collect())
+/// The areas, for /proc/self/maps, by address: start, end, protection,
+/// offset in the file and its name (or [heap], [stack]).
+pub fn areas() -> Vec<(u64, u64, u32, u64, String)> {
+    let mut out = with_state(|st| {
+        let mut out: Vec<(u64, u64, u32, u64, String)> = st.images.iter().map(|i| (i.start, i.end, i.prot, i.off, String::from(&*i.name))).collect();
+        let heap_end = mem::align_up(st.brk_cur, PAGE_SIZE);
+        if heap_end > st.brk_start {
+            out.push((st.brk_start, heap_end, PROT_READ | PROT_WRITE, 0, String::from("[heap]")));
+        }
+        for (&s, v) in &st.vmas {
+            // The stack's reserve is in its [stack] line.
+            if st.images.iter().any(|i| i.start <= s && v.end <= i.end) {
+                continue;
+            }
+            let name = match &v.backing {
+                Backing::File(f) => f.name.clone(),
+                _ => String::new(),
+            };
+            out.push((s, v.end, v.prot, v.off, name));
+        }
+        out
+    });
+    out.sort_by_key(|a| a.0);
+    out
 }
 
 pub fn new_map() -> BTreeMap<u64, Vma> {

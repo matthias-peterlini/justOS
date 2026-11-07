@@ -136,6 +136,10 @@ pub struct LinuxState {
     pub pending: Vec<signal::Pending>,
     /// The program, as a Linux path.
     pub exe: String,
+    /// What the loader placed (the program's and the dynamic loader's
+    /// segments, the stack), for /proc/self/maps: start, end, protection,
+    /// file offset and name.
+    pub images: Vec<mm::Image>,
 }
 
 const BRK_BASE: u64 = 0x1000_0000_0000;
@@ -158,6 +162,7 @@ impl LinuxState {
             sigthreads: BTreeMap::new(),
             pending: Vec::new(),
             exe: String::new(),
+            images: Vec::new(),
         }
     }
 }
@@ -211,6 +216,7 @@ pub fn fork_state(child: u32, tid: task::Tid) {
         sigthreads: signal::forked(st, me, tid),
         pending: Vec::new(),
         exe: st.exe.clone(),
+        images: st.images.clone(),
     });
     if let Some(c) = copy {
         states.insert(child, c);
@@ -264,7 +270,7 @@ pub fn load(elf: &[u8], name: &str, args: &str, exe: &str) -> Result<(u64, u64),
 /// Maps a program (and the dynamic loader it names) into the current,
 /// empty address space and builds its stack with `argv` and `envp`.
 fn load_program(elf: &[u8], name: &str, argv: &[String], envp: &[String], exe_linux: &str) -> Result<(u64, u64), JustError> {
-    let info = map_segments(elf, PIE_BASE).map_err(|_| JustError::BadProgram)?;
+    let info = map_segments(elf, PIE_BASE, exe_linux).map_err(|_| JustError::BadProgram)?;
     let interp = match interpreter(elf) {
         Some(path) => Some(load_interpreter(name, &path)?),
         None => None,
@@ -279,10 +285,31 @@ fn load_program(elf: &[u8], name: &str, argv: &[String], envp: &[String], exe_li
     Ok((interp.map_or(info.entry, |i| i.entry), stack))
 }
 
+/// Variables the shell's `export` added to the environment of the Linux
+/// programs justOS starts ("NAME=value"; they replace defaults of the same
+/// name).
+static EXTRA_ENV: crate::sync::IrqLock<Vec<String>> = crate::sync::IrqLock::new(Vec::new());
+
+/// Sets a variable for the Linux programs started from now on; an empty
+/// value takes it away again.
+pub fn set_env(name: &str, value: &str) {
+    let mut env = EXTRA_ENV.lock();
+    env.retain(|v| v.split_once('=').map(|(n, _)| n) != Some(name));
+    if !value.is_empty() {
+        env.push(alloc::format!("{name}={value}"));
+    }
+}
+
+pub fn extra_env() -> Vec<String> {
+    EXTRA_ENV.lock().clone()
+}
+
 /// The environment of a Linux program justOS starts (one started by
 /// another Linux program gets what that one passes to execve).
 fn default_env() -> Vec<String> {
     let (cols, rows) = crate::console::size();
+    let extra = extra_env();
+    let set = |v: &String| extra.iter().any(|e| e.split_once('=').map(|(n, _)| n) == v.split_once('=').map(|(n, _)| n));
     ["PATH=/apps:/usr/local/bin:/usr/bin:/bin", "HOME=/home", "USER=root", "LANG=C.UTF-8", "TERM=xterm", "SHELL=/bin/sh", "TMPDIR=/home/tmp"]
         .iter()
         .map(|s| s.to_string())
@@ -291,6 +318,8 @@ fn default_env() -> Vec<String> {
         // GTK and GLib: settings kept in memory (there is no dconf service)
         // and no accessibility bus to look for.
         .chain(["GSETTINGS_BACKEND=memory", "NO_AT_BRIDGE=1"].iter().map(|s| s.to_string()))
+        .filter(|v| !set(v))
+        .chain(extra.iter().cloned())
         .collect()
 }
 
@@ -328,7 +357,7 @@ fn load_interpreter(name: &str, path: &str) -> Result<Loaded, JustError> {
         crate::println!("\x1b[91m{name}: {path} is not a dynamic loader\x1b[0m");
         return Err(JustError::BadProgram);
     }
-    map_segments(&bytes, INTERP_BASE).map_err(|_| JustError::BadProgram)
+    map_segments(&bytes, INTERP_BASE, path).map_err(|_| JustError::BadProgram)
 }
 
 struct Loaded {
@@ -357,8 +386,9 @@ fn u64_at(b: &[u8], o: usize) -> Option<u64> {
 
 /// Maps the loadable segments of an ELF (ET_EXEC at its own addresses, a
 /// PIE or shared object moved so its lowest page is at `pie_base`) and
-/// returns where the headers landed.
-fn map_segments(elf: &[u8], pie_base: u64) -> Result<Loaded, ()> {
+/// returns where the headers landed. `name` is the file, as Linux shows
+/// it in /proc/self/maps.
+fn map_segments(elf: &[u8], pie_base: u64, name: &str) -> Result<Loaded, ()> {
     if elf.len() < 64 || &elf[..4] != b"\x7fELF" || elf[4] != 2 || elf[5] != 1 {
         return Err(());
     }
@@ -393,6 +423,7 @@ fn map_segments(elf: &[u8], pie_base: u64) -> Result<Loaded, ()> {
     for i in 0..phnum {
         let p = (phoff + i * phentsize) as usize;
         let kind = u32_at(elf, p).ok_or(())?;
+        let flags = u32_at(elf, p + 4).ok_or(())?;
         let offset = u64_at(elf, p + 8).ok_or(())?;
         let vaddr = u64_at(elf, p + 16).ok_or(())?.wrapping_add(bias);
         let filesz = u64_at(elf, p + 32).ok_or(())?;
@@ -412,6 +443,10 @@ fn map_segments(elf: &[u8], pie_base: u64) -> Result<Loaded, ()> {
         let end = mem::align_up(vaddr + memsz, PAGE_SIZE);
         top = top.max(end);
         map_maybe(start, end - start).map_err(|_| ())?;
+        // PF_R 4, PF_W 2, PF_X 1 as PROT_READ 1, PROT_WRITE 2, PROT_EXEC 4.
+        let prot = (flags >> 2 & 1) | (flags & 2) | (flags & 1) << 2;
+        let image = mm::Image { start, end, prot, off: offset & !(PAGE_SIZE - 1), name: name.into() };
+        with_state(|st| st.images.push(image));
         // SAFETY: the range was just mapped writable in this address space.
         unsafe {
             core::ptr::copy_nonoverlapping(elf.as_ptr().add(offset as usize), vaddr as *mut u8, filesz as usize);
@@ -504,6 +539,8 @@ fn build_stack(info: &Loaded, interp_base: u64, argv: &[String], envp: &[String]
     // The rest of an 8 MiB stack comes page by page as it is used.
     with_state(|st| {
         st.vmas.insert(top - mm::STACK_RESERVE, mm::Vma::anon(bottom, mm::PROT_READ | mm::PROT_WRITE));
+        let rw = mm::PROT_READ | mm::PROT_WRITE;
+        st.images.push(mm::Image { start: top - mm::STACK_RESERVE, end: top, prot: rw, off: 0, name: "[stack]".into() });
     });
 
     // String area at the top; collect the addresses as we go.
@@ -727,16 +764,25 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         130 => signal::sys_rt_sigsuspend(a[0]),
         131 => signal::sys_sigaltstack(a[0], a[1]),
         137 | 138 => sys_statfs(a[1]),
+        140 => 20, // getpriority: 20 - nice, nice 0
+        141 => 0,  // setpriority
+        142 | 144 => 0, // sched_setparam, sched_setscheduler: accepted, changes nothing
+        143 => zero_out(a[1], 4), // sched_getparam: priority 0
+        145 => 0, // sched_getscheduler: SCHED_OTHER
+        146 => if matches!(a[0], 1 | 2) { 99 } else { 0 }, // sched_get_priority_max: FIFO, RR
+        147 => if matches!(a[0], 1 | 2) { 1 } else { 0 },  // sched_get_priority_min
         157 => 0, // prctl
         158 => sys_arch_prctl(a[0], a[1]),
         160 => 0, // setrlimit
         186 => thread::sys_gettid(),
+        187 => 0, // readahead: the cache reads what is asked
         200 => signal::sys_tgkill(0, a[0] as i64, a[1]),
         201 => sys_time(a[0]),
         202 => thread::sys_futex(a[0], a[1], a[2], a[3], a[4], a[5]),
         203 => 0, // sched_setaffinity
         204 => sys_sched_getaffinity(a[1], a[2]),
         213 => poll::sys_epoll_create1(0),
+        221 => 0, // fadvise64: only advice
         218 => thread::sys_set_tid_address(a[0]),
         228 => sys_clock_gettime(a[0], a[1]),
         229 => sys_clock_getres(a[1]),
@@ -766,13 +812,14 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         291 => poll::sys_epoll_create1(a[0] as u32),
         292 => fd::sys_dup3(fd0, a[1] as i32, a[2] as u32),
         293 => fd::sys_pipe2(a[0], a[1] as u32),
-        302 => sys_prlimit(a[2], a[3]),
+        302 => sys_prlimit(a[1], a[3]),
         309 => sys_getcpu(a[0], a[1]),
         318 => sys_getrandom(a[0], a[1]),
         322 if a[0] as i32 == fd::AT_FDCWD || a[4] == 0 => sys_execve(a[1], a[2], a[3]), // execveat
         324 => 0, // membarrier
         332 => fd::sys_statx(fd0, a[1], a[2], a[4]),
         435 => -err::ENOSYS, // clone3: callers fall back to clone
+        436 => fd::sys_close_range(a[0] as u32, a[1] as u32, a[2] as u32),
         441 => poll::sys_epoll_pwait2(fd0, a[1], a[2] as i32, a[3]),
         _ => -err::ENOSYS,
     }
@@ -898,6 +945,7 @@ fn reset_for_exec() {
         let gone: Vec<i32> = st.fds.iter().filter(|(_, (_, cloexec))| *cloexec).map(|(&fd, _)| fd).collect();
         let closed = gone.iter().filter_map(|fd| st.fds.remove(fd)).collect();
         st.vmas = mm::new_map();
+        st.images.clear();
         st.mmap_next = mm::MMAP_BASE;
         st.clear_tid.clear();
         for act in st.sigactions.iter_mut() {
@@ -1141,14 +1189,15 @@ fn sys_nanosleep(req: u64) -> i64 {
 }
 
 /// (seconds, nanoseconds) on one of the Linux clocks.
+/// Seconds and nanoseconds on clock `id`: the wall clock (realtime and its
+/// variants) is the start time plus the uptime, so both move together and
+/// neither goes back.
 fn clock_now(id: u64) -> (u64, u64) {
-    let ms = crate::time::uptime_ms();
-    // A finer counter for the sub-millisecond part.
-    let tsc = unsafe { core::arch::x86_64::_rdtsc() };
-    let sub = (tsc % 1_000_000) / 1000 * 1000 % 1_000_000;
+    let ns = crate::time::uptime_ns();
+    let (s, sub) = (ns / 1_000_000_000, ns % 1_000_000_000);
     match id {
-        0 | 5 | 8 | 11 => (crate::time::unix_now(), (ms % 1000) * 1_000_000 + sub % 1_000_000 / 1000), // realtime
-        _ => (ms / 1000, (ms % 1000) * 1_000_000 + sub % 1_000_000 / 1000),                          // monotonic, boottime, cputime
+        0 | 5 | 8 | 11 => (crate::time::boot_unix() + s, sub), // realtime
+        _ => (s, sub), // monotonic, boottime, cputime
     }
 }
 
@@ -1170,8 +1219,9 @@ fn sys_clock_getres(tp: u64) -> i64 {
     }
     match user_bytes(tp, 16) {
         Ok(b) => {
+            // The tick refined by the time stamp counter (see uptime_ns).
             b[0..8].copy_from_slice(&0u64.to_le_bytes());
-            b[8..16].copy_from_slice(&1_000_000u64.to_le_bytes());
+            b[8..16].copy_from_slice(&1000u64.to_le_bytes());
             0
         }
         Err(e) => e,
@@ -1270,6 +1320,8 @@ fn sys_getrlimit(resource: u64, ptr: u64) -> i64 {
     }
 }
 
+/// prlimit64(pid, resource, new, old): limits are fixed here, so a new one
+/// is accepted and changes nothing.
 fn sys_prlimit(resource: u64, old: u64) -> i64 {
     if old != 0 {
         return sys_getrlimit(resource, old);

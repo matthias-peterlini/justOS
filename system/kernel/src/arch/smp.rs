@@ -17,6 +17,13 @@
 //! and waits until they have. A processor that waits for a lock with
 //! interrupts off answers such requests while it spins ([`service`]), so
 //! two processors cannot wait for each other.
+//!
+//! Threads of user programs run on every processor. Each processor says
+//! which address space it has loaded ([`load_cr3`]); a page of a program
+//! that is unmapped or changed is flushed only where that program runs
+//! ([`shootdown_user`]), and an address space is freed only once no
+//! processor has it loaded ([`wait_unloaded`]). Switching address spaces
+//! flushes the TLB, so a processor running something else holds nothing.
 
 use super::{apic, cpu, gdt, idt, syscall};
 use crate::mem::{self, paging, region};
@@ -56,6 +63,12 @@ pub struct PerCpu {
     online: AtomicBool,
     /// The top of its idle thread's stack (where it starts again after sleep).
     stack_top: AtomicU64,
+    /// The address space loaded (see [`load_cr3`]).
+    cr3: AtomicU64,
+    /// Flushes asked of this processor alone ([`shootdown_user`]), and the
+    /// count it had seen at its last flush.
+    flush_asked: AtomicU64,
+    flush_done: AtomicU64,
 }
 
 impl PerCpu {
@@ -68,6 +81,9 @@ impl PerCpu {
             tlb_seen: AtomicU64::new(0),
             online: AtomicBool::new(false),
             stack_top: AtomicU64::new(0),
+            cr3: AtomicU64::new(0),
+            flush_asked: AtomicU64::new(0),
+            flush_done: AtomicU64::new(0),
         }
     }
 }
@@ -188,9 +204,11 @@ pub fn service() {
     }
     let want = TLB_GEN.load(Ordering::Acquire);
     let me = &CPUS[this_cpu()];
-    if me.tlb_seen.load(Ordering::Relaxed) < want {
+    let asked = me.flush_asked.load(Ordering::Acquire);
+    if me.tlb_seen.load(Ordering::Relaxed) < want || me.flush_done.load(Ordering::Relaxed) < asked {
         flush_all();
-        me.tlb_seen.store(want, Ordering::Release);
+        me.tlb_seen.fetch_max(want, Ordering::Release);
+        me.flush_done.store(asked, Ordering::Release);
     }
 }
 
@@ -217,6 +235,86 @@ pub fn shootdown() {
             service();
             core::hint::spin_loop();
             spins += 1;
+        }
+    }
+}
+
+/// Loads the address space `pml4` on this processor, after saying so: a
+/// processor changing a page of it then sees that this one may hold the
+/// page in its TLB. (Its change comes before it looks; this store comes
+/// before the load, which flushes the TLB.)
+///
+/// # Safety
+/// `pml4` must map the kernel half, as every address space does.
+pub unsafe fn load_cr3(pml4: u64) {
+    CPUS[this_cpu()].cr3.store(pml4, Ordering::SeqCst);
+    core::sync::atomic::fence(Ordering::SeqCst);
+    // SAFETY: the caller's promise.
+    unsafe { cpu::write_cr3(pml4) };
+}
+
+/// Does another online processor have `pml4` loaded?
+fn loaded_elsewhere(c: &PerCpu, me: usize, i: usize, pml4: u64) -> bool {
+    i != me && c.online.load(Ordering::Acquire) && c.cr3.load(Ordering::SeqCst) == pml4
+}
+
+/// After a page of the user address space `pml4` was unmapped or changed
+/// (and dropped from this processor's TLB), before its frame is used
+/// again: the other processors running in that address space, and only
+/// they, flush their TLBs. Nothing to do for a program running only here
+/// (most of them).
+pub fn shootdown_user(pml4: u64) {
+    if ONLINE.load(Ordering::Acquire) <= 1 {
+        return;
+    }
+    core::sync::atomic::fence(Ordering::SeqCst);
+    let me = this_cpu();
+    let mut asked = [0u64; MAX_CPUS];
+    let mut sent = 0;
+    for (i, c) in CPUS.iter().enumerate() {
+        if loaded_elsewhere(c, me, i, pml4) {
+            asked[i] = c.flush_asked.fetch_add(1, Ordering::AcqRel) + 1;
+            apic::send_to(c.apic_id.load(Ordering::Relaxed), VEC_TLB);
+            sent += 1;
+        }
+    }
+    if sent == 0 {
+        return;
+    }
+    let mut spins = 0u64;
+    for (i, c) in CPUS.iter().enumerate() {
+        // One that switched to another address space meanwhile is done too.
+        let start = spins;
+        while asked[i] != 0 && loaded_elsewhere(c, me, i, pml4) && c.flush_done.load(Ordering::Acquire) < asked[i] && spins - start < 200_000_000 {
+            service();
+            core::hint::spin_loop();
+            spins += 1;
+        }
+    }
+    USER_FLUSHES.fetch_add(1, Ordering::Relaxed);
+    USER_IPIS.fetch_add(sent, Ordering::Relaxed);
+    USER_SPINS.fetch_add(spins, Ordering::Relaxed);
+}
+
+/// What [`shootdown_user`] cost so far (the shell's `cpus`).
+static USER_FLUSHES: AtomicU64 = AtomicU64::new(0);
+static USER_IPIS: AtomicU64 = AtomicU64::new(0);
+static USER_SPINS: AtomicU64 = AtomicU64::new(0);
+
+/// Flushes of program pages that had to ask other processors, the IPIs
+/// sent for them and the spins spent waiting for the answers.
+pub fn user_flush_stats() -> (u64, u64, u64) {
+    (USER_FLUSHES.load(Ordering::Relaxed), USER_IPIS.load(Ordering::Relaxed), USER_SPINS.load(Ordering::Relaxed))
+}
+
+/// Waits until no other processor has `pml4` loaded, before it is freed:
+/// the other threads of a program that ended may still be switching away.
+pub fn wait_unloaded(pml4: u64) {
+    let me = this_cpu();
+    for (i, c) in CPUS.iter().enumerate() {
+        while loaded_elsewhere(c, me, i, pml4) {
+            service();
+            core::hint::spin_loop();
         }
     }
 }
@@ -338,6 +436,7 @@ fn setup_here(index: usize) {
     // After the GDT: loading the segment registers may clear the GS base.
     CPUS[index].index.store(index as u64, Ordering::Relaxed);
     set_gs(index);
+    CPUS[index].cr3.store(paging::kernel_pml4(), Ordering::SeqCst);
     let id = apic::enable_here();
     CPUS[index].apic_id.store(id, Ordering::Relaxed);
 }

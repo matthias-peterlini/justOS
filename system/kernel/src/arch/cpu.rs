@@ -210,10 +210,12 @@ pub fn enable_sse() {
     let (mut cr0, mut cr4): (u64, u64);
     // SAFETY: ring 0. Clears CR0.EM (no x87 emulation), sets CR0.MP, and sets
     // CR4.OSFXSR | CR4.OSXMMEXCPT so the CPU saves SSE state and reports SSE
-    // exceptions as #XF.
+    // exceptions as #XF. Also sets CR0.WP: the kernel too faults when it
+    // writes to a read-only page, which is how a Linux program's page that
+    // still maps a file's shared frame gets copied first.
     unsafe {
         asm!("mov {}, cr0", out(reg) cr0, options(nomem, nostack, preserves_flags));
-        cr0 = (cr0 & !(1 << 2)) | (1 << 1);
+        cr0 = (cr0 & !(1 << 2)) | (1 << 1) | (1 << 16);
         asm!("mov cr0, {}", in(reg) cr0, options(nomem, nostack, preserves_flags));
         asm!("mov {}, cr4", out(reg) cr4, options(nomem, nostack, preserves_flags));
         cr4 |= (1 << 9) | (1 << 10);

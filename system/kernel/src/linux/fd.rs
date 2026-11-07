@@ -154,6 +154,36 @@ pub fn sys_close(fd: i32) -> i64 {
     }
 }
 
+/// close_range: closes the open descriptors from `first` to `last`, or
+/// with CLOSE_RANGE_CLOEXEC only marks them close-on-exec (what programs
+/// do before starting another one, instead of trying every number).
+pub fn sys_close_range(first: u32, last: u32, flags: u32) -> i64 {
+    const CLOSE_RANGE_UNSHARE: u32 = 2;
+    const CLOSE_RANGE_CLOEXEC: u32 = 4;
+    if first > last || flags & !(CLOSE_RANGE_UNSHARE | CLOSE_RANGE_CLOEXEC) != 0 {
+        return -err::EINVAL;
+    }
+    let (lo, hi) = (first.min(i32::MAX as u32) as i32, last.min(i32::MAX as u32) as i32);
+    let closed: Vec<(Arc<Desc>, bool)> = with_state(|st| {
+        if flags & CLOSE_RANGE_CLOEXEC != 0 {
+            for (_, (_, cloexec)) in st.fds.range_mut(lo..=hi) {
+                *cloexec = true;
+            }
+            return Vec::new();
+        }
+        let fds: Vec<i32> = st.fds.range(lo..=hi).map(|(&fd, _)| fd).collect();
+        fds.iter().filter_map(|fd| st.fds.remove(fd)).collect()
+    });
+    // Dropped outside the state lock, as in close.
+    drop(closed);
+    0
+}
+
+/// The open descriptor numbers of the calling process (/proc/self/fd).
+pub fn open_numbers() -> Vec<i32> {
+    with_state(|st| st.fds.keys().copied().collect())
+}
+
 pub fn sys_dup(fd: i32) -> i64 {
     match get(fd) {
         Some(d) => install(d, false),
@@ -169,7 +199,10 @@ pub fn sys_dup3(old: i32, new: i32, flags: u32) -> i64 {
     if !(0..4096).contains(&new) {
         return -err::EBADF;
     }
-    let prev = with_state(|st| st.fds.insert(new, (d, flags & O_CLOEXEC != 0)));
+    // dup2 (flags u32::MAX) never marks the copy close-on-exec: programs
+    // dup2 descriptors into place right before starting another program.
+    let cloexec = flags != u32::MAX && flags & O_CLOEXEC != 0;
+    let prev = with_state(|st| st.fds.insert(new, (d, cloexec)));
     drop(prev);
     new as i64
 }
@@ -216,9 +249,10 @@ fn virtual_file(text: &str) -> Option<Kind> {
         "/etc/localtime" => None,
         "/proc/self/maps" => {
             let mut s = String::new();
-            for (a, b, prot) in super::mm::areas() {
+            for (a, b, prot, off, name) in super::mm::areas() {
                 let r = |bit, c| if prot & bit != 0 { c } else { '-' };
-                s.push_str(&alloc::format!("{a:x}-{b:x} {}{}{}p 00000000 00:00 0\n", r(1, 'r'), r(2, 'w'), r(4, 'x')));
+                let line = alloc::format!("{a:x}-{b:x} {}{}{}p {off:08x} 00:00 0", r(1, 'r'), r(2, 'w'), r(4, 'x'));
+                s.push_str(&alloc::format!("{line:<72} {name}\n"));
             }
             data(s)
         }
@@ -272,6 +306,13 @@ fn open_path(path: &Path, text: &str, flags: u32) -> i64 {
     let keep = flags & (O_NONBLOCK | O_APPEND | 3);
     if let Some(kind) = virtual_file(text) {
         return install(Desc::new(kind, keep), cloexec);
+    }
+    if matches!(text.trim_end_matches('/'), "/proc/self/fd" | "/proc/thread-self/fd") {
+        // The open descriptors, as a folder of numbers (programs read it to
+        // close what a child must not inherit).
+        let mut names = vec![(String::from("."), true), (String::from(".."), true)];
+        names.extend(open_numbers().into_iter().map(|n| (alloc::format!("{n}"), false)));
+        return install(Desc::new(Kind::Dir { path: path.clone(), names: IrqLock::new(Some(names)) }, keep), cloexec);
     }
     let writable = flags & (O_WRONLY | O_RDWR) != 0;
     match fs::stat(path) {
@@ -853,10 +894,14 @@ pub fn sys_unlinkat(dirfd: i32, path_ptr: u64) -> i64 {
     match path_arg(dirfd, path_ptr) {
         // A local socket's name.
         Ok((p, _)) if super::unix::unlink(&p) => 0,
-        Ok((p, _)) => match fs::remove(&p) {
-            Ok(()) => 0,
-            Err(e) => -errno(user::fs_error(e)),
-        },
+        Ok((p, _)) => {
+            // Mappings of it keep what they map.
+            super::mm::forget_file(&p);
+            match fs::remove(&p) {
+                Ok(()) => 0,
+                Err(e) => -errno(user::fs_error(e)),
+            }
+        }
         Err(e) => e,
     }
 }
@@ -866,6 +911,9 @@ pub fn sys_renameat(olddir: i32, old: u64, newdir: i32, new: u64) -> i64 {
         (Ok((a, _)), Ok((b, _))) => (a, b),
         (Err(e), _) | (_, Err(e)) => return e,
     };
+    // Mappings of either keep what they map.
+    super::mm::forget_file(&from);
+    super::mm::forget_file(&to);
     if fs::exists(&to) && !fs::is_dir(&to) {
         let _ = fs::remove(&to);
     }

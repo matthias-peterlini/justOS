@@ -6,6 +6,7 @@
 use super::{err, user_bytes, with_state};
 use crate::arch::cpu;
 use crate::arch::idt::TrapFrame;
+use crate::mem::paging;
 use crate::sync::IrqLock;
 use crate::task::{self, Tid, WaitQueue};
 use crate::user;
@@ -152,7 +153,7 @@ pub fn sys_exit(code: i64) -> ! {
             if let Ok(b) = user_bytes(ctid, 4) {
                 b.copy_from_slice(&0u32.to_le_bytes());
             }
-            futex_wake(ctid, 1, u32::MAX);
+            futex_wake(futex_key(ctid, true), 1, u32::MAX);
         }
     }
     user::exit_thread(code)
@@ -162,8 +163,7 @@ pub fn sys_exit(code: i64) -> ! {
 // Futexes
 
 struct Waiter {
-    cr3: u64,
-    addr: u64,
+    key: Key,
     tid: Tid,
     bitset: u32,
     woken: bool,
@@ -182,14 +182,33 @@ const FUTEX_WAKE_BITSET: u64 = 10;
 const FUTEX_PRIVATE: u64 = 128;
 const FUTEX_CLOCK_REALTIME: u64 = 256;
 
+/// What a futex word is known by. A private one (or any word of memory a
+/// process has to itself): its address space and address. A shared one in
+/// memory that processes share: the frame and the offset in it, which every
+/// process mapping that memory sees the same.
+type Key = (u64, u64);
+
+fn futex_key(addr: u64, shared: bool) -> Key {
+    let cr3 = cpu::read_cr3();
+    if shared {
+        super::mm::populate(addr, 4);
+        let page = addr & !0xfff;
+        if let Some(e) = paging::entry_in(cr3, page) {
+            if e & paging::SHARED != 0 && e & paging::WRITE != 0 {
+                return (0, (e & paging::ADDR_MASK) | (addr & 0xfff));
+            }
+        }
+    }
+    (cr3, addr)
+}
+
 fn read_u32(addr: u64) -> Result<u32, i64> {
     super::mm::populate(addr, 4);
     let b = user_bytes(addr, 4)?;
     Ok(u32::from_le_bytes(b[..4].try_into().unwrap()))
 }
 
-fn futex_wake(addr: u64, n: u32, bitset: u32) -> i64 {
-    let cr3 = cpu::read_cr3();
+fn futex_wake(key: Key, n: u32, bitset: u32) -> i64 {
     let mut count = 0;
     {
         let mut w = WAITERS.lock();
@@ -197,7 +216,7 @@ fn futex_wake(addr: u64, n: u32, bitset: u32) -> i64 {
             if count >= n {
                 break;
             }
-            if !x.woken && x.cr3 == cr3 && x.addr == addr && x.bitset & bitset != 0 {
+            if !x.woken && x.key == key && x.bitset & bitset != 0 {
                 x.woken = true;
                 count += 1;
             }
@@ -210,17 +229,18 @@ fn futex_wake(addr: u64, n: u32, bitset: u32) -> i64 {
 }
 
 /// Waits while `*addr == val`; `deadline` is an uptime in ms.
-fn futex_wait(addr: u64, val: u32, deadline: Option<u64>, bitset: u32) -> i64 {
+fn futex_wait(addr: u64, shared: bool, val: u32, deadline: Option<u64>, bitset: u32) -> i64 {
     if bitset == 0 {
         return -err::EINVAL;
     }
     super::mm::populate(addr, 4);
-    let cr3 = cpu::read_cr3();
+    let key = futex_key(addr, shared);
     let me = task::current_tid();
     {
-        // Compare and queue with interrupts off: the threads of programs all
-        // run on the first processor, so none runs in between and no
-        // wake-up is lost.
+        // Compare and queue under the lock futex_wake takes: a thread that
+        // changes the word and then wakes (on any processor) either changed
+        // it before the compare or finds this one queued, so no wake-up is
+        // lost.
         let mut w = WAITERS.lock();
         let cur = match user_bytes(addr, 4) {
             Ok(b) => u32::from_le_bytes(b[..4].try_into().unwrap()),
@@ -229,7 +249,7 @@ fn futex_wait(addr: u64, val: u32, deadline: Option<u64>, bitset: u32) -> i64 {
         if cur != val {
             return -err::EAGAIN;
         }
-        w.push(Waiter { cr3, addr, tid: me, bitset, woken: false });
+        w.push(Waiter { key, tid: me, bitset, woken: false });
     }
     let woken = |me: Tid| WAITERS.lock().iter().any(|x| x.tid == me && x.woken);
     let result = loop {
@@ -263,23 +283,25 @@ fn timeout_deadline(ts: u64, absolute: bool, realtime: bool) -> Result<Option<u6
         return Ok(Some(now.saturating_add(ms)));
     }
     // An absolute time on the clock the program used.
-    let clock_now = if realtime { crate::time::unix_now() * 1000 + now % 1000 } else { now };
+    let clock_now = if realtime { crate::time::boot_unix() * 1000 + now } else { now };
     Ok(Some(now + ms.saturating_sub(clock_now)))
 }
 
 pub fn sys_futex(addr: u64, op: u64, val: u64, ts: u64, addr2: u64, val3: u64) -> i64 {
     let realtime = op & FUTEX_CLOCK_REALTIME != 0;
+    let shared = op & FUTEX_PRIVATE == 0;
+    let key = |addr| futex_key(addr, shared);
     match op & !(FUTEX_PRIVATE | FUTEX_CLOCK_REALTIME) {
         FUTEX_WAIT => match timeout_deadline(ts, false, false) {
-            Ok(d) => futex_wait(addr, val as u32, d, u32::MAX),
+            Ok(d) => futex_wait(addr, shared, val as u32, d, u32::MAX),
             Err(e) => e,
         },
         FUTEX_WAIT_BITSET => match timeout_deadline(ts, true, realtime) {
-            Ok(d) => futex_wait(addr, val as u32, d, val3 as u32),
+            Ok(d) => futex_wait(addr, shared, val as u32, d, val3 as u32),
             Err(e) => e,
         },
-        FUTEX_WAKE => futex_wake(addr, val as u32, u32::MAX),
-        FUTEX_WAKE_BITSET => futex_wake(addr, val as u32, val3 as u32),
+        FUTEX_WAKE => futex_wake(key(addr), val as u32, u32::MAX),
+        FUTEX_WAKE_BITSET => futex_wake(key(addr), val as u32, val3 as u32),
         op @ (FUTEX_REQUEUE | FUTEX_CMP_REQUEUE) => {
             if op == FUTEX_CMP_REQUEUE {
                 match read_u32(addr) {
@@ -288,46 +310,56 @@ pub fn sys_futex(addr: u64, op: u64, val: u64, ts: u64, addr2: u64, val3: u64) -
                     _ => {}
                 }
             }
-            let woken = futex_wake(addr, val as u32, u32::MAX);
+            let (from, to) = (key(addr), key(addr2));
+            let woken = futex_wake(from, val as u32, u32::MAX);
             // `ts` carries the number to move to addr2.
             let limit = ts as u32;
-            let cr3 = cpu::read_cr3();
             let mut moved = 0;
             for x in WAITERS.lock().iter_mut() {
                 if moved >= limit {
                     break;
                 }
-                if !x.woken && x.cr3 == cr3 && x.addr == addr {
-                    x.addr = addr2;
+                if !x.woken && x.key == from {
+                    x.key = to;
                     moved += 1;
                 }
             }
             woken + moved as i64
         }
         FUTEX_WAKE_OP => {
-            let opcode = (val3 >> 28) & 7;
+            // op (4 bits, 8 = "oparg is a shift"), cmp, oparg, cmparg.
+            let op4 = (val3 >> 28) & 15;
+            let opcode = op4 & 7;
             let cmp = (val3 >> 24) & 15;
             let mut oparg = ((val3 >> 12) & 0xfff) as u32;
             let cmparg = (val3 & 0xfff) as u32;
-            if opcode & 8 != 0 {
+            if op4 & 8 != 0 {
                 oparg = 1 << (oparg & 31);
+            }
+            if addr2 % 4 != 0 {
+                return -err::EINVAL;
             }
             super::mm::populate(addr2, 4);
             let old = {
                 let _w = WAITERS.lock();
                 let Ok(b) = user_bytes(addr2, 4) else { return -err::EFAULT };
-                let old = u32::from_le_bytes(b[..4].try_into().unwrap());
-                let new = match opcode & 7 {
-                    0 => oparg,
-                    1 => old.wrapping_add(oparg),
-                    2 => old | oparg,
-                    3 => old & !oparg,
-                    _ => old ^ oparg,
-                };
-                b.copy_from_slice(&new.to_le_bytes());
-                old
+                // Atomically: threads on other processors change the word
+                // with atomic instructions meanwhile.
+                // SAFETY: four mapped, aligned bytes of the program's memory.
+                let word = unsafe { &*(b.as_ptr() as *const core::sync::atomic::AtomicU32) };
+                let order = core::sync::atomic::Ordering::SeqCst;
+                let r = word.fetch_update(order, order, |old| {
+                    Some(match opcode & 7 {
+                        0 => oparg,
+                        1 => old.wrapping_add(oparg),
+                        2 => old | oparg,
+                        3 => old & !oparg,
+                        _ => old ^ oparg,
+                    })
+                });
+                r.unwrap_or_else(|old| old)
             };
-            let mut n = futex_wake(addr, val as u32, u32::MAX);
+            let mut n = futex_wake(key(addr), val as u32, u32::MAX);
             let hit = match cmp {
                 0 => old == cmparg,
                 1 => old != cmparg,
@@ -337,7 +369,7 @@ pub fn sys_futex(addr: u64, op: u64, val: u64, ts: u64, addr2: u64, val3: u64) -
                 _ => (old as i32) >= cmparg as i32,
             };
             if hit {
-                n += futex_wake(addr2, ts as u32, u32::MAX);
+                n += futex_wake(key(addr2), ts as u32, u32::MAX);
             }
             n
         }

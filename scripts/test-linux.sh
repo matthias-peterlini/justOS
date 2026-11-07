@@ -79,7 +79,9 @@ fi
         'dt: unix refused 111 missing 2' 'dt: seqpacket 2 3 dgram 2 trunc 1' 'dt: dgram 4 from @dt-b len=7' \
         'dt: unix eagain 11 eof 0 epipe 32 hup 1' \
         'dt: memfd shared pread=shared child=child was here seal=1 link=/memfd:dt (deleted)' 'dt: shared anon 42' \
-        'dt: memfd passed from the child exit=0' 'dt: shm_open hello 11 again 2'
+        'dt: memfd passed from the child exit=0' 'dt: shm_open hello 11 again 2' \
+        'dt: nofile finite=1' 'dt: dup2 survives exec sock=1 cloexec=0' 'dt: dup2 exec got k exit=5' \
+        'dt: proc fd 50=1 1=1 close_range 0 closed=1' 'dt: pshared semaphore exit=6'
 } > expect.txt
 
 STEP_WAIT=${STEP_WAIT:-2} "$HERE/test.sh" justos.img session.txt > out.txt 2>&1

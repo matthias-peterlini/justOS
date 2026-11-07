@@ -342,6 +342,10 @@ pub(crate) fn write_in(pid: u32, addr: u64, data: &[u8]) {
         if at >= USER_TOP {
             return;
         }
+        // Not a file's page that the child still shares (unlikely there).
+        if paging::entry_in(cr3, at).is_some_and(|e| e & paging::WRITE == 0) {
+            continue;
+        }
         if let Some(phys) = paging::translate_in(cr3, at) {
             // SAFETY: a user page of that process, reached through the
             // direct map.
@@ -841,8 +845,9 @@ pub(crate) fn main_thread_of(pid: u32) -> Option<Tid> {
     PROCS.lock().get(&pid).filter(|p| p.state == State::Running).map(|p| p.tid)
 }
 
-/// Called on timer interrupts: a program in user mode that is being
-/// stopped stops, and a Linux program gets the signal waiting for it.
+/// Called on timer interrupts (of every processor): a program in user mode
+/// that is being stopped stops, and a Linux program gets the signal
+/// waiting for it.
 pub fn check_kill(frame: &mut TrapFrame) {
     if !frame.is_user() {
         return;
@@ -975,13 +980,19 @@ pub(crate) fn map_fixed(addr: u64, len: u64) -> Result<(), Error> {
 pub(crate) fn unmap_range(addr: u64, len: u64) -> Result<(), Error> {
     let pages = user_range(addr, len)?;
     let cr3 = cpu::read_cr3();
+    let mut freed = Vec::new();
     for i in 0..pages {
         let virt = addr + i * PAGE_SIZE;
         if paging::user_accessible(cr3, virt) {
             if let Some(phys) = paging::unmap_in(cr3, virt) {
-                frame::free(phys);
+                freed.push(phys);
             }
         }
+    }
+    // Other threads of the program may still reach them through their TLBs.
+    crate::arch::smp::shootdown_user(cr3);
+    for phys in freed {
+        frame::free(phys);
     }
     Ok(())
 }
@@ -1469,13 +1480,20 @@ pub fn fault(frame: &mut TrapFrame, what: &str) {
     }
     let cr2 = cpu::read_cr2();
     cpu::enable_irq();
-    // A Linux program may handle it (SIGSEGV and the like).
+    let extra = if frame.vector == 14 { alloc::format!(" (address {cr2:#x})") } else { String::new() };
+    // Where, in a Linux program: the library and the offset in it.
+    let place = match crate::linux::mm::describe(task::current_pid(), frame.rip) {
+        p if p.starts_with('(') => alloc::format!("{:#x}", frame.rip),
+        p => alloc::format!("{:#x} ({p})", frame.rip),
+    };
+    // A Linux program may handle it (SIGSEGV and the like); the journal
+    // says where it was all the same.
     if crate::linux::signal::fault(frame, cr2) {
+        crate::debug!("linux", "{} (process {}, thread {}): {what} at {place}{extra}, to its handler", current_name(), task::current_pid(), task::current_tid());
         cpu::disable_irq();
         return;
     }
-    let extra = if frame.vector == 14 { alloc::format!(" (address {:#x})", cpu::read_cr2()) } else { String::new() };
-    crate::println!("\x1b[91m{} stopped: {what} at {:#x}{extra}\x1b[0m", current_name(), frame.rip);
+    crate::println!("\x1b[91m{} stopped: {what} at {place}{extra}\x1b[0m", current_name());
     if let Some(title) = crate::gui::window::title_of(task::current_pid()) {
         crate::gui::notify(&title, "L'app si è chiusa per un errore.", "window");
     }

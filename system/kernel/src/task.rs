@@ -8,8 +8,9 @@
 //! A thread switched away from is handed to the next thread on the same
 //! processor ([`after_switch`]): only once its registers are saved can it be
 //! queued again, run elsewhere or, when it has ended, have its stack freed.
-//! Threads of user programs stay on the first processor, so their address
-//! spaces are never live anywhere else.
+//! Threads of user programs run anywhere too: the processors say which
+//! address space they have loaded, so that a page a program unmaps is
+//! flushed where the program runs ([`smp::shootdown_user`]).
 
 use crate::arch::smp::{self, MAX_CPUS};
 use crate::arch::{cpu, gdt, syscall};
@@ -124,17 +125,12 @@ impl Thread {
     fn stack_top(&self) -> u64 {
         self.stack + self.stack_pages * mem::PAGE_SIZE
     }
-
-    /// Threads of user programs run on the first processor only.
-    fn pinned(&self) -> bool {
-        self.pid != 0 || self.cr3 != 0
-    }
 }
 
-/// Whether a thread may run on `cpu`: the other processors run no user
-/// programs, and nothing while they are being stopped (before sleep).
-fn allowed_on(t: &Thread, cpu: usize) -> bool {
-    cpu == 0 || (!t.pinned() && !smp::parking())
+/// Whether a thread may run on `cpu`: the other processors run nothing
+/// while they are being stopped (before sleep).
+fn allowed_on(_t: &Thread, cpu: usize) -> bool {
+    cpu == 0 || !smp::parking()
 }
 
 /// What the scheduler keeps for each processor.
@@ -411,7 +407,7 @@ fn schedule() {
                 let target = if cr3 != 0 { cr3 } else { mem::paging::kernel_pml4() };
                 if cpu::read_cr3() != target {
                     // SAFETY: every address space maps the kernel half.
-                    unsafe { cpu::write_cr3(target) };
+                    unsafe { smp::load_cr3(target) };
                 }
                 s.cpus[me].current = next;
                 s.cpus[me].prev = Some((cur, requeue));
@@ -541,7 +537,7 @@ pub fn leave_address_space() {
         t.cr3 = 0;
     }
     // SAFETY: the kernel tables map everything the kernel needs.
-    unsafe { cpu::write_cr3(mem::paging::kernel_pml4()) };
+    unsafe { smp::load_cr3(mem::paging::kernel_pml4()) };
 }
 
 /// Moves the running thread to another address space (`execve`).
@@ -552,7 +548,7 @@ pub fn enter_address_space(cr3: u64) {
         t.cr3 = cr3;
     }
     // SAFETY: a new address space shares the kernel half.
-    unsafe { cpu::write_cr3(cr3) };
+    unsafe { smp::load_cr3(cr3) };
 }
 
 /// The running thread.
@@ -775,6 +771,14 @@ pub fn list() -> Vec<ThreadInfo> {
             pid: t.pid,
         })
         .collect()
+}
+
+/// The thread each running processor has on it, with the ready queue's
+/// length.
+pub fn on_cpus() -> (Vec<Tid>, usize) {
+    let s = SCHED.lock();
+    let n = smp::count().max(1);
+    (s.cpus[..n].iter().map(|c| c.current).collect(), s.ready.len())
 }
 
 /// Where a thread of a program that is not on a processor stopped in its

@@ -3,15 +3,19 @@
  * (fork, vfork, posix_spawn, execve of a #! script, waitpid), signals
  * (handlers, masks, faults, EINTR and SA_RESTART, SIGCHLD, kill, SIGPIPE)
  * local sockets (pairs, a named server, SCM_RIGHTS, datagrams) and shared
- * memory (memfd, MAP_SHARED across fork and over a socket, shm_open).
+ * memory (memfd, MAP_SHARED across fork and over a socket, shm_open),
+ * starting a child the way browsers do (dup2 into place, close the rest)
+ * and a process-shared semaphore.
  * Built by scripts/test-linux.sh with the host's gcc. */
 #define _GNU_SOURCE
+#include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <gnu/libc-version.h>
 #include <poll.h>
 #include <pthread.h>
+#include <semaphore.h>
 #include <setjmp.h>
 #include <signal.h>
 #include <spawn.h>
@@ -19,8 +23,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -129,6 +135,18 @@ int main(int argc, char **argv) {
     if (argc > 2 && strcmp(argv[1], "child") == 0) {
         printf("dt: child says %s home=%s\n", argv[2], getenv("HOME") ? getenv("HOME") : "-");
         return 3;
+    }
+    if (argc > 2 && strcmp(argv[1], "fdcheck") == 0) {
+        /* The descriptor dup2'd into place before exec is still open, still
+           the socket, and not close-on-exec. */
+        int fd = atoi(argv[2]), buf = 0;
+        socklen_t len = sizeof buf;
+        int sock = getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &buf, &len) == 0 && buf > 0;
+        int cloexec = fcntl(fd, F_GETFD) & FD_CLOEXEC;
+        if (write(fd, "k", 1) != 1)
+            return 1;
+        printf("dt: dup2 survives exec sock=%d cloexec=%d\n", sock, cloexec);
+        return 5;
     }
     if (argc > 2 && strcmp(argv[1], "shebang") == 0) {
         printf("dt: shebang %s\n", argv[2]);
@@ -637,5 +655,60 @@ int main(int argc, char **argv) {
     shm_unlink("/dt-shm");
     int gone = shm_open("/dt-shm", O_RDWR, 0) < 0 ? errno : 0;
     printf("dt: shm_open %s %d%d again %d\n", sb, ok1, ok2, gone);
+
+    /* Starting a child the way browsers do: as many descriptors as
+       getrlimit says, the channel dup2'd into place (the original is
+       close-on-exec), the rest listed in /proc/self/fd or closed with
+       close_range. */
+    struct rlimit rl;
+    getrlimit(RLIMIT_NOFILE, &rl);
+    printf("dt: nofile finite=%d\n", rl.rlim_cur != RLIM_INFINITY && rl.rlim_cur > 0);
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sv) != 0)
+        return 1;
+    fflush(stdout);
+    pid_t c12 = fork();
+    if (c12 == 0) {
+        char *fargs[] = {"dt", "fdcheck", "9", NULL};
+        if (dup2(sv[1], 9) != 9)
+            _exit(1);
+        execve(self, fargs, environ);
+        _exit(2);
+    }
+    close(sv[1]);
+    char ck = 0;
+    if (read(sv[0], &ck, 1) != 1)
+        ck = '-';
+    printf("dt: dup2 exec got %c exit=%d\n", ck, reap(c12));
+    close(sv[0]);
+    int listed50 = 0, listed1 = 0;
+    if (dup2(1, 50) == 50) {
+        DIR *dir = opendir("/proc/self/fd");
+        struct dirent *de;
+        while (dir && (de = readdir(dir)) != NULL) {
+            listed50 |= strcmp(de->d_name, "50") == 0;
+            listed1 |= strcmp(de->d_name, "1") == 0;
+        }
+        if (dir)
+            closedir(dir);
+    }
+    dup2(1, 51);
+    long ranged = syscall(SYS_close_range, 50, ~0U, 0);
+    int closed = fcntl(50, F_GETFD) < 0 && errno == EBADF && fcntl(51, F_GETFD) < 0;
+    printf("dt: proc fd 50=%d 1=%d close_range %ld closed=%d\n", listed50, listed1, ranged, closed);
+
+    /* A semaphore in memory both processes share: the child waits in the
+       kernel until the parent posts. */
+    sem_t *sem = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (sem == MAP_FAILED || sem_init(sem, 1, 0) != 0)
+        return 1;
+    fflush(stdout);
+    pid_t c13 = fork();
+    if (c13 == 0) {
+        sem_wait(sem);
+        _exit(6);
+    }
+    usleep(300000);
+    sem_post(sem);
+    printf("dt: pshared semaphore exit=%d\n", reap(c13));
     return 0;
 }
