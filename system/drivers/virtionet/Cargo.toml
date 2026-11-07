@@ -1,6 +1,6 @@
 [package]
 name = "virtionet"
-description = "JustOS driver: virtio network cards"
+description = "justOS driver: virtio network cards"
 version = "1.1.0"
 edition.workspace = true
 publish.workspace = true

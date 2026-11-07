@@ -1,10 +1,10 @@
 # L'interfaccia grafica
 
-Quando il loader trova uno schermo grafico di almeno 800x600, JustOS si avvia
+Quando il loader trova uno schermo grafico di almeno 800x600, justOS si avvia
 in modalità grafica. Sullo schermo non compare mai testo tecnico: il kernel
 scrive i suoi messaggi solo sulla porta seriale e nel giornale di sistema, e
 le righe di comando si vedono soltanto aprendo il Terminale. Anche un errore
-fatale mostra una schermata semplice («JustOS si è dovuto fermare»), con i
+fatale mostra una schermata semplice («justOS si è dovuto fermare»), con i
 dettagli solo sulla porta seriale.
 
 ## Avvio
@@ -30,7 +30,7 @@ Presa a modello da macOS:
   bianco o in nero secondo lo sfondo. Un clic apre il **centro notifiche**
   con il calendario del mese e le notifiche ricevute.
 - **Dock**: a sinistra il marchio **J▮**, che apre il menu di sistema
-  (*Info su JustOS*, *Impostazioni di sistema*, *Negozio*, *Monitor
+  (*Info su justOS*, *Impostazioni di sistema*, *Negozio*, *Monitor
   attività*, *Desktop e finestre*, *Schermata*, *Blocca schermo*,
   *Sospendi* quando il computer può, *Riavvia*, *Spegni*). Poi File,
   Applicazioni, Editor di testo, Note, Calendario, Foto, Musica,
@@ -94,7 +94,7 @@ Presa a modello da macOS:
   volume si spostano, tra volumi diversi si copiano; tenendo **Ctrl** (o
   Alt) si copia sempre e compare un **+** verde, con **Maiusc** si sposta
   sempre. Rilasciati sul Cestino del dock ci finiscono dentro; sull'icona di
-  un'app (Editor, Foto, Musica, ArcStudio, File) si aprono lì; sul
+  un'app (Editor, Foto, Musica, JustStudio, File) si aprono lì; sul
   Terminale ne scrivono il percorso; nell'Editor si aprono. Le app del
   Negozio che lo chiedono (Disegno) ricevono i file, solo in lettura.
 - **Schermata**: il tasto **Stamp** (o *Schermata* nel menu J▮) salva
@@ -102,18 +102,18 @@ Presa a modello da macOS:
   che Foto apre subito.
 - **Blocco**: **logo+L** o *Blocca schermo* nel menu J▮ coprono tutto
   con l'ora sullo sfondo sfocato. Con una password (*Impostazioni →
-  Password*) JustOS si avvia bloccato, si blocca da solo dopo 2, 5 o 15
+  Password*) justOS si avvia bloccato, si blocca da solo dopo 2, 5 o 15
   minuti senza usarlo e prima di ogni sospensione, così al risveglio chiede
   la password; senza password basta Invio. La password non è salvata
   in chiaro: nelle impostazioni c'è un sale casuale e 20 000 passaggi di
   SHA-256.
-- **Aggiornamenti**: con la rete, all'avvio e una volta al giorno JustOS
+- **Aggiornamenti**: con la rete, all'avvio e una volta al giorno justOS
   legge l'indice firmato degli aggiornamenti. Una versione nuova si
   scarica e si scrive nell'altro slot di sistema; con gli aggiornamenti
   automatici succede da sola, poi una notifica chiede di riavviare. In
   *Info sistema* il pulsante passa da *Cerca aggiornamenti* a *Installa*,
   *Scarico…*, *Installo…* e *Riavvia*. Accanto ci sono *Annulla* e *Torna a
-  <versione precedente>*. Se la versione nuova non parte, JustOS torna da
+  <versione precedente>*. Se la versione nuova non parte, justOS torna da
   solo alla precedente e lo dice. Una release su GitHub che l'indice non ha
   ancora è solo annunciata.
 
@@ -147,7 +147,7 @@ si ridisegna a ogni fotogramma.
 | Browser | schede, barra degli indirizzi (indirizzi o ricerche DuckDuckGo), avanti/indietro, ricarica, pagina iniziale con la ricerca e qualche sito a un clic, trova nella pagina (Ctrl+F), moduli, `<select>`, cookie; i file non visualizzabili vanno in `Scaricati` |
 | File | sfoglia i volumi: risorse a sinistra, cartelle e file a destra; doppio clic apre una cartella o il file con l'app giusta; **schede** (Ctrl+T o il **+**, Ctrl+W chiude, Ctrl+Tab passa alla successiva, *Apri in una nuova scheda* sulle cartelle); tasto destro per aprire, rinominare (anche F2), spostare nel Cestino (Canc), creare una cartella; nel Cestino eliminare o svuotare; **selezione multipla** (Ctrl+clic, Maiusc+clic, Ctrl+A) e **trascinamento** tra cartelle, schede e finestre |
 | Editor di testo | file di testo con selezione, copia e incolla, scorrimento; Nuovo, Apri, Salva (Ctrl+N, Ctrl+O, Ctrl+S) con la scelta del file; alla chiusura salva da solo |
-| ArcStudio | l'IDE di ArcScript, preinstallato: esplora i progetti di `sys:/home/arcscript`, editor con numeri di riga, colori della sintassi, rientro automatico ed errori sottolineati mentre si scrive; **anteprima dal vivo** della `view` (il programma gira nella finestra e risponde a pulsanti, interruttori, cursori e campi), console con l'output di `print()`, pannello Problemi (un clic porta alla riga); Esegui (F5), Compila in `.arc` (Ctrl+B) e Nel terminale passano da `arcc`. I file `.as` si aprono qui |
+| JustStudio | l'IDE di JustScript, preinstallato: esplora i progetti di `sys:/home/justscript`, editor con numeri di riga, colori della sintassi, rientro automatico ed errori sottolineati mentre si scrive; **anteprima dal vivo** della `view` (il programma gira nella finestra e risponde a pulsanti, interruttori, cursori e campi), console con l'output di `print()`, pannello Problemi (un clic porta alla riga); Esegui (F5), Compila in `.jpk` (Ctrl+B) e Nel terminale passano da `justc`. I file `.jt` si aprono qui |
 | Note | note in `sys:/home/Note`, la prima riga è il titolo, ricerca, si salvano mentre si scrive |
 | Promemoria | cose da fare, spuntate con un clic (`sys:/home/Promemoria.txt`) |
 | Calendario | un mese alla volta con le feste italiane (anche Pasqua e Pasquetta) e i propri eventi («9:30 Riunione»), salvati in `sys:/home/Calendario.txt` |
@@ -160,7 +160,7 @@ si ridisegna a ogni fotogramma.
 | Impostazioni | nome, tastiera, sfondo, risoluzione dello schermo, volume e suono all'avvio, configurazione iniziale |
 | Monitor attività | i programmi in esecuzione, il processore e la memoria nell'ultimo minuto; un programma si può terminare |
 | Info sistema | panoramica, dispositivi con i loro driver, dischi con lo spazio libero |
-| Terminale | la shell di JustOS: l'unico posto dove si vedono le righe di comando |
+| Terminale | la shell di justOS: l'unico posto dove si vedono le righe di comando |
 
 ### Il motore web
 
@@ -222,7 +222,7 @@ Terminale: `install`, `install <nome>`, `uninstall <nome>`.
 
 Con un driver video (`bochsvga`, `vmsvga`, `virtiogpu`: le schede delle
 macchine virtuali) *Impostazioni → Schermo* elenca le risoluzioni comuni
-che lo schermo offre; un clic la cambia subito, e JustOS la riprende a ogni
+che lo schermo offre; un clic la cambia subito, e justOS la riprende a ogni
 avvio. Senza driver resta la risoluzione scelta dal firmware. Dal
 Terminale: `display` elenca, `display 1920x1080` cambia.
 
@@ -275,7 +275,7 @@ shell solo quando il Terminale è in primo piano.
 ## Le risorse
 
 Caratteri, icone, sfondi e suoni sono generati in fase di sviluppo da script
-Python (`tools/assets/`) e salvati nel repository; per ricostruire JustOS non
+Python (`tools/assets/`) e salvati nel repository; per ricostruire justOS non
 servono.
 
 - `gen_fonts.py` → `system/kernel/assets/fonts.bin`: Inter e DejaVu Sans
@@ -284,7 +284,7 @@ servono.
   caratteri al doppio della misura (`fonts@2x.bin.gz`, per gli schermi ad
   alta densità; i programmi lo trovano in `sys:/system/fonts@2x.bin`).
 - `gen_pixicons.py` → `rootfs/system/gui/icons.qoi`: le icone a pixel di
-  JustOS, quasi novanta, su una griglia: app in un riquadro di 20×20 celle
+  justOS, quasi novanta, su una griglia: app in un riquadro di 20×20 celle
   con la sfumatura, glifi di sistema in 12×12, angoli esterni arrotondati
   di mezza cella e raccordi di 0,38 negli angoli interni (`pixgrid.py`).
   Le icone di partenza sono gli SVG di `tools/assets/src/icone-justos`
@@ -293,7 +293,7 @@ servono.
   Negozio. Basta Pillow.
 - `gen_pixel.py` → `rootfs/system/gui/wallpapers/pixel.qoi`: lo sfondo
   predefinito, le Dolomiti al tramonto in grandi pixel con il retino
-  ordinato (Bayer) nei colori caldi di JustOS; basta Pillow.
+  ordinato (Bayer) nei colori caldi di justOS; basta Pillow.
 - `gen_wallpapers.py` → `rootfs/system/gui/wallpapers/`: due sfondi
   (Tramonto, Notte) dipinti con rumore e sfumature.
 - `gen_sounds.py` → `rootfs/system/sounds/avvio.wav`, il suono d'avvio, e i
@@ -303,7 +303,7 @@ servono.
 
 ## Provarla
 
-`make run` apre JustOS in una finestra di QEMU. `make shots` avvia JustOS senza
+`make run` apre justOS in una finestra di QEMU. `make shots` avvia justOS senza
 schermo, lo guida con mouse e tastiera (`scripts/gui-shots.py`, attraverso
 QMP) lungo `scripts/gui/tour.txt` (configurazione, ogni app, il Negozio che
 installa e avvia un gioco) e salva le schermate in `build/shots/`; con

@@ -11,7 +11,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-pub const TEXT_FILES: &[&str] = &["txt", "md", "toml", "json", "rs", "c", "h", "sh", "py", "ini", "cfg", "log", "csv", "html", "css", "js", "as"];
+pub const TEXT_FILES: &[&str] = &["txt", "md", "toml", "json", "rs", "c", "h", "sh", "py", "ini", "cfg", "log", "csv", "html", "css", "js", "jt"];
 
 const PLACES: [(&str, &str); 6] = [
     ("Home", "sys:/home"),

@@ -341,7 +341,7 @@
    "developer": "jq team",
    "license": "MIT",
    "about": "La versione Windows di jq.",
-   "details": "Lo stesso jq, compilato per Windows: JustOS lo esegue con winrun.",
+   "details": "Lo stesso jq, compilato per Windows: justOS lo esegue con winrun.",
    "color": "#5D4037",
    "tags": [
     "json",

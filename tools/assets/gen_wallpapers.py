@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Paints the JustOS wallpapers.
+"""Paints the justOS wallpapers.
 
 Every wallpaper is generated here from noise and gradients: a sky, a far
 range in the haze, a massif of Dolomite towers whose rock is lit from the

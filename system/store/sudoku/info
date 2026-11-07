@@ -3,6 +3,6 @@ category=Giochi
 about=Ogni riga, colonna e riquadro con i numeri da 1 a 9.
 details=Ogni partita è nuova e ha una sola soluzione. Tre livelli di difficoltà, la matita per gli appunti, gli errori segnati in rosso e il tempo che scorre.
 version=1.0
-developer=JustOS
+developer=justOS
 type=native
 gui=yes

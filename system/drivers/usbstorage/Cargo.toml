@@ -1,6 +1,6 @@
 [package]
 name = "usbstorage"
-description = "JustOS driver: USB flash drives and disks (mass storage)"
+description = "justOS driver: USB flash drives and disks (mass storage)"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true

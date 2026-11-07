@@ -47,7 +47,7 @@ pub fn data_file(name: &str) -> String {
 
 /// From now on, runs as app `id` (`org.example.app`), shown as `name`, in
 /// its sandbox; there is no way back. For programs that run others' code,
-/// such as `arcc`.
+/// such as `justc`.
 pub fn enter(id: &str, name: &str) -> Result<()> {
     sys::check(sys::call(sys::APP_ENTER, id.as_ptr() as u64, id.len() as u64, name.as_ptr() as u64, name.len() as u64, 0)).map(|_| ())
 }

@@ -1,6 +1,6 @@
 [package]
 name = "disegno"
-description = "JustOS store program: disegno"
+description = "justOS store program: disegno"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true

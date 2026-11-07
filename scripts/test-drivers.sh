@@ -1,5 +1,5 @@
 #!/bin/sh
-# Boots a JustOS image once for every kind of hardware QEMU can emulate
+# Boots a justOS image once for every kind of hardware QEMU can emulate
 # and checks that the matching driver installs and works: disks (a file is
 # written and the file system checked), network cards (DHCP and ping) and
 # USB controllers (a keyboard and a USB stick behind each one) and SD card
@@ -126,7 +126,7 @@ for c in $CASES; do
     case $CMDS in
         net) EXPECT="3 of 3 replies" ;;
         sd) EXPECT="sdhci 1.1.0 installed|$EXPECT_SD|written on the card|card: no problems found" ;;
-        usb) EXPECT="usbhid 1.0.0 installed|usbstorage 1.0.0 installed|Benvenuto in JustOS|stick: no problems found" ;;
+        usb) EXPECT="usbhid 1.0.0 installed|usbstorage 1.0.0 installed|Benvenuto in justOS|stick: no problems found" ;;
     esac
     [ "$c" = multi-nic ] && EXPECT="$EXPECT|^net2 "
     [ "${SLEEP:-0}" = 1 ] && EXPECT="$EXPECT|awake again after"

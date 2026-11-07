@@ -1,6 +1,6 @@
 [package]
 name = "xhci"
-description = "JustOS driver: USB 3 host controllers (xHCI)"
+description = "justOS driver: USB 3 host controllers (xHCI)"
 version = "1.1.0"
 edition.workspace = true
 publish.workspace = true

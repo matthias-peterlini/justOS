@@ -1,4 +1,4 @@
-//! The USB core shared by JustOS host controller drivers.
+//! The USB core shared by justOS host controller drivers.
 //!
 //! A host controller driver implements [`Host`] (ports, addressing,
 //! transfers) and hands it to [`start`]. The core then does everything that

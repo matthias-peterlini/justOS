@@ -1,11 +1,11 @@
-//! The JustOS system call interface for user programs.
+//! The justOS system call interface for user programs.
 //!
 //! `int 0x80` with the call number in `rax` and up to five arguments in
 //! `rdi`, `rsi`, `rdx`, `r10`, `r8`. The result comes back in `rax`:
 //! non-negative on success, a negative [`Error`] code otherwise.
 //!
 //! Files are reached through **handles** that the kernel hands out; paths
-//! are JustOS paths (`sys:/home/notes.txt`, or relative to the program's
+//! are justOS paths (`sys:/home/notes.txt`, or relative to the program's
 //! current folder). Handle 0 is the console.
 
 pub const EXIT: u64 = 0;
@@ -104,7 +104,7 @@ pub const PORT_CALL: u64 = 35;
 /// message).
 pub const PROC_NAME: u64 = 36;
 
-// Apps: an installed JustOS app runs as itself (its `app_id`, such as
+// Apps: an installed justOS app runs as itself (its `app_id`, such as
 // `dev.justos.disegno`) in a sandbox: it reads and writes only its own folder,
 // `sys:/home/.apps/<app_id>`; other folders need the user's permission, and
 // single files come through the system's file picker.
@@ -114,7 +114,7 @@ pub const PROC_NAME: u64 = 36;
 pub const APP_ID: u64 = 37;
 /// (id, len, name, len): from now on the program runs as app `id` (shown
 /// as `name`), in its sandbox. One way: an app cannot become another
-/// (`Denied`). For runners such as `arcc` before they start a package.
+/// (`Denied`). For runners such as `just` before they start a package.
 pub const APP_ENTER: u64 = 38;
 /// (mode, name, len, buf, cap) -> length of the path chosen: the system's
 /// file picker, outside the app. `PICK_OPEN` a file to open, `PICK_SAVE` a

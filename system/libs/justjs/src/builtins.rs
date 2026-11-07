@@ -10,7 +10,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt::Write;
 
-use arcc_core::float as fm;
+use justc_core::float as fm;
 
 use crate::interp::*;
 use crate::value::*;

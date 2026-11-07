@@ -1,4 +1,4 @@
-//! The JustOS shell: the system console's command interpreter.
+//! The justOS shell: the system console's command interpreter.
 
 use crate::dev::input::{self, Key};
 use crate::fs::{self, Path};
@@ -22,7 +22,7 @@ pub fn banner(boot: &crate::boot::BootInfo) {
         crate::console::fill_rect_px(0, 0, w, 3, 0xC9A7FF);
     }
     println!();
-    println!("  {BOLD}JustOS{ACCENT}█{RESET} {DIM}{}{RESET}", crate::VERSION);
+    println!("  {BOLD}justOS{ACCENT}█{RESET} {DIM}{}{RESET}", crate::VERSION);
     let mut brand = [0u8; 48];
     let cpu = crate::arch::cpu::brand(&mut brand);
     let screen = match boot.fb_kind {
@@ -65,7 +65,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("ports", "", "named message ports and who owns them"),
     ("perms", "[allow|deny|ask <app> <perm>]", "what apps may use outside their sandbox"),
     ("updates", "[check|install <app>|all|auto on|off]", "updates of the installed apps"),
-    ("sysupdate", "[check|install [file]|rollback|cancel]", "JustOS updates: the two system slots"),
+    ("sysupdate", "[check|install [file]|rollback|cancel]", "justOS updates: the two system slots"),
     ("dnd", "test", "check moving and copying files the way a drop does"),
     ("run", "<program> [args]", "start a program (also just: <program>)"),
     ("irq", "", "interrupt lines and message interrupts"),
@@ -93,7 +93,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("display", "[WxH | scale auto|1|2]", "screen resolutions, switch to one, or the interface size"),
 ];
 
-/// The BusyBox applets JustOS exposes as commands once `busybox` is installed.
+/// The BusyBox applets justOS exposes as commands once `busybox` is installed.
 /// Running one loads `sys:/apps/busybox` with that name as `argv[0]`.
 const BUSYBOX_APPLETS: &[&str] = &[
     "ash",
@@ -877,15 +877,15 @@ impl Shell {
                         Err(e) => println!("{ERR}sysupdate: {e}{RESET}"),
                     },
                     (Some("check"), None, _) => match crate::update::check_now(false) {
-                        State::UpToDate => println!("JustOS is up to date"),
-                        State::Available(v) => println!("JustOS {v} is available: sysupdate install"),
-                        State::Released(v) => println!("JustOS {v} is released on GitHub (not in the update index yet)"),
-                        State::Staged(v) => println!("JustOS {v} starts at the next restart"),
+                        State::UpToDate => println!("justOS is up to date"),
+                        State::Available(v) => println!("justOS {v} is available: sysupdate install"),
+                        State::Released(v) => println!("justOS {v} is released on GitHub (not in the update index yet)"),
+                        State::Staged(v) => println!("justOS {v} starts at the next restart"),
                         State::Failed(e) => println!("{ERR}sysupdate: {e}{RESET}"),
                         _ => println!("already busy"),
                     },
                     (Some("install"), None, _) => match crate::update::install() {
-                        Ok(v) => println!("JustOS {v} is installed in the other slot: it starts at the next restart"),
+                        Ok(v) => println!("justOS {v} is installed in the other slot: it starts at the next restart"),
                         Err(e) => println!("{ERR}sysupdate: {e}{RESET}"),
                     },
                     (Some("install"), Some(a), b) if (a == "--unsigned") == b.is_some() => {
@@ -905,12 +905,12 @@ impl Shell {
                             su::install(&data, &mut |_, _| {})
                         });
                         match result {
-                            Ok(v) => println!("JustOS {v} is installed in the other slot: it starts at the next restart"),
+                            Ok(v) => println!("justOS {v} is installed in the other slot: it starts at the next restart"),
                             Err(e) => println!("{ERR}sysupdate: {e}{RESET}"),
                         }
                     }
                     (Some("rollback"), None, _) => match su::rollback() {
-                        Ok(v) => println!("JustOS {v} starts at the next restart"),
+                        Ok(v) => println!("justOS {v} starts at the next restart"),
                         Err(e) => println!("{ERR}sysupdate: {e}{RESET}"),
                     },
                     (Some("cancel"), None, _) => match su::cancel() {
@@ -1255,7 +1255,7 @@ impl Shell {
         if let Ok(apps) = fs::abs("sys:/apps").and_then(|p| fs::list_dir(&p)) {
             let names: Vec<String> = apps
                 .iter()
-                .filter_map(|(e, _)| [".app", ".arc", ".as"].iter().find_map(|ext| e.name.strip_suffix(ext)).map(String::from))
+                .filter_map(|(e, _)| [".app", ".jpk", ".jt"].iter().find_map(|ext| e.name.strip_suffix(ext)).map(String::from))
                 .collect();
             if !names.is_empty() {
                 println!("Programs in sys:/apps: {BOLD}{}{RESET}", names.join("  "));
@@ -1421,7 +1421,7 @@ impl Shell {
             }
             Some("add") | Some("install") => {
                 let Some(file) = args.get(1) else {
-                    println!("usage: drv add <file.adp>");
+                    println!("usage: drv add <file.jdp>");
                     return;
                 };
                 if let Some(p) = self.path(file) {
@@ -1464,7 +1464,7 @@ impl Shell {
 
     fn sysinfo(&self) {
         let mut brand = [0u8; 48];
-        println!("{BOLD}JustOS{RESET} {}", crate::VERSION);
+        println!("{BOLD}justOS{RESET} {}", crate::VERSION);
         println!("  processor  {} ({} running)", crate::arch::cpu::brand(&mut brand), crate::arch::smp::count());
         let (_, usable) = mem::frame::stats();
         println!("  memory     {}", Size(usable));

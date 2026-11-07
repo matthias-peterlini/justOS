@@ -1,6 +1,6 @@
 [package]
 name = "gioco2048"
-description = "JustOS store program: 2048 game"
+description = "justOS store program: 2048 game"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true

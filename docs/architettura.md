@@ -1,4 +1,4 @@
-# Architettura di JustOS
+# Architettura di justOS
 
 ## Avvio
 
@@ -105,7 +105,7 @@ CD live, RSDP, tipo di loader e lo slot avviato (con i segni "in prova" e
 
 ### Aggiornamenti del sistema (A/B)
 
-Un aggiornamento di JustOS è un'immagine di slot (`justtool slot`,
+Un aggiornamento di justOS è un'immagine di slot (`justtool slot`,
 `justos-<versione>.slot`). Il kernel (`sysupdate.rs`) la scrive nello slot
 che **non** è in esecuzione, la rilegge e ne controlla lo SHA-256, e solo
 allora la rende quella che parte, **in prova**. `BOOT.CTL` tiene lo slot
@@ -181,7 +181,7 @@ La metà bassa appartiene al programma in esecuzione.
 Il firmware descrive il computer con le tabelle ACPI; la DSDT e le SSDT
 contengono codice, l'AML, che solo lui sa come parla al suo hardware:
 quanto è carica la batteria, se il coperchio è chiuso, quanto è caldo il
-processore. JustOS lo esegue con il suo interprete, `justaml`
+processore. justOS lo esegue con il suo interprete, `justaml`
 (`system/libs/justaml`, senza `std`, provato anche sul PC di sviluppo con
 `cargo test -p justaml` e con le tabelle di portatili veri). Copre l'AML
 che i firmware usano davvero: tipi, pacchetti, campi (anche Index e Bank),
@@ -343,8 +343,8 @@ Oltre ai programmi nativi, il kernel riconosce altri due tipi di eseguibile
 dal loro contenuto. Un ELF che non è un `.app` è un **programma Linux**:
 `linux/` lo carica (ET_EXEC o PIE, con stack iniziale e vettore ausiliario;
 se chiede un caricatore dinamico, carica anche quello e parte da lì) e serve le chiamate di sistema Linux che arrivano sull'istruzione
-`syscall` (`arch/syscall.rs`), traducendole nelle operazioni di JustOS. Un file
+`syscall` (`arch/syscall.rs`), traducendole nelle operazioni di justOS. Un file
 che inizia con `MZ` è un **programma Windows**: il kernel avvia `winrun`, un
-normale programma di JustOS che carica il `.exe`, risolve le importazioni verso
+normale programma di justOS che carica il `.exe`, risolve le importazioni verso
 un `kernel32`/`msvcrt` scritti da zero e salta al punto d'ingresso. I
 dettagli, e cosa è gestito, sono in [compat.md](compat.md).

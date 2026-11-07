@@ -451,7 +451,7 @@ pub fn ping(dst: Ip, seq: u16, timeout_ms: u64) -> Result<u64, &'static str> {
     let mut msg = vec![8u8, 0, 0, 0];
     msg.extend_from_slice(&id.to_be_bytes());
     msg.extend_from_slice(&seq.to_be_bytes());
-    msg.extend_from_slice(b"JustOS ping payload 0123456789abcdef");
+    msg.extend_from_slice(b"justOS ping payload 0123456789abcdef");
     let c = checksum(&msg);
     msg[2..4].copy_from_slice(&c.to_be_bytes());
     let start = time::uptime_ms();

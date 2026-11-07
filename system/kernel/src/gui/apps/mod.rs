@@ -2,7 +2,7 @@
 //! opens which file.
 
 mod about;
-mod arcstudio;
+mod juststudio;
 mod browser;
 mod calculator;
 mod calendar;
@@ -43,7 +43,7 @@ pub fn open_with(kind: &str, path: &str) -> Option<Box<dyn App>> {
         "textedit" if !dir => Box::new(textedit::TextEdit::new(Some(path))),
         "photos" | "viewer" if ext == "qoi" => Box::new(Viewer::new(path)),
         "music" if ext == "wav" => Box::new(music::Music::with_file(path)),
-        "arcstudio" if !dir => Box::new(arcstudio::ArcStudio::new(Some(path))),
+        "juststudio" if !dir => Box::new(juststudio::JustStudio::new(Some(path))),
         _ => return None,
     })
 }
@@ -53,7 +53,7 @@ pub const BUILT_IN: [(&str, &str, &str); 18] = [
     ("browser", "Browser", "browser"),
     ("files", "File", "files"),
     ("textedit", "Editor di testo", "text-editor"),
-    ("arcstudio", "ArcStudio", "code"),
+    ("juststudio", "JustStudio", "code"),
     ("notes", "Note", "notes"),
     ("reminders", "Promemoria", "reminders"),
     ("calendar", "Calendario", "calendar"),
@@ -80,7 +80,7 @@ pub fn open(id: &str) -> Option<Box<dyn App>> {
         "store" => Box::new(store::Store::new()),
         "calculator" => Box::new(calculator::Calculator::new()),
         "textedit" | "textedit-new" => Box::new(textedit::TextEdit::new(None)),
-        "arcstudio" => Box::new(arcstudio::ArcStudio::new(None)),
+        "juststudio" => Box::new(juststudio::JustStudio::new(None)),
         "notes" => Box::new(notes::Notes::new()),
         "reminders" => Box::new(reminders::Reminders::new()),
         "calendar" => Box::new(calendar::Calendar::new()),
@@ -221,9 +221,10 @@ pub fn for_file(path: &str) -> Opener {
         }
         // A Windows program with a window of its own needs no terminal.
         "exe" if windowed_exe(path) => Opener::Spawn(String::from(path)),
-        // ArcScript sources open in the IDE, which runs them too.
-        "as" => Opener::App(Box::new(arcstudio::ArcStudio::new(Some(path)))),
-        "exe" | "arc" | "" => Opener::Run(quoted),
+        // JustScript sources open in the IDE, which runs them too.
+        "jt" => Opener::App(Box::new(juststudio::JustStudio::new(Some(path)))),
+        // A JustScript package runs through `just`, like a program.
+        "exe" | "jpk" | "" => Opener::Run(quoted),
         // Android apps get a window; Java programs (DEX) a terminal.
         "apk" => Opener::Spawn(String::from(path)),
         "dex" | "jar" => Opener::Run(quoted),

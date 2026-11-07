@@ -249,7 +249,7 @@ fn mbr_type_name(t: u8) -> &'static str {
     }
 }
 
-const GPT_JUSTFS: [u8; 16] = *b"JustOS-JustFS-1\0";
+const GPT_JUSTFS: [u8; 16] = *b"justOS-JustFS-1\0";
 
 fn guid_kind(g: &[u8]) -> String {
     match g {

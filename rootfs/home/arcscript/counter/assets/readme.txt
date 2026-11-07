@@ -1,1 +1,0 @@
-ArcScript counter example asset

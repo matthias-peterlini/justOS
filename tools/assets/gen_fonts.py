@@ -7,7 +7,7 @@ here, once, with Pillow. Output: system/kernel/assets/fonts.bin, and with
 unit (system/kernel/assets/fonts@2x.bin.gz, gzipped).
 
 Format (little-endian):
-    "ARCF" u16 version=1, u16 font count
+    "JFNT" u16 version=1, u16 font count
     per font:  u16 size, u16 line height, i16 ascent, u16 glyph count,
                then per glyph: u32 code point, u8 width, u8 height,
                i8 x offset, i8 y offset (top of the mask relative to the
@@ -16,7 +16,7 @@ Format (little-endian):
     data area: one byte of coverage (0-255) per mask pixel, row by row
 
 Fonts: Google Sans Flex (SIL Open Font License, in tools/assets/fonts, the
-typeface of the arc design; a variable font, rendered at the weight and
+typeface of the justOS design; a variable font, rendered at the weight and
 optical size each use asks for) and DejaVu Sans Mono (Bitstream Vera
 licence); see system/kernel/assets/LICENSES.md.
 
@@ -113,7 +113,7 @@ def main():
         fonts = [(p, s * 2, c, s * 2, wt, s) for p, s, c, wt in FONTS]
     else:
         fonts = [(p, s, c, s, wt, None) for p, s, c, wt in FONTS]
-    header = bytearray(b"ARCF" + struct.pack("<HH", 1, len(fonts)))
+    header = bytearray(b"JFNT" + struct.pack("<HH", 1, len(fonts)))
     data = bytearray()
     tables = bytearray()
     for path, size, chars, tag, weight, optical in fonts:

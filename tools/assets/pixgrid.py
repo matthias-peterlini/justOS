@@ -1,4 +1,4 @@
-"""Pixel icons on a grid, in the JustOS style.
+"""Pixel icons on a grid, in the justOS style.
 
 An icon is a few layers of grid cells, each layer one colour. Drawn, every
 cell is a square whose outer corners are rounded by half a cell where both

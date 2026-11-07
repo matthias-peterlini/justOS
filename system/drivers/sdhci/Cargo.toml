@@ -1,6 +1,6 @@
 [package]
 name = "sdhci"
-description = "JustOS driver: SD card readers (SD host controller)"
+description = "justOS driver: SD card readers (SD host controller)"
 version = "1.1.0"
 edition.workspace = true
 publish.workspace = true

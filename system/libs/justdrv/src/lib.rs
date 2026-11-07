@@ -1,4 +1,4 @@
-//! Run-time support for JustOS driver modules.
+//! Run-time support for justOS driver modules.
 //!
 //! A driver crate is a `#![no_std]`, `#![no_main]` binary that depends on
 //! `justdrv` and declares itself with [`driver!`]:

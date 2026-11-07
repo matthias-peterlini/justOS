@@ -1,6 +1,6 @@
 [package]
 name = "nvme"
-description = "JustOS driver: NVMe disks"
+description = "justOS driver: NVMe disks"
 version = "1.1.0"
 edition.workspace = true
 publish.workspace = true

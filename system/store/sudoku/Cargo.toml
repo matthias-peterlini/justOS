@@ -1,6 +1,6 @@
 [package]
 name = "sudoku"
-description = "JustOS store program: sudoku"
+description = "justOS store program: sudoku"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true

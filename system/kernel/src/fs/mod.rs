@@ -1,11 +1,11 @@
 //! Volumes and paths.
 //!
-//! JustOS has no single root: every mounted file system is a **volume** with
+//! justOS has no single root: every mounted file system is a **volume** with
 //! a name, and a path names the volume first:
 //!
 //! ```text
-//! sys:/system/drivers/ahci.adp     the system volume
-//! boot:/drivers/ps2kbd.adp         the boot pack (read-only, in memory)
+//! sys:/system/drivers/ahci.jdp     the system volume
+//! boot:/drivers/ps2kbd.jdp         the boot pack (read-only, in memory)
 //! ram:/scratch.txt                 a RAM disk that starts empty at boot
 //! ```
 //!

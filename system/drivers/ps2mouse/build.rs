@@ -1,5 +1,5 @@
 fn main() {
-    // Every JustOS driver is a self-contained position-independent image.
+    // Every justOS driver is a self-contained position-independent image.
     println!("cargo:rustc-link-arg-bins=-e");
     println!("cargo:rustc-link-arg-bins=just_driver_entry");
     println!("cargo:rustc-link-arg-bins=--strip-all");

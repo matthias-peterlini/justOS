@@ -1,6 +1,6 @@
 [package]
 name = "pcnet"
-description = "JustOS driver: AMD PCnet Ethernet"
+description = "justOS driver: AMD PCnet Ethernet"
 version = "1.1.0"
 edition.workspace = true
 publish.workspace = true

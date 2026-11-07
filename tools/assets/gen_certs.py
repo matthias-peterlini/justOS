@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Turns Mozilla's trusted roots into the files JustOS reads.
+"""Turns Mozilla's trusted roots into the files justOS reads.
 
 Source: tools/assets/src/cacert.pem, the bundle of the `certifi` package
 (Mozilla's CA list, MPL-2.0). Outputs:
 
-    rootfs/system/certs.bin               for justtls: "ARCR", u32 count, then
+    rootfs/system/certs.bin               for justtls: "JCRT", u32 count, then
                                           per root u16 + subject (DER Name),
                                           u16 + SubjectPublicKeyInfo (DER)
     rootfs/etc/ssl/certs/ca-certificates.crt
@@ -68,7 +68,7 @@ def main():
             b64 = None
         elif b64 is not None:
             b64.append(line.strip())
-    out = bytearray(b"ARCR" + struct.pack(">I", len(ders)))
+    out = bytearray(b"JCRT" + struct.pack(">I", len(ders)))
     for der in ders:
         subj, spki = subject_and_spki(der)
         out += struct.pack(">H", len(subj)) + subj + struct.pack(">H", len(spki)) + spki

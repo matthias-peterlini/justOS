@@ -1,6 +1,6 @@
 [package]
 name = "fbgeneric"
-description = "JustOS driver: any graphics card, through the firmware framebuffer"
+description = "justOS driver: any graphics card, through the firmware framebuffer"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true

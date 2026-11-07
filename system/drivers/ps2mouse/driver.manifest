@@ -3,5 +3,5 @@ name        = ps2mouse
 version     = 1.1.0
 class       = input
 description = PS/2 mouse
-author      = JustOS
+author      = justOS
 match       = platform ps2-mouse

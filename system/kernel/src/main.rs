@@ -1,4 +1,4 @@
-//! The JustOS kernel.
+//! The justOS kernel.
 //!
 //! Boot order: serial console → CPU tables → memory → screen (and the boot
 //! splash) → clock and scheduler → interrupts on → ACPI → boot pack and RAM
@@ -78,7 +78,7 @@ static mut BOOT_STACK: Stack = Stack([0; BOOT_STACK_SIZE]);
 #[no_mangle]
 extern "C" fn kmain(boot_phys: u64) -> ! {
     console::serial::init();
-    console::early("\nJustOS kernel ");
+    console::early("\njustOS kernel ");
     console::early(VERSION);
     console::early("\n");
 

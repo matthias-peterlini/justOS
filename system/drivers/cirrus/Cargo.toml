@@ -1,6 +1,6 @@
 [package]
 name = "cirrus"
-description = "JustOS driver: Cirrus Logic GD5446 display"
+description = "justOS driver: Cirrus Logic GD5446 display"
 version = "1.1.0"
 edition.workspace = true
 publish.workspace = true

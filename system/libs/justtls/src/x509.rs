@@ -289,10 +289,10 @@ pub struct Root {
     pub key: PublicKey,
 }
 
-/// The roots in the `ARCR` format of `tools/certs` (subject and SPKI of each).
+/// The roots in the `JCRT` format of `tools/certs` (subject and SPKI of each).
 pub fn parse_roots(b: &[u8]) -> Vec<Root> {
     let mut out = Vec::new();
-    if b.get(..4) != Some(b"ARCR") {
+    if b.get(..4) != Some(b"JCRT") {
         return out;
     }
     let mut i = 8;

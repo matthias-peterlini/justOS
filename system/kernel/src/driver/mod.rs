@@ -1,6 +1,6 @@
 //! The driver manager: finds, installs and loads drivers by itself.
 //!
-//! Drivers are `.adp` packages (see `justdk::package`) kept in three places:
+//! Drivers are `.jdp` packages (see `justdk::package`) kept in three places:
 //!
 //! * `boot:/drivers` — the drivers needed before the system disk is mounted
 //!   (disk controllers, keyboard), inside the boot pack;
@@ -123,7 +123,7 @@ fn scan_folder(dir: &str, origin: Origin, out: &mut Vec<PackageEntry>) {
     let Ok(dir) = fs::abs(dir) else { return };
     let Ok(entries) = fs::list_dir(&dir) else { return };
     for (e, st) in entries {
-        if st.kind != justfs::Kind::File || !e.name.to_ascii_lowercase().ends_with(".adp") {
+        if st.kind != justfs::Kind::File || !e.name.to_ascii_lowercase().ends_with(".jdp") {
             continue;
         }
         let path = dir.join(&e.name);
@@ -393,7 +393,7 @@ pub fn add(path: &Path) -> Result<String, String> {
     }
     let store = fs::abs(STORE).unwrap();
     fs::make_dir(&store).map_err(|e| alloc::format!("{STORE}: {e}"))?;
-    let dest = store.join(&alloc::format!("{}.adp", name.to_ascii_lowercase()));
+    let dest = store.join(&alloc::format!("{}.jdp", name.to_ascii_lowercase()));
     let mut m = MANAGER.lock();
     // A loaded older version is replaced right away when it can be unloaded.
     let mut note = String::new();
@@ -469,7 +469,7 @@ pub fn process_inbox() -> Vec<String> {
     let Ok(inbox) = fs::abs(INBOX) else { return out };
     let Ok(entries) = fs::list_dir(&inbox) else { return out };
     for (e, st) in entries {
-        if st.kind != justfs::Kind::File || !e.name.to_ascii_lowercase().ends_with(".adp") {
+        if st.kind != justfs::Kind::File || !e.name.to_ascii_lowercase().ends_with(".jdp") {
             continue;
         }
         let path = inbox.join(&e.name);

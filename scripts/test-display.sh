@@ -1,5 +1,5 @@
 #!/bin/sh
-# Boots a JustOS image once per display controller QEMU emulates, switches
+# Boots a justOS image once per display controller QEMU emulates, switches
 # the resolution from the shell and checks the screen QEMU shows: it must
 # have the new size and show the desktop (not a black or stale picture).
 #

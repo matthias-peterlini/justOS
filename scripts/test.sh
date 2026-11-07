@@ -1,5 +1,5 @@
 #!/bin/sh
-# Boots a JustOS image headless and types a list of commands on the serial
+# Boots a justOS image headless and types a list of commands on the serial
 # console. Usage: scripts/test.sh <image> [commands-file] [qemu options...]
 #
 # Lines starting with @sleep N pause; @raw TEXT sends TEXT as a printf
@@ -10,7 +10,8 @@
 # cdrom for a live CD (an .iso).
 # UEFI=1 starts it with UEFI firmware (OVMF_CODE, OVMF_VARS) instead of a BIOS.
 #
-# The image is not changed: the session runs on a copy.
+# The image is not changed: the session runs on a copy. KEEP_DISK=FILE saves
+# that copy as it is after the session, to look at what the session wrote.
 #
 # Prints the whole session; exits non-zero if the kernel stopped.
 set -eu
@@ -27,7 +28,7 @@ IMAGE=$WORK
 case "${DISK:-ide}" in
     ide)    DRIVE="-drive file=$IMAGE,format=raw,if=ide" ;;
     ahci)   DRIVE="-machine q35 -drive file=$IMAGE,format=raw,if=none,id=sys -device ahci,id=ahci -device ide-hd,drive=sys,bus=ahci.0,bootindex=0" ;;
-    nvme)   DRIVE="-machine q35 -drive file=$IMAGE,format=raw,if=none,id=sys -device nvme,drive=sys,serial=arc0001,bootindex=0" ;;
+    nvme)   DRIVE="-machine q35 -drive file=$IMAGE,format=raw,if=none,id=sys -device nvme,drive=sys,serial=just0001,bootindex=0" ;;
     virtio) DRIVE="-drive file=$IMAGE,format=raw,if=none,id=sys -device virtio-blk-pci,drive=sys,bootindex=0" ;;
     virtio-modern) DRIVE="-drive file=$IMAGE,format=raw,if=none,id=sys -device virtio-blk-pci,drive=sys,bootindex=0,disable-legacy=on" ;;
     virtio-legacy) DRIVE="-drive file=$IMAGE,format=raw,if=none,id=sys -device virtio-blk-pci,drive=sys,bootindex=0,disable-modern=on" ;;
@@ -61,6 +62,7 @@ fi
 # Strip colours for readability.
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g; s/\r//g' "$OUT"
 STATUS=0
-grep -q "JustOS stopped" "$OUT" && STATUS=1
+grep -q "justOS stopped" "$OUT" && STATUS=1
+if [ -n "${KEEP_DISK:-}" ]; then cp --sparse=always "$WORK" "$KEEP_DISK"; fi
 rm -f "$OUT" "$WORK" $VARS
 exit $STATUS

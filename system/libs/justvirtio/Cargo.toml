@@ -1,6 +1,6 @@
 [package]
 name = "justvirtio"
-description = "virtio transport for JustOS drivers: legacy and modern PCI, virtqueues"
+description = "virtio transport for justOS drivers: legacy and modern PCI, virtqueues"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

@@ -1,0 +1,28 @@
+[package]
+name = "justc"
+description = "justOS programs: justc, the JustScript compiler, and just, its runner"
+version = "0.5.0"
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "justc"
+path = "src/main.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "just"
+path = "src/just.rs"
+test = false
+bench = false
+
+[dependencies]
+justrt.workspace = true
+justc-core.workspace = true
+just-vm.workspace = true
+jpk-bundler.workspace = true
+
+[lints]
+workspace = true

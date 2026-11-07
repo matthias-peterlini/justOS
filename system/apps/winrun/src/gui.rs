@@ -1,9 +1,9 @@
 //! Windows with a message loop: a part of `user32` and `gdi32` on top of the
-//! JustOS windows of [`justui`].
+//! justOS windows of [`justui`].
 //!
-//! Each Win32 window is a JustOS window whose canvas keeps what the program
+//! Each Win32 window is a justOS window whose canvas keeps what the program
 //! drew, as a Windows window does. Mouse, keyboard, resizing and closing come
-//! back from JustOS as events and become `WM_*` messages; `GetMessage` merges
+//! back from justOS as events and become `WM_*` messages; `GetMessage` merges
 //! them with posted messages, timers and `WM_PAINT`. A device context draws
 //! with GDI's pen, brush and font onto the window or onto a bitmap (for the
 //! usual double buffering with `BitBlt`).
@@ -592,7 +592,7 @@ extern "win64" fn CreateWindowExW(_ex: u32, class: u64, title: *const u16, style
 fn destroy(hwnd: u64) {
     if let Some(i) = hwnd.checked_sub(HWND_BASE) {
         if let Some(slot) = st().wins.get_mut(i as usize) {
-            *slot = None; // closes the JustOS window
+            *slot = None; // closes the justOS window
         }
     }
     st().timers.retain(|t| t.hwnd != hwnd);
@@ -762,7 +762,7 @@ fn char_code(k: justui::KeyEvent) -> Option<u32> {
     })
 }
 
-/// A key is "down" for a moment after it was pressed: JustOS reports presses,
+/// A key is "down" for a moment after it was pressed: justOS reports presses,
 /// not releases.
 const KEY_HOLD_MS: u64 = 150;
 
@@ -778,7 +778,7 @@ extern "win64" fn GetKeyState(key: i32) -> i16 {
 // ----------------------------------------------------------------------------
 // The message loop
 
-/// Turns the JustOS events of every window into messages.
+/// Turns the justOS events of every window into messages.
 fn pump(wait_ms: u64) -> bool {
     let n = st().wins.len();
     let mut got = false;
@@ -1378,7 +1378,7 @@ fn ellipse_span(r: Rect, y: i32) -> Option<(i32, i32)> {
     if t < 0 {
         return None;
     }
-    let half = (a * arcc_core::float::sqrt(t as f64) / b as f64 / 2.0) as i32;
+    let half = (a * justc_core::float::sqrt(t as f64) / b as f64 / 2.0) as i32;
     let cx = r.x + r.w / 2;
     Some((cx - half, cx + half + (r.w & 1)))
 }

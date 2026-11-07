@@ -1,6 +1,6 @@
-# I driver di JustOS
+# I driver di justOS
 
-In JustOS un driver è un **pacchetto**: un file `.adp` che contiene un
+In justOS un driver è un **pacchetto**: un file `.jdp` che contiene un
 manifesto di testo e il modulo compilato. Il kernel legge i manifesti, li
 confronta con l'hardware e carica da solo il driver giusto. Installarne uno
 vuol dire solo mettere il pacchetto dove il kernel lo trova.
@@ -48,7 +48,7 @@ Questo succede in tre momenti:
   `sys:/inbox` ogni due secondi. Un pacchetto lasciato lì viene verificato
   (formato, CRC, manifesto, versione dell'ABI), spostato nel magazzino e
   installato. Un pacchetto non valido viene rinominato in
-  `<nome>.adp.rejected`, con il motivo nel giornale (`log`).
+  `<nome>.jdp.rejected`, con il motivo nel giornale (`log`).
 
 Se arriva una versione più nuova di un driver già in esecuzione, la vecchia
 viene scaricata e sostituita subito, se il driver lo permette (cioè se ha
@@ -62,7 +62,7 @@ dev 5                dettagli del dispositivo 5
 dev scan             cerca hardware nuovo e installa i driver mancanti
 drv                  tutti i driver: dove si trovano e se sono in uso
 drv info <nome>      manifesto, file, dispositivi gestiti
-drv add <file.adp>   installa un pacchetto (come l'inbox, ma subito)
+drv add <file.jdp>   installa un pacchetto (come l'inbox, ma subito)
 drv remove <nome>    toglie il driver dal magazzino e, se può, lo scarica
 drv reload <nome>    scarica e ricarica un driver
 drv inbox            controlla l'inbox adesso
@@ -72,7 +72,7 @@ Dal computer di sviluppo si può mettere un pacchetto nell'inbox di
 un'immagine senza avviarla:
 
 ```sh
-tools/target/release/justtool fs build/justos.img put mio.adp /inbox/
+tools/target/release/justtool fs build/justos.img put mio.jdp /inbox/
 ```
 
 ## Il manifesto
@@ -87,7 +87,7 @@ name        = e1000                 # obbligatorio: nome unico del driver
 version     = 1.0.0                 # obbligatorio: major.minor.patch
 class       = network               # storage, input, network, display, other
 description = Intel PRO/1000 Ethernet
-author      = JustOS
+author      = justOS
 boot        = no                    # yes: va nel pacchetto di avvio
 match       = pci 8086:100e         # vendor:device (esadecimale)
 match       = pci 8086:10d3
@@ -126,7 +126,7 @@ system/drivers/esempio/
 ```toml
 [package]
 name = "esempio"
-description = "JustOS driver: esempio"
+description = "justOS driver: esempio"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true
@@ -245,7 +245,7 @@ video della versione 0.4 chiedono un kernel 0.4).
 Il kernel converte ogni suono al formato dell'uscita (frequenza, canali) e
 applica il volume da sé: un driver audio dichiara un solo formato e lascia
 il guadagno dell'hardware fisso. Un driver video descrive il framebuffer
-di ogni modo; se il dispositivo non legge da solo la memoria che JustOS
+di ogni modo; se il dispositivo non legge da solo la memoria che justOS
 disegna (virtio-gpu, VMware SVGA), fornisce anche `flush`, che il kernel
 chiama per ogni rettangolo cambiato.
 
@@ -379,7 +379,7 @@ collegamento a caldo. Gli altri id elencati nei manifesti sono
 chip della stessa famiglia che usano la stessa interfaccia.
 
 "Provato su modello" vuol dire provato su un modello del chip scritto per
-JustOS, perché QEMU non lo emula: il sorgente è in `tools/qemu/` e
+justOS, perché QEMU non lo emula: il sorgente è in `tools/qemu/` e
 `scripts/build-qemu.sh` costruisce un QEMU che lo contiene. Il modello è
 severo: segnala (con `-d guest_errors`, righe che iniziano con il nome del
 chip) ciò che il chip vero rifiuterebbe o ignorerebbe, e `make
@@ -442,19 +442,19 @@ Con `make` i pacchetti si creano da soli in `build/drivers/`. A mano:
 ```sh
 cd system && cargo build --release -p esempio
 tools/target/release/justtool pack system/drivers/esempio/driver.manifest \
-    system/target/x86_64-unknown-none/release/esempio esempio.adp
-tools/target/release/justtool inspect esempio.adp
+    system/target/x86_64-unknown-none/release/esempio esempio.jdp
+tools/target/release/justtool inspect esempio.jdp
 ```
 
 `justtool pack` controlla il manifesto e che il modulo sia un'immagine
 caricabile: ELF64, indipendente dalla posizione, con le sole rilocazioni
 relative e il punto d'ingresso giusto.
 
-Formato `.adp` (interi little-endian):
+Formato `.jdp` (interi little-endian):
 
 ```text
 offset  dim.  campo
-     0     8  "ARCDRVPK"
+     0     8  "JUSTDRVP"
      8     4  versione del formato (1)
     12     4  versione dell'ABI dei driver
     16     4  posizione del manifesto    20  4  lunghezza

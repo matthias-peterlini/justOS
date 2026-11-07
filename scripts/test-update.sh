@@ -100,11 +100,11 @@ expect bios-1 "system slot A$" "started from slot A"
 expect bios-1 "slot A: $VERSION · works · running" "slot A runs"
 expect bios-1 "slot B: $VERSION · works" "slot B holds the same system"
 expect bios-1 "new.slot.sig is missing" "a signature is asked for"
-expect bios-1 "JustOS 9.9.9 is installed in the other slot" "installed into slot B"
+expect bios-1 "justOS 9.9.9 is installed in the other slot" "installed into slot B"
 expect bios-1 "this version starts again" "cancelled"
 expect bios-1 "non c'è una versione che ha funzionato" "no rollback to a slot being replaced"
 expect bios-1 "slot B: 9.9.9 · not confirmed · starts next · 2 tries left" "slot B starts next, on trial"
-refuse bios-1 "JustOS stopped" "no panic"
+refuse bios-1 "justOS stopped" "no panic"
 
 run bios-2 bios 5 \
     "sysupdate" "@sleep 22" \
@@ -116,9 +116,9 @@ expect bios-2 "system slot B, on trial" "started from slot B, on trial"
 expect bios-2 "slot B: 9.9.9 · not confirmed · running · 1 try left" "the loader used up a try"
 expect bios-2 "works: slot B confirmed" "confirmed"
 expect bios-2 "slot B: 9.9.9 · works · running" "slot B works"
-expect bios-2 "JustOS 6.6.6 is installed in the other slot" "the broken update installed into slot A"
+expect bios-2 "justOS 6.6.6 is installed in the other slot" "the broken update installed into slot A"
 expect bios-2 "slot A: 6.6.6 · not confirmed · starts next · 2 tries left" "slot A starts next"
-refuse bios-2 "JustOS stopped" "no panic"
+refuse bios-2 "justOS stopped" "no panic"
 
 # Slot A resets the CPU twice; then the loader goes back to B.
 run bios-3 bios 14 \
@@ -126,10 +126,10 @@ run bios-3 bios 14 \
     "sysupdate" \
     "shutdown"
 expect bios-3 "system slot B, the other one did not start" "back to slot B"
-expect bios-3 "did not start: back to JustOS" "it says so"
+expect bios-3 "did not start: back to justOS" "it says so"
 expect bios-3 "slot A: 6.6.6 · not confirmed$" "slot A is left alone"
 expect bios-3 "slot B: 9.9.9 · works · running" "slot B runs"
-refuse bios-3 "JustOS stopped" "no panic"
+refuse bios-3 "justOS stopped" "no panic"
 
 echo "== UEFI"
 fresh
@@ -137,7 +137,7 @@ run uefi-1 uefi 12 \
     "sysupdate install --unsigned sys:/new.slot" "@sleep 12" \
     "shutdown"
 expect uefi-1 "system slot A$" "started from slot A"
-expect uefi-1 "JustOS 9.9.9 is installed in the other slot" "installed into slot B"
+expect uefi-1 "justOS 9.9.9 is installed in the other slot" "installed into slot B"
 
 run uefi-2 uefi 12 \
     "sysupdate" "@sleep 22" \
@@ -147,8 +147,8 @@ run uefi-2 uefi 12 \
 expect uefi-2 "system slot B, on trial" "started from slot B, on trial"
 expect uefi-2 "slot B: 9.9.9 · not confirmed · running · 1 try left" "the loader used up a try"
 expect uefi-2 "slot B: 9.9.9 · works · running" "slot B works"
-expect uefi-2 "JustOS $VERSION starts at the next restart" "rolled back"
-refuse uefi-2 "JustOS stopped" "no panic"
+expect uefi-2 "justOS $VERSION starts at the next restart" "rolled back"
+refuse uefi-2 "justOS stopped" "no panic"
 
 run uefi-3 uefi 12 \
     "sysupdate" \

@@ -1,6 +1,6 @@
 [package]
 name = "ahci"
-description = "JustOS driver: AHCI SATA disks"
+description = "justOS driver: AHCI SATA disks"
 version = "1.1.0"
 edition.workspace = true
 publish.workspace = true

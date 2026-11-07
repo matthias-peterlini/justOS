@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Paints "pixel", the default JustOS wallpaper: Dolomites at sunset in big
+"""Paints "pixel", the default justOS wallpaper: Dolomites at sunset in big
 pixels, the sky and the rock shaded with ordered (Bayer) dithering between a
-few warm colours around the JustOS orange (#ff5a1f).
+few warm colours around the justOS orange (#ff5a1f).
 
 It is drawn on a 160x100 grid and each cell becomes a 16x16 square, so the
 picture is 2560x1600 and its flat runs compress well in QOI. Only Pillow

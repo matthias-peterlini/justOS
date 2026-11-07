@@ -34,7 +34,7 @@ int main(void) {
 
     char s[64];
     strcpy(s, "Hello");
-    strcat(s, ", JustOS");
+    strcat(s, ", justOS");
     for (char *p = s; *p; p++) *p = toupper((unsigned char)*p);
     printf("wtest: %s %d\n", s, (int)strlen(s));
 

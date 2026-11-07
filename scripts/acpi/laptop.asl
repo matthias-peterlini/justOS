@@ -2,12 +2,12 @@
  * A laptop for QEMU: a battery, a power adapter, a lid and a thermal zone,
  * added to the virtual machine's ACPI tables with
  *     -acpitable file=scripts/acpi/laptop.aml
- * scripts/test-acpi.sh checks that arcOS reads them, and that it turns
+ * scripts/test-acpi.sh checks that justOS reads them, and that it turns
  * itself off when the battery runs empty.
  *
  * Build: iasl -p laptop laptop.asl
  */
-DefinitionBlock ("", "SSDT", 2, "ARCOS", "LAPTOP", 1)
+DefinitionBlock ("", "SSDT", 2, "JUSTOS", "LAPTOP", 1)
 {
     Scope (\_SB)
     {
@@ -55,10 +55,10 @@ DefinitionBlock ("", "SSDT", 2, "ARCOS", "LAPTOP", 1)
                     0xFFFFFFFF,     /* min averaging interval */
                     100,            /* granularity 1 */
                     100,            /* granularity 2 */
-                    "ARC57",        /* model */
+                    "JST57",        /* model */
                     "0001",         /* serial number */
                     "LION",         /* type */
-                    "Arc Cells",    /* OEM */
+                    "Just Cells",   /* OEM */
                     0x00            /* swapping capability */
                 })
             }

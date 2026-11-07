@@ -1,4 +1,4 @@
-//! virtio over PCI for JustOS drivers.
+//! virtio over PCI for justOS drivers.
 //!
 //! Hides the two ways a virtio device shows itself on PCI:
 //!

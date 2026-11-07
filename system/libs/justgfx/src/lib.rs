@@ -1,4 +1,4 @@
-//! Drawing for JustOS, shared by the kernel's interface and by programs with
+//! Drawing for justOS, shared by the kernel's interface and by programs with
 //! windows: pixel buffers and shapes ([`gfx`]), text from the font atlas
 //! ([`font`]) and QOI pictures ([`qoi`]).
 

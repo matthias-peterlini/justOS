@@ -71,7 +71,7 @@ fn main() {
         }
         if c.connected() && !sent_request {
             eprintln!("connected: {} in {:?}, alpn {:?}", c.version(), t0.elapsed(), c.alpn_chosen);
-            let req = format!("GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nUser-Agent: JustOS\r\n\r\n");
+            let req = format!("GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nUser-Agent: justOS\r\n\r\n");
             c.write(req.as_bytes()).unwrap();
             sent_request = true;
             continue;

@@ -1,4 +1,4 @@
-//! JustFS — the native file system of JustOS.
+//! JustFS — the native file system of justOS.
 //!
 //! A simple extent-based design with 4 KiB blocks:
 //!
@@ -1230,8 +1230,8 @@ mod tests {
     fn files_and_folders() {
         let mut fs = fs(512);
         fs.create_dirs("System/Drivers").unwrap();
-        fs.write_file("System/Drivers/a.adp", b"hello").unwrap();
-        assert_eq!(fs.read_file("system/DRIVERS/A.adp").unwrap(), b"hello");
+        fs.write_file("System/Drivers/a.jdp", b"hello").unwrap();
+        assert_eq!(fs.read_file("system/DRIVERS/A.jdp").unwrap(), b"hello");
         let big: Vec<u8> = (0..50_000u32).map(|i| i as u8).collect();
         fs.write_file("big", &big).unwrap();
         assert_eq!(fs.read_file("big").unwrap(), big);
@@ -1247,7 +1247,7 @@ mod tests {
         let sys = fs.lookup("System").unwrap();
         assert_eq!(fs.remove(sys, "Drivers"), Err(Error::NotEmpty));
         let drv = fs.lookup("System/Drivers").unwrap();
-        fs.remove(drv, "a.adp").unwrap();
+        fs.remove(drv, "a.jdp").unwrap();
         fs.remove(sys, "drivers").unwrap();
         fs.remove(ROOT, "big").unwrap();
         assert_eq!(fs.check().unwrap(), 0);

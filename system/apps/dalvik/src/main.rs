@@ -1,4 +1,4 @@
-//! Runs Android apps and Java programs on JustOS.
+//! Runs Android apps and Java programs on justOS.
 //!
 //! `dalvik` reads the DEX code of an `.apk`, a `.jar` built with `d8`/`dx`
 //! or a bare `.dex` file and runs it with the [`justdex`] interpreter. A
@@ -21,7 +21,7 @@ use justrt::{eprintln, println};
 
 justrt::main!(main);
 
-/// The interpreter's way out to JustOS.
+/// The interpreter's way out to justOS.
 struct JustHost;
 
 impl Host for JustHost {

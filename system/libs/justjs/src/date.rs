@@ -1,10 +1,10 @@
-//! `Date`. JustOS keeps no time zone, so local time is UTC.
+//! `Date`. justOS keeps no time zone, so local time is UTC.
 
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use arcc_core::float as fm;
+use justc_core::float as fm;
 
 use crate::builtins::{ctor, func, num_arg};
 use crate::interp::*;

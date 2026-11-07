@@ -1,4 +1,4 @@
-# Roadmap: un JustOS che si usa come Windows e macOS
+# Roadmap: un justOS che si usa come Windows e macOS
 
 L'obiettivo è «zero attrito»: chi arriva da Windows o da macOS deve trovare
 le cose dove se le aspetta, senza terminale e senza configurare niente. Questo
@@ -48,8 +48,8 @@ Ogni app installata ha un `app_id` (`kernel/src/sandbox.rs`, chiamate 37–39
 in `justdk::syscall`, libreria `justrt::app`):
 
 - le app native in `sys:/apps` lo prendono dalla chiave `app_id=` del loro
-  `<nome>.info` (altrimenti `dev.justos.<nome>`), i pacchetti `.arc` da
-  `arcc`, che chiama `APP_ENTER` prima di eseguirli; i processi figli
+  `<nome>.info` (altrimenti `dev.justos.<nome>`), i pacchetti `.jpk` da
+  `just`, che chiama `APP_ENTER` prima di eseguirli; i processi figli
   ereditano l'app del padre. Gli id sono minuscoli e `just.` è riservato.
 - file: la propria cartella `sys:/home/.apps/<app_id>` (anche la cartella di
   partenza), in sola lettura i caratteri, i certificati, i suoni e le app;
@@ -121,7 +121,7 @@ chiamate `WIN_CREATE`/`WIN_PRESENT`/`WIN_EVENT`.
    tramite l'host, buona per le macchine virtuali), poi un driver nativo.
    Su hardware vero l'unica strada realistica è portare i driver DRM di
    Linux (i915/amdgpu: milioni di righe) dietro uno strato di compatibilità,
-   oppure Mesa con un backend per JustOS. È il lavoro più grande della lista.
+   oppure Mesa con un backend per justOS. È il lavoro più grande della lista.
 5. **Gesti** (3–4 settimane dopo un driver I²C-HID/PS/2 multi-touch): tre
    dita per Mission Control e per cambiare desktop, due per scorrere.
 
@@ -137,7 +137,7 @@ chiamate `WIN_CREATE`/`WIN_PRESENT`/`WIN_EVENT`.
 | Programmi Linux (ELF) | 🟡 solo collegati staticamente (musl), senza `ld.so` (`kernel/src/linux`, `make test-linux`) |
 | Programmi Windows (PE) | 🟡 console e finestre semplici (`winrun`) |
 | Android (DEX/APK) | 🟡 `dalvik`, programmi semplici |
-| ArcScript con IDE (ArcStudio) | ✅ |
+| JustScript con IDE (JustStudio) | ✅ |
 
 **Il browser, onestamente.** Un motore moderno (Chromium/Blink, WebKit,
 Gecko) è decine di milioni di righe di C++ e chiede: thread POSIX, memoria
@@ -164,7 +164,7 @@ dichiarare, come per ogni sistema non commerciale.
 1. ✅ un indice remoto firmato: `make updates` scrive `index.json` (numero
    di serie, versione, URL, SHA-256 e dimensione di ogni app) e la sua
    firma Ed25519 (`justtls::ed25519`); `scripts/publish-updates.sh` lo
-   pubblica sul ramo `updates` del repository. JustOS rifiuta un indice con
+   pubblica sul ramo `updates` del repository. justOS rifiuta un indice con
    una firma sbagliata o un numero di serie più vecchio dell'ultimo visto;
 2. ✅ il servizio `just.updates` (`kernel/src/appupdate.rs`) controlla una
    volta al giorno, scarica in background e sostituisce un'app quando è
@@ -203,7 +203,7 @@ standard: un driver vale per quasi tutti i dongle), più complicato sopra:
 L2CAP, profili HID (tastiere, mouse) e A2DP (audio, con il codec SBC).
 Stima: 2–3 mesi per HID, altrettanti per l'audio.
 
-**Batteria e temperatura.** Fatto: JustOS esegue l'AML del firmware con il
+**Batteria e temperatura.** Fatto: justOS esegue l'AML del firmware con il
 suo interprete, `justaml` (scritto da zero, provato con le tabelle di sette
 portatili veri e di QEMU), e da lì legge batteria, alimentatore, coperchio
 e temperature; gli eventi arrivano dai GPE e dall'embedded controller.

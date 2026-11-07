@@ -240,7 +240,7 @@ fn devices() {
     assert_eq!(s.ini, 4);
 
     let deva = i.find("\\_SB.DEVA").unwrap();
-    assert_eq!(i.ids(deva), ["ARC0001"]);
+    assert_eq!(i.ids(deva), ["JST0001"]);
     assert_eq!(i.path(deva), "\\_SB.DEVA");
     assert_eq!(i.object_type(deva), ObjectType::Device);
     assert_eq!(int(&mut i, "\\_SB.DEVA.UPS"), 1);

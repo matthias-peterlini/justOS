@@ -1,6 +1,6 @@
 [package]
 name = "edit"
-description = "JustOS program: text editor"
+description = "justOS program: text editor"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true

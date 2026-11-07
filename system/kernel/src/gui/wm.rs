@@ -1,4 +1,4 @@
-//! Windows, as in the JustOS design: a frame of warm pink frosted glass
+//! Windows, as in the justOS design: a frame of warm pink frosted glass
 //! with the app's name at the top left and three round buttons (minimise
 //! and full screen in dark grey, close in orange) on a light pill at the top
 //! right; the content sits on a darker pane inside the frame. Their content

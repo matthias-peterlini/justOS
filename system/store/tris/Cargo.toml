@@ -1,6 +1,6 @@
 [package]
 name = "tris"
-description = "JustOS store program: tris"
+description = "justOS store program: tris"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true

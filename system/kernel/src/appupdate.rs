@@ -2,15 +2,15 @@
 //!
 //! Two sources:
 //!
-//! - **JustOS apps** (`type=native`): a signed index, `index.json` with its
+//! - **justOS apps** (`type=native`): a signed index, `index.json` with its
 //!   Ed25519 signature next to it (`index.json.sig`, in hex). The key is
-//!   [`KEY`]; its private half stays with whoever publishes JustOS, so a
+//!   [`KEY`]; its private half stays with whoever publishes justOS, so a
 //!   changed index or a changed download is refused. Each entry names the
 //!   new program's address, size and SHA-256, carries the new `info`, and
-//!   may name the oldest JustOS it runs on (`system`).
+//!   may name the oldest justOS it runs on (`system`).
 //!   The index has a serial number that never goes back, so an old index
 //!   (with old, known bugs) cannot be passed off as new. It may also offer
-//!   a newer JustOS (`system`: its version and system image), which
+//!   a newer justOS (`system`: its version and system image), which
 //!   [`crate::update`] installs.
 //! - **Linux and Windows programs** from GitHub: their latest release,
 //!   downloaded over HTTPS as the store installs them.
@@ -33,7 +33,7 @@ use justjson::Value;
 use justtls::ed25519;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-/// The public key that signs the index of JustOS apps.
+/// The public key that signs the index of justOS apps.
 pub const KEY: [u8; 32] = [
     0x83, 0x7a, 0x8d, 0x8d, 0x11, 0xc6, 0x5f, 0x04, 0xfb, 0xb9, 0x28, 0x3d, 0xd4, 0x23, 0x63, 0xe1, 0x10, 0x39, 0xa7, 0xf3, 0x6b, 0x00, 0x52,
     0x78, 0xfc, 0x57, 0x20, 0x8f, 0xa7, 0x07, 0xa1, 0xdb,
@@ -81,7 +81,7 @@ struct Remote {
     size: u64,
 }
 
-/// A newer JustOS in the index: its version and its system image (see
+/// A newer justOS in the index: its version and its system image (see
 /// [`crate::sysupdate`]).
 #[derive(Clone)]
 pub struct SystemOffer {
@@ -236,7 +236,7 @@ struct Index {
 }
 
 /// Reads and checks the signed index: its serial, the updates it has for
-/// the installed JustOS apps and a newer JustOS, if any.
+/// the installed justOS apps and a newer justOS, if any.
 fn read_index(src: &Source, min_serial: u64) -> Result<Index, String> {
     let index = fetch(&src.index, &mut |_, _| true)?;
     let sig = fetch(&format!("{}.sig", src.index), &mut |_, _| true)?;
@@ -252,7 +252,7 @@ fn read_index(src: &Source, min_serial: u64) -> Result<Index, String> {
     let mut out = Vec::new();
     for a in v.get("apps").as_array() {
         let (Some(id), Some(app), Some(info)) = (a.get("id").as_str(), remote(a.get("app")), a.get("info").as_str()) else { continue };
-        // Built for a newer JustOS: it waits for the system update.
+        // Built for a newer justOS: it waits for the system update.
         if a.get("system").as_str().is_some_and(|min| crate::update::newer(min, crate::VERSION)) {
             continue;
         }
@@ -313,7 +313,7 @@ pub fn check_with(src: &Source, github: bool) -> (Vec<Update>, Option<String>) {
     (found, error)
 }
 
-/// [`check_with`], and the newer JustOS the index offers.
+/// [`check_with`], and the newer justOS the index offers.
 fn check_index(src: &Source, github: bool) -> (Vec<Update>, Option<SystemOffer>, Option<String>) {
     let mut s = load_settings(src);
     let (mut found, system, error) = match read_index(src, s.serial) {
@@ -331,7 +331,7 @@ fn check_index(src: &Source, github: bool) -> (Vec<Update>, Option<SystemOffer>,
     (found, system, error)
 }
 
-/// The newer JustOS the published index offers, if any (reads the index now;
+/// The newer justOS the published index offers, if any (reads the index now;
 /// the app updates it has wait for the daily check).
 pub fn system_offer() -> Result<Option<SystemOffer>, String> {
     let src = Source::system();
@@ -525,7 +525,7 @@ pub fn check() -> Result<usize, String> {
     if let Some(e) = &error {
         crate::warn!("updates", "{e}");
     }
-    // A newer JustOS: in a thread of its own, it is big.
+    // A newer justOS: in a thread of its own, it is big.
     if let Some(o) = system {
         crate::task::spawn("update-system", move || crate::update::offered(o, true));
     }
@@ -794,7 +794,7 @@ pub fn self_test() -> bool {
     };
     let sha = justtls::sha2::Sha256::digest(&newer);
     let publish = |serial: u64, seed: &[u8; 32]| {
-        // provanone is not installed; provanext needs a newer JustOS.
+        // provanone is not installed; provanext needs a newer justOS.
         let mut next = entry("provanext", "1.1", &sha, "");
         if let Value::Obj(members) = &mut next {
             members.push((String::from("system"), Value::string("99.0")));

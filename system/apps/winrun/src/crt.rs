@@ -11,7 +11,7 @@ use crate::win::{alloc_bytes, c_len, console_write, format_c};
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
-use arcc_core::float as m;
+use justc_core::float as m;
 use core::ffi::c_void;
 
 /// The address of `name`, if it is one of the functions here.
@@ -185,7 +185,7 @@ extern "win64" fn ret1() -> u64 {
 // ----------------------------------------------------------------------------
 // Paths
 
-/// A Windows path as a JustOS one: `\` becomes `/` and a drive (`C:\x`) is
+/// A Windows path as a justOS one: `\` becomes `/` and a drive (`C:\x`) is
 /// the system volume.
 pub fn path(p: &str) -> String {
     let p = p.replace('\\', "/");
@@ -1232,7 +1232,7 @@ extern "win64" fn system(_cmd: *const u8) -> i32 {
 // ----------------------------------------------------------------------------
 // Time
 
-/// Seconds since 1970 (JustOS counts from 2000).
+/// Seconds since 1970 (justOS counts from 2000).
 fn unix_now() -> i64 {
     justrt::time::now() as i64 + 946_684_800
 }

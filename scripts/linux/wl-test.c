@@ -1,4 +1,4 @@
-// A Wayland client for JustOS's compositor, against Debian's
+// A Wayland client for justOS's compositor, against Debian's
 // libwayland-client and libxkbcommon (as GTK and Firefox use them). It opens
 // a window of 300x200 (green, with a magenta subsurface at 20,20), waits
 // for its frame callback and the buffer's release, reads the keymap with

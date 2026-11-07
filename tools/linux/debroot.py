@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Builds a Linux file tree from Debian packages, for JustOS's Linux layer.
+"""Builds a Linux file tree from Debian packages, for justOS's Linux layer.
 
-JustOS runs Linux programs on its own kernel; dynamically linked ones need
+justOS runs Linux programs on its own kernel; dynamically linked ones need
 the dynamic loader (ld-linux-x86-64.so.2), glibc and whatever libraries
 they link. This tool takes package names, follows their dependencies in
 the Debian archive, downloads the .deb files (checking them against the
@@ -35,7 +35,7 @@ import urllib.request
 
 MIRROR = "http://deb.debian.org/debian"
 
-# Packages that dependencies name but a JustOS tree never needs: package
+# Packages that dependencies name but a justOS tree never needs: package
 # management, init and login machinery, and interpreters only maintainer
 # scripts use.
 SKIP = {

@@ -34,7 +34,7 @@ fn main(_: &str) -> i32 {
     let used = i.memory_total - i.memory_free;
     let up = i.uptime_ms / 1000;
     println!();
-    println!("  {WHITE}JustOS{ACCENT}█{RESET}   {DIM}system overview{RESET}");
+    println!("  {WHITE}justOS{ACCENT}█{RESET}   {DIM}system overview{RESET}");
     println!();
     println!("  memory    {}  {} of {}", bar(used, i.memory_total, 30), size(used), size(i.memory_total));
     println!("  devices   {}  {} of {} with a driver", bar(i.devices_with_driver, i.devices, 30), i.devices_with_driver, i.devices);

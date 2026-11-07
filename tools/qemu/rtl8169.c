@@ -1,7 +1,7 @@
 /*
  * Realtek RTL8169 / RTL8111 (RTL8168) Gigabit Ethernet, as seen by a driver.
  *
- * Written for testing JustOS drivers. It follows the register set and the
+ * Written for testing justOS drivers. It follows the register set and the
  * descriptor rules of the real chips (Realtek datasheets, and the Linux
  * r8169 driver for the behaviour the datasheets leave out) and is strict:
  * whatever the real chip would ignore or get wrong is ignored here too and

@@ -1,6 +1,6 @@
 [package]
 name = "just-uefi"
-description = "JustOS boot loader for UEFI firmware"
+description = "justOS boot loader for UEFI firmware"
 version = "0.1.0"
 edition = "2021"
 publish = false

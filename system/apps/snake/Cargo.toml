@@ -1,6 +1,6 @@
 [package]
 name = "snake"
-description = "JustOS program: snake game"
+description = "justOS program: snake game"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true

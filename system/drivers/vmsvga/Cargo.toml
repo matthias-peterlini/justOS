@@ -1,6 +1,6 @@
 [package]
 name = "vmsvga"
-description = "JustOS driver: VMware SVGA II display"
+description = "justOS driver: VMware SVGA II display"
 version = "1.1.0"
 edition.workspace = true
 publish.workspace = true

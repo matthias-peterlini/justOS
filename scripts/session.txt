@@ -9,7 +9,7 @@ disks
 ls sys:/
 cat sys:/home/welcome.txt
 mkdir ram:/test/deep
-write ram:/test/deep/note.txt hello from JustOS
+write ram:/test/deep/note.txt hello from justOS
 append ram:/test/deep/note.txt second line
 cp ram:/test/deep/note.txt sys:/home/note.txt
 cat sys:/home/note.txt

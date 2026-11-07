@@ -7,11 +7,11 @@
 //! ```
 //!
 //! `<store dir>` holds the built store (`build/root/store/<id>/{app,info,
-//! icon.qoi}`); its JustOS apps go in the index. The out folder gets each as
+//! icon.qoi}`); its justOS apps go in the index. The out folder gets each as
 //! `<id>-<version>.app` (and `.qoi`), `index.json` and `index.json.sig`;
 //! publish it at `<url>`. The key file is a private key: 32 bytes in hex.
 //! The serial defaults to the time, so a newer index always has a higher
-//! one; `--system` is the oldest JustOS the apps run on. `--slot` adds a
+//! one; `--system` is the oldest justOS the apps run on. `--slot` adds a
 //! system update (from `justtool slot`) as `justos-<version>.slot`, with its
 //! own signature next to it (`.slot.sig`) for installing it by hand.
 
@@ -117,7 +117,7 @@ pub fn cmd_updates(args: &[String]) -> Result<()> {
         }
         let name = format!("justos-{}.slot", header.version);
         fs::write(Path::new(out).join(&name), &image).map_err(|e| format!("{name}: {e}"))?;
-        // For `sysupdate install <file>` on JustOS.
+        // For `sysupdate install <file>` on justOS.
         let sig = ed25519::sign(&seed, &image);
         fs::write(Path::new(out).join(format!("{name}.sig")), format!("{}\n", hex(&sig))).map_err(|e| format!("{name}.sig: {e}"))?;
         fields.push(("system", Value::object(vec![("version", Value::string(&header.version)), ("slot", file_entry(&base, &name, &image))])));

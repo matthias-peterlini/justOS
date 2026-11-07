@@ -1,10 +1,10 @@
 #!/bin/sh
-# Boots a JustOS image on a classic PC (PIIX4) and on a modern one (Q35),
-# presses the power button through QMP and checks that JustOS turns itself
+# Boots a justOS image on a classic PC (PIIX4) and on a modern one (Q35),
+# presses the power button through QMP and checks that justOS turns itself
 # off cleanly. Then boots a "laptop": Q35 with the battery, adapter, lid
-# and thermal zone of scripts/acpi/laptop.aml, checks that JustOS reads
+# and thermal zone of scripts/acpi/laptop.aml, checks that justOS reads
 # them through the firmware's AML, empties the battery and checks that
-# JustOS turns itself off.
+# justOS turns itself off.
 # The sleep cases put the machine to sleep (S3) for a few seconds, on two
 # processors, and check that the disk, the file system and the network
 # work after it wakes up: sleep-pc (PIIX4, IDE), sleep-q35 (AHCI) and
@@ -81,7 +81,7 @@ for c in $CASES; do
             DISK=ahci "$HERE/test.sh" "$IMAGE" "$WORK/laptop.txt" -machine q35 \
                 -acpitable file="$HERE/acpi/laptop.aml" > "$WORK/out.txt" 2>&1
             [ $? -ne 0 ] && problems="$problems [kernel stopped]"
-            for want in "AML ready" "on mains" "80%, charging" "Arc Cells ARC57 LION" "now 40000 of 50000 mWh (design 57000)" \
+            for want in "AML ready" "on mains" "80%, charging" "Just Cells JST57 LION" "now 40000 of 50000 mWh (design 57000)" \
                 "health 87%, 123 cycles" "lid.* open" "TZ01 40.0 °C.*critical 100 °C" "battery *80% (on mains)" \
                 "battery empty: turning off"; do
                 grep -q "$want" "$WORK/out.txt" || problems="$problems [missing: $want]"

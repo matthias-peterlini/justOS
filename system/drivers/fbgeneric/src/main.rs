@@ -3,7 +3,7 @@
 //! server chips, and any other PCI display controller.
 //!
 //! It keeps the framebuffer the firmware (UEFI GOP or VESA) set up before
-//! JustOS started, at the resolution the loader picked; without a native
+//! justOS started, at the resolution the loader picked; without a native
 //! driver the card cannot change it. What the driver adds is the card itself:
 //! the screen belongs to a named device, so Settings and `display` show the
 //! real card, and the screen keeps working when a better driver is missing.

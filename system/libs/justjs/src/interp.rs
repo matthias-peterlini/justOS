@@ -1225,7 +1225,7 @@ impl Interp {
             Op::Mod => Value::Num(num(self, a)? % num(self, b)?),
             Op::Exp => {
                 let (x, y) = (num(self, a)?, num(self, b)?);
-                Value::Num(if y.is_nan() || (x.abs() == 1.0 && y.is_infinite()) { f64::NAN } else { arcc_core::float::powf(x, y) })
+                Value::Num(if y.is_nan() || (x.abs() == 1.0 && y.is_infinite()) { f64::NAN } else { justc_core::float::powf(x, y) })
             }
             Op::Shl => Value::Num(f64::from(to_i32(num(self, a)?).wrapping_shl(to_u32(num(self, b)?) & 31))),
             Op::Shr => Value::Num(f64::from(to_i32(num(self, a)?) >> (to_u32(num(self, b)?) & 31))),

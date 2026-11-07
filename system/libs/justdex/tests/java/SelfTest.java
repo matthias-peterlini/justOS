@@ -7,7 +7,7 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-/** An app that tests itself on JustOS: it opens its window, presses its own
+/** An app that tests itself on justOS: it opens its window, presses its own
  *  button from a timer, logs what happened and closes. */
 public class SelfTest extends Activity {
     private int clicks = 0;

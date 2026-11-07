@@ -1,6 +1,6 @@
 [package]
 name = "justdk"
-description = "JustOS Driver Kit: the stable kernel/driver ABI, manifests and driver packages"
+description = "justOS Driver Kit: the stable kernel/driver ABI, manifests and driver packages"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

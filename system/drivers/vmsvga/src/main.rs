@@ -2,7 +2,7 @@
 //! "vmware" display.
 //!
 //! The device has an index/value register pair in I/O space, its
-//! framebuffer in the second BAR and a command FIFO in the third. JustOS
+//! framebuffer in the second BAR and a command FIFO in the third. justOS
 //! draws into the framebuffer and tells the device what changed with an
 //! UPDATE command in the FIFO.
 

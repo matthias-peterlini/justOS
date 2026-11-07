@@ -1,6 +1,6 @@
 [package]
 name = "hda"
-description = "JustOS driver: Intel High Definition Audio"
+description = "justOS driver: Intel High Definition Audio"
 version = "1.1.0"
 edition.workspace = true
 publish.workspace = true

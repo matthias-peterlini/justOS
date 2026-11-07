@@ -3,6 +3,6 @@ category=Giochi
 about=Scopri tutte le caselle senza far saltare una mina.
 details=Un numero dice quante mine toccano la casella. Clic per scoprire, clic destro (o F) per mettere una bandierina. Tre livelli: Facile, Medio e Difficile. La prima mossa non è mai una mina.
 version=1.0
-developer=JustOS
+developer=justOS
 type=native
 gui=yes

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/brand/banner.png" alt="JustOS" width="100%">
+<img src="docs/brand/banner.png" alt="justOS" width="100%">
 
 ### Un sistema operativo per PC x86-64, scritto da zero in Rust.
 
@@ -21,7 +21,7 @@ programmazione: tutto progettato apposta, senza librerie esterne.
 
 <br>
 
-<img src="docs/screenshots/scrivania.jpg" alt="La scrivania di JustOS">
+<img src="docs/screenshots/scrivania.jpg" alt="La scrivania di justOS">
 
 <sub>La scrivania: l'ora che fluttua sullo sfondo, il dock con il menu J▮ a sinistra e lo stato a destra.</sub>
 
@@ -29,7 +29,7 @@ programmazione: tutto progettato apposta, senza librerie esterne.
 
 <br>
 
-## Perché JustOS
+## Perché justOS
 
 <table>
 <tr>
@@ -80,7 +80,7 @@ fotocamera e microfono, come su un telefono.
 **Esegue anche gli altri**
 
 Programmi Linux (statici o con la glibc di Debian), Windows x64 (anche
-con finestre), Java e app Android girano accanto alle app di JustOS, senza
+con finestre), Java e app Android girano accanto alle app di justOS, senza
 modifiche.
 
 </td>
@@ -90,7 +90,7 @@ modifiche.
 
 **Ha il suo linguaggio**
 
-ArcScript, con compilatore e macchina virtuale, e l'IDE **ArcStudio** con
+JustScript, con compilatore e macchina virtuale, e l'IDE **JustStudio** con
 gli errori sottolineati mentre scrivi e l'anteprima dal vivo.
 
 </td>
@@ -121,8 +121,8 @@ questi scritti da zero.
 <td width="50%"><img src="docs/screenshots/finestre.jpg" alt="Musica, Note e File"><br><b>Finestre</b>: Musica, Note e File insieme.</td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/schermo-intero.jpg" alt="ArcStudio a schermo intero"><br><b>Schermo intero</b>: ArcStudio prende tutto lo schermo, con l'ora nel titolo.</td>
-<td><img src="docs/screenshots/browser.jpg" alt="Browser"><br><b>Browser</b>: Wikipedia con il motore web di JustOS.</td>
+<td><img src="docs/screenshots/schermo-intero.jpg" alt="JustStudio a schermo intero"><br><b>Schermo intero</b>: JustStudio prende tutto lo schermo, con l'ora nel titolo.</td>
+<td><img src="docs/screenshots/browser.jpg" alt="Browser"><br><b>Browser</b>: Wikipedia con il motore web di justOS.</td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/negozio.jpg" alt="Negozio"><br><b>Negozio</b>: giochi e app, installati con un clic.</td>
@@ -187,7 +187,7 @@ Secure Boot va disattivato.
 
 | | |
 |---|---|
-| **Di serie** | Browser, File, Editor di testo, Note, Promemoria, Calendario, Orologio, Calcolatrice, Foto, Musica, Anteprima, Terminale, Monitor attività, Impostazioni, Info sistema, ArcStudio |
+| **Di serie** | Browser, File, Editor di testo, Note, Promemoria, Calendario, Orologio, Calcolatrice, Foto, Musica, Anteprima, Terminale, Monitor attività, Impostazioni, Info sistema, JustStudio |
 | **Nel Negozio** | 2048, Campo minato, Serpente, Sudoku, Tris e Disegno; BusyBox e Lua per il Terminale; programmi Linux e Windows da GitHub. Le app si aggiornano da sole, da un indice firmato |
 | **Doppio clic** | un programma parte; un pacchetto `.deb`, `.tar.gz`, `.zip` o `.pkg` si installa da solo |
 
@@ -199,13 +199,13 @@ Secure Boot va disattivato.
 |---|---|---|
 | **JustBoot** | loader per BIOS (MBR + secondo stadio in assembly) e per UEFI (un'applicazione EFI in Rust); entrambi scelgono uno dei due slot di sistema (aggiornamenti A/B con ritorno indietro) e passano al kernel la stessa `BootInfo` | [architettura](docs/architettura.md#aggiornamenti-del-sistema-ab) |
 | **Kernel** | 64 bit, memoria virtuale a 4 livelli, scheduler preemptivo su tutti i processori, thread, code di attesa, MSI/MSI-X, porte di messaggi tra programmi, ACPI con un interprete AML scritto da zero (spegnimento, sospensione in RAM, batteria, temperature) | [architettura](docs/architettura.md#kernel) |
-| **Driver** | pacchetti `.adp` indipendenti dal kernel: il kernel confronta i manifesti con l'hardware e carica il driver giusto da solo, all'avvio e a sistema avviato | [driver](docs/driver.md) |
+| **Driver** | pacchetti `.jdp` indipendenti dal kernel: il kernel confronta i manifesti con l'hardware e carica il driver giusto da solo, all'avvio e a sistema avviato | [driver](docs/driver.md) |
 | **JustFS** | il file system nativo: blocchi da 4 KiB, extent, controllo di coerenza; volumi con nome (`sys:`, `ram:`, `chiavetta:`) | [architettura](docs/architettura.md#file-system-justfs) |
 | **Interfaccia** | splash, configurazione guidata, scrivania con dock, Applicazioni, centro di controllo, notifiche, ricerca globale, desktop virtuali, snap delle finestre, trascinamento dei file, HiDPI, animazioni | [gui](docs/gui.md) |
 | **Sicurezza** | identità delle app, sandbox, permessi, password con sale e blocco automatico | [roadmap](docs/roadmap.md#le-basi-comuni) |
 | **Programmi** | in modalità utente, ognuno nel suo spazio di indirizzi, a riga di comando o con finestre proprie (`justui`) | [programmi](docs/programmi.md) |
 | **Compatibilità** | eseguibili ELF Linux (statici o dinamici con la glibc), `.exe` Windows x64 (console e finestre), programmi Java e app Android (`.dex`, `.apk`) | [compatibilità](docs/compat.md) |
-| **ArcScript** | il linguaggio di JustOS: `arcc` compila ed esegue `.as` e pacchetti `.arc`; ArcStudio è l'IDE con anteprima dal vivo | [ArcScript](docs/arcscript.md#arcstudio) |
+| **JustScript** | il linguaggio di justOS: sorgenti `.jt`, che `justc` compila in pacchetti `.jpk` (o in `.exe` autonomi per Windows, `-t windows`) e `just` esegue (`just main.jt`); JustStudio è l'IDE con anteprima dal vivo | [JustScript](docs/justscript.md#juststudio) |
 | **Rete** | ARP, IPv4, ICMP, UDP, TCP, DHCP, DNS; TLS 1.3 con certificati verificati e HTTP(S) | |
 | **Web** | `justweb` (HTML, CSS con flexbox, grid, tabelle e media query; PNG, JPEG e GIF) e `justjs` (JavaScript con il DOM, gli eventi, i timer e `fetch`) | [gui](docs/gui.md#il-motore-web) |
 | **Shell** | una quarantina di comandi, cronologia, completamento con Tab | qui sotto, nei primi passi |
@@ -262,8 +262,10 @@ suspend 10             sospende il computer per 10 secondi
 install sudoku         un programma dal Negozio
 updates check          aggiornamenti delle app
 sysupdate              i due slot di sistema (check, install, rollback)
-cd sys:/home/arcscript
-hello.as               un programma ArcScript
+cd sys:/home/justscript
+hello.jt               un programma JustScript (o: just hello.jt)
+justc build library    lo compila in un pacchetto .jpk
+justc build library -t windows    in un .exe che gira da solo su Windows
 shutdown / restart
 ```
 
@@ -272,13 +274,14 @@ shutdown / restart
 ## Compilare
 
 Servono Rust stable (`rustup` installa da solo la versione e i target
-giusti, grazie a `rust-toolchain.toml`), `nasm`, `qemu-system-x86_64` e,
-per provare l'avvio UEFI, OVMF.
+giusti, grazie a `rust-toolchain.toml`), `nasm`, `qemu-system-x86_64`, il gcc
+di MinGW-w64 (`gcc-mingw-w64-x86-64`, collega il runtime degli `.exe` di
+`justc`) e, per provare l'avvio UEFI, OVMF.
 
 ```sh
 make            # l'immagine di disco build/justos.img (BIOS e UEFI)
 make iso        # il CD live build/justos.iso
-make run        # avvia JustOS in QEMU (anche run-uefi, run-q35, run-nvme, run-iso)
+make run        # avvia justOS in QEMU (anche run-uefi, run-q35, run-nvme, run-iso)
 ```
 
 `make SIZE=1G` cambia la dimensione dell'immagine, `make MEMORY=2G` la
@@ -297,7 +300,7 @@ make test-acpi      # pulsante di accensione, batteria, sospensione e risveglio
 make test-update    # aggiornamento nell'altro slot, prova, conferma, ritorno indietro
 SLEEP=1 make test-drivers  # gli stessi, dopo una sospensione (anche test-audio)
 make test-compat    # programmi Linux, Windows (anche con finestre), Java e Android
-make test-arcscript # programmi ArcScript
+make test-justscript # programmi JustScript
 make shots          # usa l'interfaccia (ogni app, il Negozio) e salva le schermate
 make check          # test delle librerie e dello strumento host
 ```
@@ -313,9 +316,9 @@ make check          # test delle librerie e dello strumento host
 | `boot/bios/`, `boot/uefi/` | JustBoot per BIOS e per UEFI |
 | `system/kernel/` | il kernel, con l'interfaccia grafica (`src/gui`) |
 | `system/drivers/` | i driver, uno per cartella, ognuno con il suo `driver.manifest` |
-| `system/apps/` | i programmi, tra cui `winrun` (programmi Windows), `dalvik` (Java e Android) e `arcc` (ArcScript) |
+| `system/apps/` | i programmi, tra cui `winrun` (programmi Windows), `dalvik` (Java e Android), `justc` e `just` (JustScript) |
 | `system/store/` | le app del Negozio (giochi e Disegno), con icona e scheda |
-| `system/libs/` | le librerie: ABI dei driver (`justdk`, `justdrv`), programmi (`justrt`), finestre (`justui`), disegno (`justgfx`), JustFS, USB, virtio, ArcScript, TLS (`justtls`), web (`justweb`), JavaScript (`justjs`), Dalvik (`justdex`) |
+| `system/libs/` | le librerie: ABI dei driver (`justdk`, `justdrv`), programmi (`justrt`), finestre (`justui`), disegno (`justgfx`), JustFS, USB, virtio, JustScript, TLS (`justtls`), web (`justweb`), JavaScript (`justjs`), Dalvik (`justdex`) |
 | `tools/justtool/` | strumento host: crea pacchetti, immagini e CD, legge e scrive volumi JustFS |
 | `tools/assets/` | i generatori di caratteri, icone, sfondi, suoni, musica e del banner di questa pagina |
 | `tools/qemu/` | modelli per QEMU di dispositivi che QEMU non ha (Realtek RTL8169, RTL8168, RTL8125) |
@@ -329,7 +332,7 @@ make check          # test delle librerie e dello strumento host
 
 Copyright (C) 2026 Matthias Peterlini <https://matthiaspeterlini.tech>
 
-JustOS è software libero: puoi ridistribuirlo e/o modificarlo secondo i
+justOS è software libero: puoi ridistribuirlo e/o modificarlo secondo i
 termini della GNU General Public License pubblicata dalla Free Software
 Foundation, nella versione 3 o (a tua scelta) in una qualsiasi versione
 successiva (GPL-3.0-or-later). È distribuito nella speranza che sia utile,

@@ -7,10 +7,10 @@ use super::text::{self, Font};
 use super::Display;
 use crate::dev::input::{self, KeyEvent};
 
-// The JustOS palette: frosted glass over the wallpaper, light panes for the
+// The justOS palette: frosted glass over the wallpaper, light panes for the
 // dock and the widgets, warm pink ones for the window frames, darker panes
 // for content, white text on the dark ones and ink on the light ones, light
-// grey and white pills, and the orange of the JustOS cursor.
+// grey and white pills, and the orange of the justOS cursor.
 pub const TEXT: u32 = 0xFFFF_FFFF;
 pub const TEXT_DIM: u32 = 0xFFC9_C6CE;
 pub const TEXT_FAINT: u32 = 0xFF94_919A;
@@ -28,14 +28,14 @@ pub const FRAME_STRONG: u32 = 0xB3F2_D6CE;
 pub const FRAME: u32 = 0x8CE8_D2CC;
 /// The round dark window buttons.
 pub const KNOB: u32 = 0xFF3B_3A3F;
-/// The close button, and the cursor of the JustOS mark (#ff5a1f).
+/// The close button, and the cursor of the justOS mark (#ff5a1f).
 pub const CLOSE: u32 = 0xFFFF_5A1F;
 pub const BORDER: u32 = 0x29FF_FFFF;
 /// The glow in the corner of a card.
 pub const GLOW: u32 = 0xFF8A_3416;
-/// The highlight colour (text cursor, progress, focus): the JustOS orange.
+/// The highlight colour (text cursor, progress, focus): the justOS orange.
 pub const ACCENT: u32 = 0xFFFF_5A1F;
-/// The orange of things that call for attention, the same JustOS orange.
+/// The orange of things that call for attention, the same justOS orange.
 pub const ORANGE: u32 = 0xFFFF_5A1F;
 pub const RED: u32 = 0xFFFF_5A4E;
 pub const GREEN: u32 = 0xFF34_C46A;
@@ -156,7 +156,7 @@ pub fn button(c: &mut Canvas, r: Rect, label: &str, primary: bool, hover: bool) 
         c.shadow(r, r.h / 2, 8, if hover { 70 } else { 45 });
         c.fill_round(r, r.h / 2, if hover { 0xFFFF_FFFF } else { 0xF5FF_FFFF });
     } else {
-        // The translucent grey pill of the JustOS design.
+        // The translucent grey pill of the justOS design.
         c.fill_round(r, r.h / 2, if hover { 0x40FF_FFFF } else { 0x29FF_FFFF });
         c.stroke_round(r, r.h / 2, 1, 0x1FFF_FFFF);
     }

@@ -1,5 +1,5 @@
 //! A Wayland compositor, in the kernel: how Linux programs with a graphical
-//! interface (GTK, Qt, SDL, Firefox...) show windows on JustOS.
+//! interface (GTK, Qt, SDL, Firefox...) show windows on justOS.
 //!
 //! It listens at `$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY` ([`RUNTIME_DIR`],
 //! [`DISPLAY`]), a local socket of the kernel's own, and serves each client
@@ -7,7 +7,7 @@
 //! pools: a memfd passed with SCM_RIGHTS); on each commit the compositor
 //! copies what changed, composes the surfaces of a window (the toplevel,
 //! its subsurfaces, its popups) and hands the result to the desktop, which
-//! shows it in a JustOS window, with JustOS's frame: decorations are the
+//! shows it in a justOS window, with justOS's frame: decorations are the
 //! server's (`xdg-decoration`, and KDE's protocol, which GTK reads). Pointer
 //! and keyboard come back as `wl_pointer` and `wl_keyboard` events, the keys
 //! through an XKB keymap of our own ([`keymap`]).
@@ -41,7 +41,7 @@ use wire::{Args, Out};
 pub const RUNTIME_DIR: &str = "/home/tmp";
 pub const DISPLAY: &str = "wayland-0";
 
-/// Largest window content (units), as for JustOS's own programs.
+/// Largest window content (units), as for justOS's own programs.
 const MAX_W: i32 = crate::gui::window::MAX_W;
 const MAX_H: i32 = crate::gui::window::MAX_H;
 /// A client that leaves this much unread is stuck: it is let go.
@@ -618,7 +618,7 @@ impl Client {
                 self.add(id, Iface::Keyboard, ver, Data::None);
                 self.send_keymap(id);
                 if ver >= 4 {
-                    // JustOS repeats keys itself.
+                    // justOS repeats keys itself.
                     self.out.event(id, 5).int(0).int(0);
                 }
                 if let Some(s) = self.keyboard {
@@ -716,14 +716,14 @@ impl Client {
         let k = crate::gui::scale().max(1);
         // About 96 dots per inch at one pixel per unit.
         let (mw, mh) = (pw * 254 / 96 / 10 / k, ph * 254 / 96 / 10 / k);
-        self.out.event(id, 0).int(0).int(0).int(mw).int(mh).int(0).string("JustOS").string("Display").int(0);
+        self.out.event(id, 0).int(0).int(0).int(mw).int(mh).int(0).string("justOS").string("Display").int(0);
         self.out.event(id, 1).uint(3).int(pw).int(ph).int(60_000);
         if v >= 2 {
             self.out.event(id, 3).int(k);
         }
         if v >= 4 {
-            self.out.event(id, 4).string("JustOS-1");
-            self.out.event(id, 5).string("JustOS display");
+            self.out.event(id, 4).string("justOS-1");
+            self.out.event(id, 5).string("justOS display");
         }
         if v >= 2 {
             self.out.event(id, 2);
@@ -1626,7 +1626,7 @@ fn import(s: &mut Surface, b: &Buf, damage: Rect) -> bool {
     full
 }
 
-/// Wayland's ARGB is premultiplied; JustOS's pictures are not.
+/// Wayland's ARGB is premultiplied; justOS's pictures are not.
 fn unpremultiply(v: u32) -> u32 {
     let a = v >> 24;
     if a == 255 || a == 0 {

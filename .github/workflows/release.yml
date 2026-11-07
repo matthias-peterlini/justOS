@@ -25,7 +25,8 @@ jobs:
       - name: Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y nasm
+          # MinGW links just-stub, the runtime of justc's .exe programs.
+          sudo apt-get install -y nasm gcc-mingw-w64-x86-64
           # rust-toolchain.toml picks the toolchain, targets and rust-src.
           rustup show
 
@@ -53,5 +54,5 @@ jobs:
             gh release upload "$TAG" dist/* --clobber
           else
             gh release create "$TAG" dist/* --target "$GITHUB_SHA" \
-              --title "JustOS $TAG" --notes-file .github/release-notes.md
+              --title "justOS $TAG" --notes-file .github/release-notes.md
           fi

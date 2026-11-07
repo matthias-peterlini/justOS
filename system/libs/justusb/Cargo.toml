@@ -1,6 +1,6 @@
 [package]
 name = "justusb"
-description = "USB core for JustOS host controller drivers: enumeration, hubs, hot-plug"
+description = "USB core for justOS host controller drivers: enumeration, hubs, hot-plug"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

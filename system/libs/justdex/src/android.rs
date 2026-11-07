@@ -192,8 +192,8 @@ pub(crate) fn static_field(vm: &mut Vm, class: &str, name: &str) -> Option<Val> 
     Some(match (class, name) {
         ("Landroid/os/Build$VERSION;", "SDK_INT") => Val::int(23),
         ("Landroid/os/Build$VERSION;", "RELEASE") => vm.jstring("6.0".into()),
-        ("Landroid/os/Build;", "MODEL" | "DEVICE" | "PRODUCT") => vm.jstring("JustOS".into()),
-        ("Landroid/os/Build;", "MANUFACTURER" | "BRAND") => vm.jstring("JustOS".into()),
+        ("Landroid/os/Build;", "MODEL" | "DEVICE" | "PRODUCT") => vm.jstring("justOS".into()),
+        ("Landroid/os/Build;", "MANUFACTURER" | "BRAND") => vm.jstring("justOS".into()),
         _ => return None,
     })
 }
@@ -538,7 +538,7 @@ pub(crate) fn method(vm: &mut Vm, o: &Ref, _class: &str, name: &str, sig: &str, 
                 let Val::R(v) = &a0 else {
                     return vm.throw(
                         "Ljava/lang/UnsupportedOperationException;",
-                        "setContentView(R.layout...): JustOS cannot read XML layouts yet; build the screen in code",
+                        "setContentView(R.layout...): justOS cannot read XML layouts yet; build the screen in code",
                     );
                 };
                 vm.ui.content = Some(v.clone());

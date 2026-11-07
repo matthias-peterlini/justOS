@@ -105,7 +105,7 @@ impl App for About {
                 c.fill_circle(cx, area.y + 170, 74, 0xFF14_1414);
                 draw_mark(c, cx, area.y + 170, 56, 0xFFF2_EFE6);
                 let x = area.x + 250;
-                text::draw(c, Font::Title, x, area.y + 76, "JustOS", TEXT);
+                text::draw(c, Font::Title, x, area.y + 76, "justOS", TEXT);
                 text::draw(c, Font::Body, x, area.y + 116, &format!("Versione {}", crate::VERSION), TEXT_DIM);
                 let mut brand = [0u8; 48];
                 let cpu = match crate::arch::smp::count() {
@@ -164,12 +164,12 @@ impl App for About {
                 }
                 let (line, color) = match &state {
                     State::NotChecked | State::Checking => (String::new(), TEXT_FAINT),
-                    State::UpToDate => (String::from("JustOS è aggiornato."), ui::GREEN),
-                    State::Available(v) => (format!("È disponibile JustOS {v}."), ui::ORANGE),
-                    State::Released(v) => (format!("JustOS {v} è nelle release su GitHub."), ui::ORANGE),
-                    State::Downloading { version, done, total } => (format!("Scarico JustOS {version}: {} di {}", Size(*done), Size(*total)), TEXT_DIM),
-                    State::Installing { version, .. } => (format!("Scrivo JustOS {version} accanto a questo sistema…"), TEXT_DIM),
-                    State::Staged(v) => (format!("JustOS {v} parte al prossimo riavvio."), ui::GREEN),
+                    State::UpToDate => (String::from("justOS è aggiornato."), ui::GREEN),
+                    State::Available(v) => (format!("È disponibile justOS {v}."), ui::ORANGE),
+                    State::Released(v) => (format!("justOS {v} è nelle release su GitHub."), ui::ORANGE),
+                    State::Downloading { version, done, total } => (format!("Scarico justOS {version}: {} di {}", Size(*done), Size(*total)), TEXT_DIM),
+                    State::Installing { version, .. } => (format!("Scrivo justOS {version} accanto a questo sistema…"), TEXT_DIM),
+                    State::Staged(v) => (format!("justOS {v} parte al prossimo riavvio."), ui::GREEN),
                     State::Failed(e) => (format!("Non riuscito: {e}"), TEXT_FAINT),
                 };
                 text::draw(c, Font::Small, b.x + 4, b.bottom() + 10, &text::fit(Font::Small, &line, area.right() - b.x - 20), color);

@@ -1,4 +1,4 @@
-//! The smallest JustOS program.
+//! The smallest justOS program.
 
 #![no_std]
 #![no_main]

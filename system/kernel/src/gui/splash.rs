@@ -1,4 +1,4 @@
-//! The boot splash: the JustOS wordmark and a progress bar on a dark
+//! The boot splash: the justOS wordmark and a progress bar on a dark
 //! background with a warm glow. No text.
 //!
 //! The wordmark is the one on justos.dev: "JUSTOS" in a pixel font seven
@@ -65,7 +65,7 @@ fn cursor_in(color: u32) -> u32 {
     (a << 24) | (CURSOR & 0xFF_FFFF)
 }
 
-/// The JustOS wordmark, `h` units tall and centred on (`cx`, `cy`): the
+/// The justOS wordmark, `h` units tall and centred on (`cx`, `cy`): the
 /// letters in `color`, the cursor in orange (as transparent as `color`).
 pub fn draw_logo(c: &mut Canvas, cx: i32, cy: i32, h: i32, color: u32) {
     let cursor = cursor_in(color);

@@ -1,5 +1,5 @@
 //! The desktop: the clock floating at the top, the widgets, the dock (the
-//! JustOS mark, the apps, the status), the launcher, the windows and the
+//! justOS mark, the apps, the status), the launcher, the windows and the
 //! animations between them. There is no bar.
 //!
 //! Everything that moves is driven by time ([`ui::Anim`]), not by frames:
@@ -53,7 +53,7 @@ const MAGNIFY: i32 = 30;
 const DOCK_GAP: i32 = 10;
 const DOCK_PAD: i32 = 11;
 const SEP_W: i32 = 19;
-/// The dark pill with the JustOS mark at the left end of the dock (it opens
+/// The dark pill with the justOS mark at the left end of the dock (it opens
 /// the system menu), and the room between the dock's pills and its icons.
 const MARK_W: i32 = 64;
 const PILL_GAP: i32 = 12;
@@ -325,7 +325,7 @@ fn carry_rect(x: i32, y: i32) -> Rect {
 
 /// Does a dock icon take files dropped on it?
 fn takes_files(item: &DockItem) -> bool {
-    matches!(item.kind.as_str(), "trash" | "files" | "textedit" | "photos" | "viewer" | "music" | "arcstudio")
+    matches!(item.kind.as_str(), "trash" | "files" | "textedit" | "photos" | "viewer" | "music" | "juststudio")
 }
 
 struct Launcher {
@@ -605,7 +605,7 @@ impl Desktop {
         Rect::new((self.w - total) / 2, self.h - dock_h - 12, total, dock_h)
     }
 
-    /// The JustOS mark at the left end of the dock `bg`.
+    /// The justOS mark at the left end of the dock `bg`.
     fn mark_pill(bg: Rect) -> Rect {
         Rect::new(bg.x + DOCK_PAD, bg.y + DOCK_PAD, MARK_W, bg.h - 2 * DOCK_PAD - 4)
     }
@@ -1442,7 +1442,7 @@ impl Desktop {
         }
     }
 
-    // The control centre, as in the JustOS design: the account on the
+    // The control centre, as in the justOS design: the account on the
     // darkened wallpaper, then a panel of grey glass with the switches, two
     // tall sliders (volume, brightness) and the power buttons. It opens
     // above the status at the right end of the dock.
@@ -1661,7 +1661,7 @@ impl Desktop {
         let mark = Self::mark_pill(bg);
         if self.dock_shown() && mark.contains(x, y) {
             let mut items = alloc::vec![
-                ("Info su JustOS", Some(MenuAct::About)),
+                ("Info su justOS", Some(MenuAct::About)),
                 ("", None),
                 ("Impostazioni di sistema…", Some(MenuAct::Settings)),
                 ("Negozio…", Some(MenuAct::Store)),
@@ -2338,7 +2338,7 @@ impl Desktop {
         let items = self.dock_items();
         let (rects, bg) = self.dock_layout(&items);
         ui::light_glass(c, &self.blur, bg, 26, true);
-        // The JustOS mark on a dark pill: it opens the system menu.
+        // The justOS mark on a dark pill: it opens the system menu.
         let mark = Self::mark_pill(bg);
         let menu = self.popup.as_ref().is_some_and(|p| p.kind == PopupKind::Menu && p.up);
         let on_mark = menu || mark.contains(self.mouse.0, self.mouse.1);
@@ -2989,7 +2989,7 @@ impl Desktop {
                         (widgets, Some(MenuAct::Widgets)),
                         ("Impostazioni Schermo…", Some(MenuAct::Display)),
                         ("", None),
-                        ("Info su JustOS", Some(MenuAct::About)),
+                        ("Info su justOS", Some(MenuAct::About)),
                     ],
                     self.w,
                 );

@@ -10,7 +10,7 @@ use std::path::Path;
 
 fn local(base: &Path, url: &str) -> Option<Vec<u8>> {
     if url.starts_with("http") {
-        let out = std::process::Command::new("curl").args(["-sSL", "--compressed", "-m", "20", "-A", "Mozilla/5.0 JustOS", url]).output().ok()?;
+        let out = std::process::Command::new("curl").args(["-sSL", "--compressed", "-m", "20", "-A", "Mozilla/5.0 justOS", url]).output().ok()?;
         return out.status.success().then_some(out.stdout);
     }
     let rel = url.strip_prefix("file://").unwrap_or(url);

@@ -35,7 +35,7 @@ pub struct Reminders {
 impl Reminders {
     pub fn new() -> Reminders {
         let text = fs::abs(FILE).and_then(|p| fs::read_file(&p)).map(|b| String::from(String::from_utf8_lossy(&b)));
-        let text = text.unwrap_or_else(|_| String::from("Prova le app di JustOS\nScegli uno sfondo nelle Impostazioni\n[x] Avvia JustOS\n"));
+        let text = text.unwrap_or_else(|_| String::from("Prova le app di justOS\nScegli uno sfondo nelle Impostazioni\n[x] Avvia justOS\n"));
         let items = text
             .lines()
             .filter(|l| !l.trim().is_empty())

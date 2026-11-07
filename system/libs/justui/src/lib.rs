@@ -1,4 +1,4 @@
-//! Windows for JustOS programs.
+//! Windows for justOS programs.
 //!
 //! A program opens a [`Window`] on the desktop, draws into its
 //! [`canvas`](Window::canvas) with the same tools the system's apps use

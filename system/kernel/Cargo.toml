@@ -1,6 +1,6 @@
 [package]
 name = "just-kernel"
-description = "The JustOS kernel"
+description = "The justOS kernel"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -20,8 +20,8 @@ justtls.workspace = true
 justzip.workspace = true
 justjson.workspace = true
 justweb.workspace = true
-arcc-core.workspace = true
-arc-vm.workspace = true
+justc-core.workspace = true
+just-vm.workspace = true
 justaml.workspace = true
 
 [lints]

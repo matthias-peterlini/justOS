@@ -3,6 +3,6 @@ name        = ahci
 version     = 1.1.0
 class       = storage
 description = AHCI SATA controller
-author      = JustOS
+author      = justOS
 boot        = yes
 match       = pci-class 01:06:01

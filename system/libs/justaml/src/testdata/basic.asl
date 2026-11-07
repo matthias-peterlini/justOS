@@ -1,10 +1,10 @@
 /*
- * Tests of the arcaml interpreter (src/tests.rs). Each Tnn method returns a
+ * Tests of the justaml interpreter (src/tests.rs). Each Tnn method returns a
  * bit mask of the checks that passed; the Rust test knows the full mask.
  *
  * Rebuild with: iasl -p basic basic.asl
  */
-DefinitionBlock ("", "DSDT", 2, "ARCOS", "AMLTEST", 1)
+DefinitionBlock ("", "DSDT", 2, "JUSTOS", "AMLTEST", 1)
 {
     External (\_SB.MISS, DeviceObj)
 
@@ -277,7 +277,7 @@ DefinitionBlock ("", "DSDT", 2, "ARCOS", "AMLTEST", 1)
 
         Device (DEVA)
         {
-            Name (_HID, "ARC0001")
+            Name (_HID, "JST0001")
             Method (_STA, 0) { Return (0x0F) }
             Method (_INI, 0) { INIC += 1 }
             Device (DEVB)
@@ -290,7 +290,7 @@ DefinitionBlock ("", "DSDT", 2, "ARCOS", "AMLTEST", 1)
 
         Device (DEVC)
         {
-            Name (_HID, "ARC0002")
+            Name (_HID, "JST0002")
             Method (_STA, 0) { Return (0) }
             Method (_INI, 0) { INIC += 0x1000 }
             Device (DEVD)
@@ -302,7 +302,7 @@ DefinitionBlock ("", "DSDT", 2, "ARCOS", "AMLTEST", 1)
 
         Device (DEVE)
         {
-            Name (_HID, "ARC0003")
+            Name (_HID, "JST0003")
             Method (_STA, 0) { Return (0x08) }
             Device (DEVF)
             {

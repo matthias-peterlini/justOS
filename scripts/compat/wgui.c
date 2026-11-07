@@ -70,7 +70,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmd, int show) {
     RegisterClassA(&wc);
     RECT r = {0, 0, 320, 240};
     AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-    HWND h = CreateWindowExA(0, "justwin", "Win32 su JustOS", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+    HWND h = CreateWindowExA(0, "justwin", "Win32 su justOS", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
                              r.right - r.left, r.bottom - r.top, NULL, NULL, inst, NULL);
     if (!h) {
         printf("wgui: no window\n");

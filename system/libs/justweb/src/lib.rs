@@ -1,4 +1,4 @@
-//! A small web engine for the JustOS Browser.
+//! A small web engine for the justOS Browser.
 //!
 //! It reads HTML into a tree ([`html`], [`dom`]), applies CSS ([`css`],
 //! [`style`]), lays the page out in boxes and lines ([`layout`]) and paints

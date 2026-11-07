@@ -9,8 +9,9 @@ publish = false
 authors = ["Matthias Peterlini"]
 
 [workspace.dependencies]
-arcc-core = { path = "libs/arcc-core" }
-arc-vm = { path = "libs/arc-vm" }
+justc-core = { path = "libs/justc-core" }
+just-vm = { path = "libs/just-vm" }
+jpk-bundler = { path = "libs/jpk-bundler" }
 justdk = { path = "libs/justdk" }
 justfs = { path = "libs/justfs" }
 justgfx = { path = "libs/justgfx" }

@@ -3,7 +3,7 @@
 //! thread of its own: the page, its stylesheets, then its pictures four at
 //! a time; the page is laid out again as they come in and when the window
 //! changes size. Its scripts run on another thread, which then hands them
-//! the page's events and timers. Cookies are kept while JustOS runs. The
+//! the page's events and timers. Cookies are kept while justOS runs. The
 //! start page searches with DuckDuckGo and has a few sites one click away.
 
 use crate::dev::input::{Key, KeyEvent};
@@ -35,7 +35,7 @@ const LINKS: [(&str, &str, &str); 4] = [
     ("Wikipedia", "wikipedia.org", "https://it.wikipedia.org/"),
     ("DuckDuckGo", "duckduckgo.com", "https://html.duckduckgo.com/html/"),
     ("Hacker News", "ycombinator.com", "https://news.ycombinator.com/"),
-    ("JustOS", "github.com", "https://github.com/matthias-peterlini/justOS"),
+    ("justOS", "github.com", "https://github.com/matthias-peterlini/justOS"),
 ];
 const ACCEPT_PAGE: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
 const ACCEPT_LANGUAGE: &str = "it-IT,it;q=0.9,en;q=0.8";
@@ -261,7 +261,7 @@ fn net_error(e: &str) -> String {
     }
 }
 
-/// A page of the browser's own, in the JustOS look.
+/// A page of the browser's own, in the justOS look.
 fn own_page(title: &str, heading: &str, text: &str) -> String {
     format!(
         "<html><head><title>{}</title></head><body style='margin:0;background:#2c2a30;color:#fff;font-family:sans-serif'>\

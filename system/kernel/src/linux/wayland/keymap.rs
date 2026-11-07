@@ -1,7 +1,7 @@
 //! The keyboard as Wayland clients see it: an XKB keymap of our own and
 //! the key codes in it.
 //!
-//! JustOS turns key presses into characters itself, with the user's
+//! justOS turns key presses into characters itself, with the user's
 //! layout. Clients get a US-shaped keymap (so that shortcuts such as Ctrl+C
 //! sit where programs expect them), and every character that is not on it
 //! (è, €, ß...) gets a key of its own: Latin-1 at the key code equal to the
@@ -135,7 +135,7 @@ impl Keymap {
             "    interpret Super_L { action = SetMods(modifiers = Mod4); };\n",
             "};\n",
             "xkb_symbols \"justos\" {\n",
-            "    name[Group1] = \"JustOS\";\n",
+            "    name[Group1] = \"justOS\";\n",
         ));
         let sym = |c: char| alloc::format!("U{:04X}", c as u32);
         for &(code, lo, hi) in US {

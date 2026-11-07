@@ -1,7 +1,7 @@
 //! HID report descriptors: which fields an input device's reports carry,
 //! where they sit and what they mean.
 //!
-//! Only the input reports are described, and only what the JustOS input
+//! Only the input reports are described, and only what the justOS input
 //! layer uses: keys (keyboard page), pointer axes (X, Y, wheel), buttons.
 
 use alloc::vec::Vec;

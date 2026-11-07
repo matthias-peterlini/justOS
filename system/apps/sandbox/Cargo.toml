@@ -1,6 +1,6 @@
 [package]
 name = "sandbox"
-description = "JustOS program: apps and their sandbox"
+description = "justOS program: apps and their sandbox"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true

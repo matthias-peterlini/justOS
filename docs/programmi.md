@@ -1,6 +1,6 @@
-# Programmi per JustOS
+# Programmi per justOS
 
-Un programma JustOS è un file `.app`: un eseguibile ELF64 che gira in
+Un programma justOS è un file `.app`: un eseguibile ELF64 che gira in
 modalità utente (ring 3), nel suo spazio di indirizzi. Parla con il kernel
 solo attraverso le chiamate di sistema (`int 0x80`). Il kernel lo carica a
 `0x400000`, gli dà uno stack sotto `0x7FFF_FFF0_0000` e la memoria che
@@ -23,12 +23,12 @@ ps                       programmi e thread in esecuzione
 kill <pid>
 ```
 
-I programmi si possono scrivere anche in ArcScript: la shell avvia i
-sorgenti `.as` e i pacchetti `.arc` attraverso `arcc`, e cerca anche
-questi in `sys:/apps` (`notes` è `sys:/apps/notes.as`). Vedi
-[arcscript.md](arcscript.md).
+I programmi si possono scrivere anche in JustScript: la shell avvia i
+sorgenti `.jt` e i pacchetti `.jpk` attraverso il runner `just`, e cerca anche
+questi in `sys:/apps` (`notes` è `sys:/apps/notes.jt`). Vedi
+[justscript.md](justscript.md).
 
-Oltre ai programmi nativi, JustOS avvia anche **programmi Linux e Windows**
+Oltre ai programmi nativi, justOS avvia anche **programmi Linux e Windows**
 per x86-64: un eseguibile ELF collegato staticamente è un programma Linux, un
 `.exe` è un programma Windows (avviato da `winrun`). Il comando `install` copia
 programmi liberi già pronti dal negozio `sys:/store` (per esempio BusyBox e
@@ -44,7 +44,7 @@ la copia nel volume di sistema come `sys:/apps/<nome>.app`.
 ```toml
 [package]
 name = "saluto"
-description = "JustOS program: saluto"
+description = "justOS program: saluto"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true
@@ -208,7 +208,7 @@ Un'app nella sandbox può creare solo porte con il proprio nome
 Un programma installato in `sys:/apps` con un `<nome>.info` di tipo `native`
 (come quelli del Negozio) è un'**app**: ha un `app_id`, dalla chiave
 `app_id=org.esempio.saluto` del `.info` o, se manca, `dev.justos.<nome>`. I
-pacchetti `.arc` lo prendono dal manifest. Gli strumenti di sistema
+pacchetti `.jpk` lo prendono dal manifest. Gli strumenti di sistema
 (`sys:/apps/*.app` senza `.info`) non sono nella sandbox. I processi avviati
 da un'app restano nella sua sandbox.
 
@@ -352,7 +352,7 @@ scripts/publish-updates.sh      # le mette sul ramo updates del repository
 La chiave privata sta fuori dal repository (`~/.justos-keys/updates.key`,
 32 byte in esadecimale; `UPDATES_KEY=` per un'altra) e la pubblica è in
 `appupdate.rs` (`justtool pubkey <chiave>` la stampa). Ogni indice ha un
-numero di serie che cresce: JustOS rifiuta un indice firmato male o più
+numero di serie che cresce: justOS rifiuta un indice firmato male o più
 vecchio dell'ultimo visto.
 
 ### Copiare un programma su un'immagine esistente

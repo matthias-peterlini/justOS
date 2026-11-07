@@ -1,6 +1,6 @@
 [package]
 name = "dalvik"
-description = "JustOS program: run an Android app (.apk) or a Java program (.dex, .jar)"
+description = "justOS program: run an Android app (.apk) or a Java program (.dex, .jar)"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true

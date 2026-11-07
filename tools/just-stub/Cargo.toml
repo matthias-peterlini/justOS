@@ -1,0 +1,12 @@
+[package]
+name = "just-stub"
+description = "The runtime of standalone JustScript programs: with a .jpk package appended it is a Windows .exe (or a Linux program) that runs it"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[dependencies]
+jpk-bundler = { path = "../../system/libs/jpk-bundler" }
+just-vm = { path = "../../system/libs/just-vm" }
+justc-core = { path = "../../system/libs/justc-core" }

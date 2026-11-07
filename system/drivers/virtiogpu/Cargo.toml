@@ -1,6 +1,6 @@
 [package]
 name = "virtiogpu"
-description = "JustOS driver: virtio GPU display"
+description = "justOS driver: virtio GPU display"
 version = "1.1.0"
 edition.workspace = true
 publish.workspace = true

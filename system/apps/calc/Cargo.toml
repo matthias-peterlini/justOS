@@ -1,6 +1,6 @@
 [package]
 name = "calc"
-description = "JustOS program: calculator"
+description = "justOS program: calculator"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true

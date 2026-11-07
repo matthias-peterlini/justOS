@@ -1,6 +1,6 @@
 [package]
 name = "serpente"
-description = "JustOS store program: serpente"
+description = "justOS store program: serpente"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true

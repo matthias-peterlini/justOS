@@ -41,6 +41,8 @@ const KERNEL_LINK_OFFSET: u64 = 0x10_0000;
 /// early code expects the hand-off.
 const BELOW_4G: u64 = 0xFFFF_F000;
 
+// The boot magics keep their arcOS names: this loader stays on the disk
+// while updates bring new kernels, and older loaders read new slots.
 const KERNEL_FILE_MAGIC: &[u8; 8] = b"ARCKERN1";
 const BOOT_MAGIC: &[u8; 8] = b"ARCBOOT1";
 const PREFERRED_MODE: (u32, u32) = (1024, 768);
@@ -174,7 +176,7 @@ macro_rules! print {
 
 /// Stops with a message; the firmware's watchdog restarts the machine.
 fn fail(what: &str, status: Status) -> ! {
-    print!("\nJustOS cannot start: {what} (status {:#x})\n", status);
+    print!("\njustOS cannot start: {what} (status {:#x})\n", status);
     loop {
         // SAFETY: plain firmware call.
         unsafe { (boot_services().stall)(1_000_000) };
@@ -327,7 +329,7 @@ fn load_kernel(vol: &Volume) -> (u64, u64, u64) {
     let word = |i: usize| u64::from_le_bytes(header[i * 8..i * 8 + 8].try_into().unwrap());
     let (entry, memsz, filesz) = (word(1), word(2), word(3));
     if &header[..8] != KERNEL_FILE_MAGIC || filesz > memsz || filesz + 32 > file_size(file) {
-        fail("KERNEL.BIN is not a JustOS kernel", 0);
+        fail("KERNEL.BIN is not a justOS kernel", 0);
     }
     // SAFETY: back to the image after the size check.
     unsafe { ((*file).set_position)(file, 32) };
@@ -450,7 +452,7 @@ fn mask_channel(mask: u32) -> (u8, u8) {
 }
 
 /// Keeps the current mode when it is already large (on a real computer the
-/// firmware starts at the panel's native resolution, which JustOS cannot change
+/// firmware starts at the panel's native resolution, which justOS cannot change
 /// later without a driver for the card); otherwise switches to the preferred
 /// mode if the display has it. Fills the framebuffer fields of the BootInfo.
 fn setup_screen(info: &mut BootInfo) {

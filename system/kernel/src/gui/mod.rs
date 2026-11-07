@@ -282,7 +282,7 @@ pub fn panic_screen() -> bool {
     }
     let cx = PANIC_W / 2;
     splash::draw_logo(c, cx, 56, 21, 0xFFF2_EFE6);
-    text::draw_centered(c, text::Font::Title, cx, 104, "JustOS si è dovuto fermare", 0xFFF5_F2F8);
+    text::draw_centered(c, text::Font::Title, cx, 104, "justOS si è dovuto fermare", 0xFFF5_F2F8);
     text::draw_centered(c, text::Font::Body, cx, 156, "Si è verificato un problema che il sistema non può risolvere da solo.", 0xB3F5_F2F8);
     text::draw_centered(c, text::Font::Body, cx, 184, "Spegni e riaccendi il computer.", 0xB3F5_F2F8);
     for y in 0..ch {

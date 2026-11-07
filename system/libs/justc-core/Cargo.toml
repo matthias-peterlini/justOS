@@ -1,0 +1,10 @@
+[package]
+name = "justc-core"
+description = "JustScript compiler core: lexer, parser, AST, bytecode compiler and the .jpk package format"
+version = "0.5.0"
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true

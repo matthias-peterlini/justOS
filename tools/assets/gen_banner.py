@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Paints the README banner: the "pixel" wallpaper (gen_pixel.py) with the
-JustOS wordmark in its sky, drawn on the same grid as the landscape (two
+justOS wordmark in its sky, drawn on the same grid as the landscape (two
 cells per pixel of the wordmark) with a soft drop shadow.
 
 The wordmark is the one of the boot splash (system/kernel/src/gui/splash.rs):

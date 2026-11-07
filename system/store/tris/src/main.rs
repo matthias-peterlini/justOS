@@ -146,7 +146,7 @@ impl Game {
     fn draw(&self, win: &mut Window) {
         win.clear();
         win.text_centered(Font::Title, W / 2, 16, "Tris", ui::TEXT);
-        let score = format!("Tu {}  ·  Pari {}  ·  JustOS {}", self.wins.0, self.wins.1, self.wins.2);
+        let score = format!("Tu {}  ·  Pari {}  ·  justOS {}", self.wins.0, self.wins.1, self.wins.2);
         win.text_centered(Font::Body, W / 2, 62, &score, ui::TEXT_DIM);
         let f = win.fonts;
         ui::segmented(&mut win.canvas, f, level_rect(), &["Facile", "Difficile"], self.hard as usize);
@@ -186,14 +186,14 @@ impl Game {
                 }
                 let msg = match w {
                     Cell::X => "Hai vinto!",
-                    Cell::O => "Vince JustOS",
+                    Cell::O => "Vince justOS",
                     Cell::Empty => "Pareggio",
                 };
                 win.text_centered(Font::Heading, W / 2, GRID_Y + 3 * CELL - 4, msg, ui::TEXT);
                 ui::button(&mut win.canvas, f, again_rect(), "Ancora", true, false);
             }
             None => {
-                let msg = if self.turn_player { "Tocca a te (X)" } else { "JustOS ci pensa…" };
+                let msg = if self.turn_player { "Tocca a te (X)" } else { "justOS ci pensa…" };
                 win.text_centered(Font::Body, W / 2, GRID_Y + 3 * CELL + 14, msg, ui::TEXT_FAINT);
             }
         }

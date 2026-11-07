@@ -1,8 +1,8 @@
 # virtio GPU: the paravirtual display of QEMU/KVM (-vga virtio) and other
-# hypervisors. 2D only: JustOS draws everything itself.
+# hypervisors. 2D only: justOS draws everything itself.
 name        = virtiogpu
 version     = 1.1.0
 class       = display
 description = virtio GPU display
-author      = JustOS
+author      = justOS
 match       = pci 1af4:1050

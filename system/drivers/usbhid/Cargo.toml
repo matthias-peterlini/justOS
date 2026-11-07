@@ -1,6 +1,6 @@
 [package]
 name = "usbhid"
-description = "JustOS driver: USB keyboards, mice and tablets (HID)"
+description = "justOS driver: USB keyboards, mice and tablets (HID)"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true

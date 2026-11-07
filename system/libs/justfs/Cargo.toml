@@ -1,6 +1,6 @@
 [package]
 name = "justfs"
-description = "JustFS, the native file system of JustOS (shared by the kernel and the host tools)"
+description = "JustFS, the native file system of justOS (shared by the kernel and the host tools)"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

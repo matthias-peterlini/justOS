@@ -1,6 +1,6 @@
 [package]
 name = "justdrv"
-description = "Run-time support for JustOS driver modules: heap, panics, entry point, hardware helpers"
+description = "Run-time support for justOS driver modules: heap, panics, entry point, hardware helpers"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

@@ -1,0 +1,6 @@
+[package]
+name = "library"
+title = "Library"
+version = "0.1.0"
+entry = "src/main.jt"
+description = "A tiny lending library\nA console program split into modules: structs, enums, maps, match and Result."

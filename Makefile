@@ -1,4 +1,4 @@
-# JustOS build.
+# justOS build.
 #
 #   make            build the bootable disk image (build/justos.img)
 #   make iso        build a live CD (build/justos.iso), BIOS and UEFI
@@ -13,8 +13,8 @@
 #   make test-drivers  boot once per emulated disk, network card and USB
 #                   controller and check that its driver works (SLEEP=1:
 #                   after the machine slept and woke up; test-audio too)
-#   make test-arcscript  run ArcScript programs on JustOS and check them
-#   make test-compat   run a Linux and a Windows program on JustOS and check them
+#   make test-justscript  run JustScript programs on justOS and check them
+#   make test-compat   run a Linux and a Windows program on justOS and check them
 #   make test-audio    play sounds on every emulated sound card and check them
 #   make test-display  switch the resolution on every emulated display, and
 #                   wake up with the picture back
@@ -31,7 +31,7 @@
 #   make test-update   install a system update into the other slot, restart
 #                   into it; a broken one goes back by itself (BIOS and UEFI)
 #   make updates    the signed index of updates (build/updates): the store's
-#                   apps and this JustOS as a system image, signed with the
+#                   apps and this justOS as a system image, signed with the
 #                   private key in UPDATES_KEY; scripts/publish-updates.sh
 #                   puts it online
 
@@ -49,9 +49,11 @@ OVMF_VARS ?= /usr/share/OVMF/OVMF_VARS_4M.fd
 BUILD    := build
 TARGET   := system/target/x86_64-unknown-none/$(PROFILE)
 JUSTTOOL  := tools/target/release/justtool
+# The runtime of the Windows programs justc builds (justc build -t windows).
+WINDOWS_STUB := tools/target/x86_64-pc-windows-gnu/release/just-stub.exe
 EFI_APP  := boot/uefi/target/x86_64-unknown-uefi/release/BOOTX64.efi
 DRIVERS  := $(notdir $(wildcard system/drivers/*))
-PACKAGES := $(DRIVERS:%=$(BUILD)/drivers/%.adp)
+PACKAGES := $(DRIVERS:%=$(BUILD)/drivers/%.jdp)
 APPS     := $(notdir $(wildcard system/apps/*))
 # Programs of the store (sys:/store), installed with the Negozio app.
 STORE    := $(notdir $(wildcard system/store/*))
@@ -76,7 +78,7 @@ ifeq ($(PROFILE),release)
 CARGO_PROFILE := --release
 endif
 
-.PHONY: photos all uefi system tools root linux-root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-arcscript test-compat test-audio test-display test-acpi test-net test-linux test-wayland test-update shots assets check updates clean $(PACKAGES)
+.PHONY: photos all uefi system tools root linux-root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-justscript test-compat test-audio test-display test-acpi test-net test-linux test-wayland test-update shots assets check updates clean $(PACKAGES)
 
 all: image
 
@@ -96,8 +98,10 @@ system:
 
 tools:
 	cd tools && $(CARGO) build --release
+	# Linked by the MinGW-w64 gcc (x86_64-w64-mingw32-gcc).
+	cd tools && $(CARGO) build --release -p just-stub --target x86_64-pc-windows-gnu
 
-$(PACKAGES): $(BUILD)/drivers/%.adp: system tools
+$(PACKAGES): $(BUILD)/drivers/%.jdp: system tools
 	@mkdir -p $(BUILD)/drivers
 	$(JUSTTOOL) pack system/drivers/$*/driver.manifest $(TARGET)/$* $@
 
@@ -112,12 +116,16 @@ linux-root:
 
 # The files of the system volume: rootfs/ plus the programs and the Linux
 # libraries.
-root: system $(LINUX)/usr/PACKAGES
+root: system tools $(LINUX)/usr/PACKAGES
 	rm -rf $(ROOT)
 	mkdir -p $(ROOT)/apps
 	cp -a $(LINUX)/. $(ROOT)/
 	cp -r rootfs/. $(ROOT)/
 	for app in $(APPS); do cp $(TARGET)/$$app $(ROOT)/apps/$$app.app; done
+	# The JustScript runner, a second program of justc.
+	cp $(TARGET)/just $(ROOT)/apps/just.app
+	mkdir -p $(ROOT)/system/justc
+	cp $(WINDOWS_STUB) $(ROOT)/system/justc/just-stub.exe
 	for p in $(STORE); do mkdir -p $(ROOT)/store/$$p && cp $(TARGET)/$$p $(ROOT)/store/$$p/app \
 		&& cp system/store/$$p/info system/store/$$p/icon.qoi $(ROOT)/store/$$p/; done
 	cp system/kernel/assets/fonts.bin $(ROOT)/system/fonts.bin
@@ -128,7 +136,7 @@ image: $(BUILD)/stage1.bin $(BUILD)/stage2.bin uefi system tools $(PACKAGES) roo
 		--stage1 $(BUILD)/stage1.bin --stage2 $(BUILD)/stage2.bin --efi $(EFI_APP) \
 		--kernel $(TARGET)/just-kernel --drivers $(BUILD)/drivers --files $(ROOT)
 
-# This JustOS as a system update (a slot image).
+# This justOS as a system update (a slot image).
 $(BUILD)/justos-$(VERSION).slot: system tools $(PACKAGES)
 	$(JUSTTOOL) slot $@ --kernel $(TARGET)/just-kernel --drivers $(BUILD)/drivers --version $(VERSION)
 
@@ -146,7 +154,7 @@ run-q35: image
 	$(QEMU) $(QEMU_COMMON) -machine q35 -drive file=$(IMAGE),format=raw,if=none,id=sys -device ahci,id=ahci -device ide-hd,drive=sys,bus=ahci.0
 
 run-nvme: image
-	$(QEMU) $(QEMU_COMMON) -machine q35 -drive file=$(IMAGE),format=raw,if=none,id=sys -device nvme,drive=sys,serial=arc0001
+	$(QEMU) $(QEMU_COMMON) -machine q35 -drive file=$(IMAGE),format=raw,if=none,id=sys -device nvme,drive=sys,serial=just0001
 
 # The firmware keeps its settings (boot entries) in build/ovmf-vars.fd.
 run-iso: iso
@@ -170,8 +178,8 @@ test-iso: iso
 	DISK=cdrom scripts/test.sh $(ISO)
 	UEFI=1 DISK=cdrom OVMF_CODE=$(OVMF_CODE) OVMF_VARS=$(OVMF_VARS) scripts/test.sh $(ISO)
 
-test-arcscript: image
-	scripts/test-arcscript.sh $(IMAGE)
+test-justscript: image
+	scripts/test-justscript.sh $(IMAGE)
 
 test-compat: image
 	scripts/test-compat.sh $(IMAGE)
@@ -218,7 +226,7 @@ photos:
 	tools/assets/gen_thumbs.py rootfs/system/gui/wallpapers
 
 check:
-	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p justdk -p justfs -p justgfx -p justtls -p justzip -p justjson -p arcc-core -p arc-vm -p justweb -p justjs -p justdex -p justaml
+	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p justdk -p justfs -p justgfx -p justtls -p justzip -p justjson -p justc-core -p just-vm -p jpk-bundler -p justweb -p justjs -p justdex -p justaml
 	cd tools && $(CARGO) test --release
 
 updates: root tools $(BUILD)/justos-$(VERSION).slot

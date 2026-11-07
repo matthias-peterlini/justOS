@@ -14,7 +14,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt::{self, Write};
 
-/// The JustOS palette: the 16 ANSI colours, then the default text and background.
+/// The justOS palette: the 16 ANSI colours, then the default text and background.
 pub const PALETTE: [u32; 18] = [
     0x2A2633, 0xFF8A8A, 0x7EE2A8, 0xF6D06F, 0x8AB4F8, 0xC9A7FF, 0x7FDBE6, 0xD8D4E0, //
     0x6B6578, 0xFFB3B3, 0xA8F0C6, 0xFFE5A0, 0xB4D0FF, 0xE0CCFF, 0xA9EEF5, 0xFFFFFF, //
@@ -694,7 +694,7 @@ pub fn panic_screen(args: fmt::Arguments<'_>) -> ! {
                 Ok(())
             }
         }
-        let _ = Serial.write_str("\nJustOS stopped: ");
+        let _ = Serial.write_str("\njustOS stopped: ");
         let _ = Serial.write_fmt(args);
         let _ = Serial.write_str("\n");
         if crate::sysupdate::on_trial() {
@@ -723,10 +723,10 @@ pub fn panic_screen(args: fmt::Arguments<'_>) -> ! {
         t.row = 0;
         t.clear();
     }
-    let _ = PanicOut.write_str("\n\x1b[41;97m JustOS stopped \x1b[0m\n\x1b[91m");
+    let _ = PanicOut.write_str("\n\x1b[41;97m justOS stopped \x1b[0m\n\x1b[91m");
     let _ = PanicOut.write_fmt(args);
     if crate::sysupdate::on_trial() {
-        let _ = PanicOut.write_str("\x1b[0m\n\nThis new version of JustOS does not work: restarting into the previous one.\n");
+        let _ = PanicOut.write_str("\x1b[0m\n\nThis new version of justOS does not work: restarting into the previous one.\n");
         crate::sysupdate::restart_after_panic();
     }
     let _ = PanicOut.write_str("\x1b[0m\n\nThe system has been halted. Restart the computer.\n");

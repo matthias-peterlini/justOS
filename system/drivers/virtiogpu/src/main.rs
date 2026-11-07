@@ -1,7 +1,7 @@
 //! virtio GPU display driver (2D).
 //!
 //! The screen is a resource on the host backed by a framebuffer in guest
-//! memory: JustOS draws into that memory, and every change is copied to the
+//! memory: justOS draws into that memory, and every change is copied to the
 //! host and shown with two commands (transfer, flush). Commands go one at a
 //! time through the control queue and are polled.
 

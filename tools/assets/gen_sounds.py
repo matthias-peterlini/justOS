@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synthesises the JustOS system sounds.
+"""Synthesises the justOS system sounds.
 
 "avvio" is the chime played when the desktop appears: three soft bell
 notes rising (an add9 arpeggio on D), each a few sine partials with a quick

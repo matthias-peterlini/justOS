@@ -1,4 +1,4 @@
-# Builds and tests JustOS on every push and pull request; the live CD and the
+# Builds and tests justOS on every push and pull request; the live CD and the
 # disk image are kept as the run's artifacts for a week.
 name: Build
 
@@ -16,7 +16,8 @@ jobs:
       - name: Tools
         run: |
           sudo apt-get update
-          # musl and MinGW build the Linux and Windows programs of test-compat.
+          # musl and MinGW build the Linux and Windows programs of test-compat;
+          # MinGW also links just-stub, the runtime of justc's .exe programs.
           sudo apt-get install -y nasm qemu-system-x86 musl-tools gcc-mingw-w64-x86-64
           # rust-toolchain.toml picks the toolchain, targets and rust-src.
           rustup show
@@ -31,6 +32,9 @@ jobs:
         run: |
           make test
           make test-compat
+          # JustScript: justc builds .jpk packages ("JPK\0"), and just, the
+          # runner the system opens .jt and .jpk files with, runs them.
+          make test-justscript
 
       - uses: actions/upload-artifact@v4
         with:

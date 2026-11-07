@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Draws the JustOS icon set into one atlas image, on a pixel grid.
+"""Draws the justOS icon set into one atlas image, on a pixel grid.
 
 The style comes from the icons in tools/assets/src/icone-justos (drawn as
 SVG on the grid): apps are a rounded square of 20x20 cells with a vertical
@@ -277,7 +277,7 @@ def t_glyph(top, bottom, layers):
 
 LIGHT = ("#ffffff", "#e6eaee")
 
-ARC = art(
+JUSTSCRIPT = art(
     "##........##",
     "##........##",
     ".##......##.",
@@ -650,7 +650,7 @@ ICONS = [
     ("settings", app_svg("impostazioni")),
     ("terminal", app_svg("terminale")),
     ("files", app_svg("file")),
-    ("arc", t("#5ac8fa", "#1a7fe0", ARC)),
+    ("justscript", t("#5ac8fa", "#1a7fe0", JUSTSCRIPT)),
     ("messages", app_svg("messaggi")),
     ("camera", app_svg("fotocamera")),
     ("info", info_icon),

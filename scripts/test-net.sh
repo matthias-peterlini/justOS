@@ -1,9 +1,9 @@
 #!/bin/sh
-# Checks TCP, HTTP and HTTPS. Servers run on this machine; JustOS reaches
+# Checks TCP, HTTP and HTTPS. Servers run on this machine; justOS reaches
 # them at 10.0.2.2 through QEMU's user network:
 #
 #   - an HTTP server with a 3 MiB file (TCP windows, many segments), checked
-#     with sha256 on JustOS
+#     with sha256 on justOS
 #   - an HTTPS server speaking TLS 1.3 and one limited to TLS 1.2, with a
 #     test authority that is added to the image (sys:/system/certs)
 #   - a server whose certificate names another host (must be refused)
@@ -26,7 +26,7 @@ cd "$WORK"
 
 # A test authority and a certificate for 10.0.2.2.
 openssl ecparam -name prime256v1 -genkey -noout -out ca.key 2>/dev/null
-openssl req -x509 -new -key ca.key -days 30 -subj "/CN=JustOS Test CA" -addext "basicConstraints=critical,CA:TRUE" -out ca.pem 2>/dev/null
+openssl req -x509 -new -key ca.key -days 30 -subj "/CN=justOS Test CA" -addext "basicConstraints=critical,CA:TRUE" -out ca.pem 2>/dev/null
 openssl x509 -in ca.pem -outform der -out ca.der
 openssl ecparam -name prime256v1 -genkey -noout -out srv.key 2>/dev/null
 openssl req -new -key srv.key -subj "/CN=10.0.2.2" -out srv.csr 2>/dev/null
@@ -55,7 +55,7 @@ sleep 1
 WEB=0
 PROXY=$(echo "${HTTPS_PROXY:-}" | sed -E 's#^https?://##; s#.*@##; s#/$##')
 if [ -n "$PROXY" ] && [ -f /root/.ccr/ca-bundle.crt ]; then
-    # The proxy listens on this machine; JustOS reaches it at 10.0.2.2.
+    # The proxy listens on this machine; justOS reaches it at 10.0.2.2.
     PPORT=${PROXY##*:}
     echo "10.0.2.2:$PPORT" > proxy
     # The bundle may hold several authorities: each becomes a file.

@@ -1,0 +1,101 @@
+# notes.jt — a command-line notebook, saved as JSON.
+#
+#   justc run examples/notes.jt -- add "Buy milk" #home
+#   justc run examples/notes.jt -- list
+#   justc run examples/notes.jt -- find milk
+#   justc run examples/notes.jt -- done 1
+#   justc run examples/notes.jt -- stats
+#
+# Uses the standard library: os (arguments, environment), fs and path
+# (files), json, time, and the string and list functions.
+
+import fs
+import json
+import os
+import path
+import time
+
+struct Note
+    id
+    text
+    tags = []
+    created = 0
+    done = false
+
+    fn line(self)
+        let mark = " "
+        if self.done
+            mark = "x"
+        let tags = self.tags.map(|t| "#" + t).join(" ")
+        return "[{mark}] {str(self.id).pad_start(3)}  {self.text} {tags}".trim_end()
+
+# NOTES_FILE overrides where the notes are kept.
+let file = os.env("NOTES_FILE").unwrap_or(path.join(os.cwd(), "notes.json"))
+
+fn load()
+    if not fs.exists(file)
+        return Ok([])
+    let data = json.parse(fs.read(file)?)?
+    return Ok(data.map(|n| Note(n["id"], n["text"], n["tags"], n["created"], n["done"])))
+
+fn save(notes)
+    fs.write(file, json.stringify(notes, 2))?
+    return Ok(nil)
+
+fn add(notes, words)
+    let tags = words.filter(|w| w.starts_with("#")).map(|w| w.slice(1).lower())
+    let text = words.filter(|w| not w.starts_with("#")).join(" ")
+    if text == ""
+        return Err("nothing to add: write the note after `add`")
+    let id = notes.reduce(0, |top, n| max(top, n.id)) + 1
+    notes.push(Note(id, text, tags, int(time.now())))
+    print("added #{id}: {text}")
+    return Ok(nil)
+
+fn mark_done(notes, arg)
+    let id = parse_int(arg).ok_or("`{arg}` is not a note number")?
+    let note = notes.first(|n| n.id == id).ok_or("there is no note #{id}")?
+    note.done = true
+    print("done: {note.text}")
+    return Ok(nil)
+
+fn stats(notes)
+    let open = notes.filter(|n| not n.done)
+    print("{len(notes)} notes, {len(open)} open")
+    let tags = {}
+    for n in notes
+        for t in n.tags
+            tags[t] = tags.get(t).unwrap_or(0) + 1
+    for pair in tags.items().sorted(|p| -p[1])
+        print("  #{pair[0]}: {pair[1]}")
+    if len(notes) > 0
+        let oldest = notes.sorted(|n| n.created)[0]
+        print("oldest: \"{oldest.text}\" from {time.format(oldest.created, "%d/%m/%Y")}")
+
+fn run(args)
+    let notes = load()?
+    let command = args.first().unwrap_or("list")
+    let rest = args.slice(1)
+    match command
+        "add" => add(notes, rest)?
+        "done" => mark_done(notes, rest.first().ok_or("which note? e.g. `done 2`")?)?
+        "find" =>
+            let needle = rest.join(" ").lower()
+            for n in notes.filter(|n| n.text.lower().contains(needle))
+                print(n.line())
+            return Ok(nil)
+        "list" =>
+            for n in notes.sorted(|n| [n.done, n.id])
+                print(n.line())
+            if len(notes) == 0
+                print("no notes yet: try `add Buy milk #home`")
+            return Ok(nil)
+        "stats" =>
+            stats(notes)
+            return Ok(nil)
+        _ => return Err("unknown command `{command}` (add, done, find, list, stats)")
+    return save(notes)
+
+if let Err(message) = run(os.args())
+    print("error: {message}")
+    os.exit(1)

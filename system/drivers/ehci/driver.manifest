@@ -5,6 +5,6 @@ name        = ehci
 version     = 1.1.0
 class       = usb
 description = USB host controller (EHCI)
-author      = JustOS
+author      = justOS
 boot        = yes
 match       = pci-class 0c:03:20

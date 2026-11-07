@@ -3,7 +3,7 @@
  *
  * Rebuild with: iasl -p narrow narrow.asl
  */
-DefinitionBlock ("", "DSDT", 1, "ARCOS", "AML32", 1)
+DefinitionBlock ("", "DSDT", 1, "JUSTOS", "AML32", 1)
 {
     Method (T32, 0)
     {

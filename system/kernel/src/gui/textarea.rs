@@ -48,7 +48,7 @@ pub struct TextArea {
 
 const GUTTER: i32 = 44;
 
-/// Words that open a block in ArcScript: the next line goes one level in.
+/// Words that open a block in JustScript: the next line goes one level in.
 const BLOCK_OPENERS: [&str; 22] = [
     "fn", "if", "else", "elif", "while", "for", "loop", "match", "struct", "enum", "impl", "view", "window", "column", "row", "card",
     "grid", "scroll", "group", "split", "accordion", "test",

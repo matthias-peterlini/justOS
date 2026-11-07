@@ -443,8 +443,8 @@ pub fn to_i32(n: f64) -> i32 {
     if !n.is_finite() {
         return 0;
     }
-    let t = arcc_core::float::trunc(n);
-    let m = t - 4294967296.0 * arcc_core::float::floor(t / 4294967296.0);
+    let t = justc_core::float::trunc(n);
+    let m = t - 4294967296.0 * justc_core::float::floor(t / 4294967296.0);
     m as u32 as i32
 }
 
@@ -457,7 +457,7 @@ pub fn to_int(n: f64) -> f64 {
     if n.is_nan() {
         0.0
     } else {
-        arcc_core::float::trunc(n)
+        justc_core::float::trunc(n)
     }
 }
 

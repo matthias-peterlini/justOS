@@ -2,7 +2,7 @@
 # image at 1024x768: the setup, then the desktop, its apps and the store.
 # Dock icons at rest: x = 178 + 62 * i (File, Applicazioni, Editor di testo,
 # Note, Calendario, Foto, Musica, Calcolatrice, Negozio, Impostazioni),
-# Cestino at 817; y = 715. The JustOS mark is at 108, the status at 901.
+# Cestino at 817; y = 715. The justOS mark is at 108, the status at 901.
 wait 2
 shot 01-splash
 wait 8

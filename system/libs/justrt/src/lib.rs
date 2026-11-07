@@ -1,4 +1,4 @@
-//! Run-time library for JustOS programs.
+//! Run-time library for justOS programs.
 //!
 //! A program is a `#![no_std]`, `#![no_main]` binary:
 //!

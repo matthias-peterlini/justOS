@@ -1,7 +1,7 @@
 //! Text, drawn from an anti-aliased glyph atlas (`fonts.bin`, rendered at
 //! build time by `tools/assets/gen_fonts.py`).
 //!
-//! The atlas: "ARCF", a version, the number of faces, then for each face its
+//! The atlas: "JFNT", a version, the number of faces, then for each face its
 //! line height, ascent and glyph table (code point, size, offset, advance,
 //! where its coverage mask starts); the masks follow, one byte per pixel.
 //!
@@ -71,7 +71,7 @@ impl Fonts {
     pub fn parse(bytes: &'static [u8]) -> Option<Fonts> {
         let u16_at = |o: usize| bytes.get(o..o + 2).map(|b| u16::from_le_bytes([b[0], b[1]]));
         let u32_at = |o: usize| bytes.get(o..o + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
-        if bytes.get(..4)? != b"ARCF" {
+        if bytes.get(..4)? != b"JFNT" {
             return None;
         }
         let count = u16_at(6)? as usize;

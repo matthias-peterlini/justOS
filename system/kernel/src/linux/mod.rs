@@ -1,13 +1,13 @@
 //! Running Linux programs.
 //!
-//! JustOS loads statically linked Linux executables (built against musl or
+//! justOS loads statically linked Linux executables (built against musl or
 //! glibc, or by the Go and Rust toolchains) and serves the Linux system
 //! calls they make. Programs arrive on the `syscall` instruction (see
 //! [`crate::arch::syscall`]) with the call number in `rax` and arguments in
 //! `rdi, rsi, rdx, r10, r8, r9`, as on Linux for x86-64.
 //!
 //! What is there: files and folders (the Linux file tree is a view of the
-//! process's JustOS volume), the console as a terminal ([`tty`]), memory with
+//! process's justOS volume), the console as a terminal ([`tty`]), memory with
 //! demand paging ([`mm`]), threads and futexes ([`thread`]), pipes and
 //! eventfds ([`fd`]), TCP and UDP sockets ([`sock`]), local sockets that
 //! pass descriptors along ([`unix`]), shared memory ([`shm`]), poll, select
@@ -42,7 +42,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use justdk::syscall::Error as JustError;
 
-/// Seconds between the Unix epoch (1970) and JustOS's epoch (2000).
+/// Seconds between the Unix epoch (1970) and justOS's epoch (2000).
 pub const UNIX_2000: u64 = 946_684_800;
 
 // ----------------------------------------------------------------------------
@@ -223,7 +223,7 @@ pub fn exe_path() -> String {
 }
 
 // ----------------------------------------------------------------------------
-// Paths: a Linux path names a place in the running process's JustOS volume.
+// Paths: a Linux path names a place in the running process's justOS volume.
 
 pub fn linux_path(text: &str) -> Result<Path, i64> {
     let cwd = user::cwd().map_err(errno)?;
@@ -233,7 +233,7 @@ pub fn linux_path(text: &str) -> Result<Path, i64> {
     Path::parse(text, &base).map_err(|e| errno(user::fs_error(e)))
 }
 
-/// Turns a JustOS path back into the Linux path a program sees ("/a/b").
+/// Turns a justOS path back into the Linux path a program sees ("/a/b").
 pub fn show_path(path: &Path) -> String {
     path.inner.clone()
 }
@@ -279,7 +279,7 @@ fn load_program(elf: &[u8], name: &str, argv: &[String], envp: &[String], exe_li
     Ok((interp.map_or(info.entry, |i| i.entry), stack))
 }
 
-/// The environment of a Linux program JustOS starts (one started by
+/// The environment of a Linux program justOS starts (one started by
 /// another Linux program gets what that one passes to execve).
 fn default_env() -> Vec<String> {
     let (cols, rows) = crate::console::size();
@@ -1211,7 +1211,7 @@ fn sys_uname(buf: u64) -> i64 {
         Err(e) => return e,
     };
     out.fill(0);
-    let fields = ["Linux", "justos", "6.1.0-justos", "#1 SMP JustOS", "x86_64", "(none)"];
+    let fields = ["Linux", "justos", "6.1.0-justos", "#1 SMP justOS", "x86_64", "(none)"];
     for (i, f) in fields.iter().enumerate() {
         let at = i * 65;
         out[at..at + f.len()].copy_from_slice(f.as_bytes());

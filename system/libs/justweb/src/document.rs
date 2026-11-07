@@ -729,7 +729,7 @@ impl Document {
     /// The value of a field.
     pub fn value(&self, n: NodeId) -> String {
         if self.dom.tag(n) == "textarea" {
-            return match self.dom.attr(n, "data-arc-value") {
+            return match self.dom.attr(n, "data-just-value") {
                 Some(v) => v.to_string(),
                 None => self.dom.text(n).trim_start_matches('\n').to_string(),
             };
@@ -739,7 +739,7 @@ impl Document {
 
     pub fn set_value(&mut self, n: NodeId, v: &str) {
         if self.dom.tag(n) == "textarea" {
-            self.dom.set_attr(n, "data-arc-value", v);
+            self.dom.set_attr(n, "data-just-value", v);
         } else {
             self.dom.set_attr(n, "value", v);
         }

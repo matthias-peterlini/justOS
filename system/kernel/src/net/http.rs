@@ -18,7 +18,7 @@ use justtls::x509::{self, Root};
 
 const CONNECT_MS: u64 = 15_000;
 const READ_MS: u64 = 30_000;
-pub const USER_AGENT: &str = "Mozilla/5.0 (JustOS; x86_64) justweb/1.0";
+pub const USER_AGENT: &str = "Mozilla/5.0 (justOS; x86_64) justweb/1.0";
 
 static ROOTS: IrqLock<Option<&'static [Root]>> = IrqLock::new(None);
 

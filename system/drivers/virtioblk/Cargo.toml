@@ -1,6 +1,6 @@
 [package]
 name = "virtioblk"
-description = "JustOS driver: virtio block devices"
+description = "justOS driver: virtio block devices"
 version = "1.1.0"
 edition.workspace = true
 publish.workspace = true

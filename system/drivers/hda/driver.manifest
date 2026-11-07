@@ -5,5 +5,5 @@ name        = hda
 version     = 1.1.0
 class       = audio
 description = HD Audio sound
-author      = JustOS
+author      = justOS
 match       = pci-class 04:03

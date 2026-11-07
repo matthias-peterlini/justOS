@@ -1,4 +1,4 @@
-//! JustOS Development Kit: the contracts between the kernel and the code it runs.
+//! justOS Development Kit: the contracts between the kernel and the code it runs.
 //!
 //! For drivers:
 //!
@@ -10,7 +10,7 @@
 //! * [`manifest`] — the text manifest of a driver: name, version and the
 //!   hardware it drives. The kernel matches devices against manifests to
 //!   install drivers automatically, without loading any code first.
-//! * [`package`] — the `.adp` driver package: header, manifest and module image.
+//! * [`package`] — the `.jdp` driver package: header, manifest and module image.
 //! * [`usb`] — what USB host controller drivers offer device drivers, and
 //!   descriptor parsing.
 //! * [`hid`] — HID report descriptors (USB keyboards, mice, tablets).

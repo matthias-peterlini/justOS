@@ -1,0 +1,4 @@
+# Run by the `just` runner: `just args.jt a "b c"` prints its arguments.
+import os
+
+print("args:", os.args())

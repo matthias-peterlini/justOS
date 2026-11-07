@@ -26,6 +26,8 @@ use justtls::sha2::Sha256;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 const SECTOR: usize = 512;
+// The boot magics keep their arcOS names: the loaders installed on disks
+// read them, and an update replaces only a slot, never the loader.
 const SLOT_MAGIC: &[u8; 8] = b"ARCSLOT1";
 const CTL_MAGIC: &[u8; 8] = b"ARCCTL01";
 /// The MBR boot table: BOOT.CTL's sector, and the table's magic.
@@ -199,7 +201,7 @@ fn layout() -> Result<Layout, String> {
     check(disk.read(0, &mut mbr), "MBR")?;
     let ctl_lba = get32(&mbr, MBR_CTL) as u64;
     if &mbr[MBR_MAGIC..MBR_MAGIC + 4] != b"ARCB" || ctl_lba == 0 || ctl_lba >= disk.sectors {
-        return Err("il disco di sistema non ha gli slot di JustOS".to_string());
+        return Err("il disco di sistema non ha gli slot di justOS".to_string());
     }
     Ok(Layout { disk, ctl_lba })
 }
@@ -302,7 +304,7 @@ pub fn install(image: &[u8], progress: &mut dyn FnMut(u64, u64)) -> Result<Strin
     if on_trial() {
         return Err("questa versione è ancora in prova: riprova tra qualche secondo".to_string());
     }
-    let h = Header::parse(image).ok_or("non è un'immagine di sistema di JustOS")?;
+    let h = Header::parse(image).ok_or("non è un'immagine di sistema di justOS")?;
     let bytes = h.total as usize * SECTOR;
     if image.len() < bytes {
         return Err("l'immagine di sistema è troncata".to_string());
@@ -356,7 +358,7 @@ pub fn install(image: &[u8], progress: &mut dyn FnMut(u64, u64)) -> Result<Strin
     c.set_active(target, TRIES);
     l.save(&mut c)?;
     refresh();
-    crate::info!("update", "JustOS {} written to slot {}: it starts next, on trial", h.version, name(target));
+    crate::info!("update", "justOS {} written to slot {}: it starts next, on trial", h.version, name(target));
     Ok(h.version)
 }
 
@@ -382,7 +384,7 @@ pub fn rollback() -> Result<String, String> {
     let _one = WORKING.try_lock().ok_or("sto già cambiando gli slot di sistema")?;
     let me = booted().ok_or("questo sistema non è partito da uno slot")?;
     if on_trial() {
-        return Err("questa versione è ancora in prova: se non funziona, JustOS torna indietro da solo".to_string());
+        return Err("questa versione è ancora in prova: se non funziona, justOS torna indietro da solo".to_string());
     }
     let l = layout()?;
     let mut c = l.control()?;
@@ -437,12 +439,12 @@ pub fn start() {
         let flags = BOOTED.load(Ordering::Relaxed);
         match confirm() {
             Ok(()) if flags & SLOT_FALLBACK != 0 => {
-                crate::warn!("update", "the new system did not start: back to JustOS {}", crate::VERSION);
-                crate::gui::notify("Aggiornamento non riuscito", &format!("La nuova versione non è partita: JustOS è tornato alla {}.", crate::VERSION), "about");
+                crate::warn!("update", "the new system did not start: back to justOS {}", crate::VERSION);
+                crate::gui::notify("Aggiornamento non riuscito", &format!("La nuova versione non è partita: justOS è tornato alla {}.", crate::VERSION), "about");
             }
             Ok(()) if flags & SLOT_TRIAL != 0 => {
-                crate::info!("update", "JustOS {} works: slot {} confirmed", crate::VERSION, booted().map_or('?', name));
-                crate::gui::notify("JustOS è aggiornato", &format!("Ora c'è la versione {}.", crate::VERSION), "about");
+                crate::info!("update", "justOS {} works: slot {} confirmed", crate::VERSION, booted().map_or('?', name));
+                crate::gui::notify("justOS è aggiornato", &format!("Ora c'è la versione {}.", crate::VERSION), "about");
             }
             Ok(()) => {}
             Err(e) => {

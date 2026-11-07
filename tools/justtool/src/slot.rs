@@ -38,6 +38,8 @@
 use justtls::sha2::Sha256;
 
 pub const SECTOR: usize = 512;
+// The boot magics keep their arcOS names: the loaders installed on disks
+// read them, and an update replaces only a slot, never the loader.
 pub const SLOT_MAGIC: &[u8; 8] = b"ARCSLOT1";
 pub const CTL_MAGIC: &[u8; 8] = b"ARCCTL01";
 

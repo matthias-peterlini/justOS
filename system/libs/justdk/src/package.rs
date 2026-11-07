@@ -1,8 +1,8 @@
-//! `.adp` driver packages (the JustOS driver package format).
+//! `.jdp` driver packages (the justOS driver package format).
 //!
 //! ```text
 //! offset  size  field
-//!      0     8  magic "ARCDRVPK"
+//!      0     8  magic "JUSTDRVP"
 //!      8     4  format version (1)
 //!     12     4  driver ABI version the module was built for
 //!     16     4  manifest offset      20  4  manifest length
@@ -16,7 +16,7 @@
 use crate::crc32;
 use crate::manifest::Manifest;
 
-pub const MAGIC: &[u8; 8] = b"ARCDRVPK";
+pub const MAGIC: &[u8; 8] = b"JUSTDRVP";
 pub const FORMAT_VERSION: u32 = 1;
 pub const HEADER_SIZE: usize = 40;
 

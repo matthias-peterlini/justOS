@@ -1,0 +1,59 @@
+# The elements of the just theme (the justOS desktop): typography, buttons,
+# inputs, joined groups, accordions and split panels.
+
+let query = ""
+let page = "Group"
+let clicks = 0
+let option = true
+
+fn pick(name)
+    page = name
+    clicks += 1
+
+view
+    window "Elements" width: 980, height: 760, padding: 28, gap: 22
+        row gap: 40
+            column gap: 4
+                label "tipografia" size: 18
+                label "Google Sans Flex" size: 34
+                label "ABCDEFGHIJKLMNOPQRSTUVWXYZ" size: 15
+                label "abcdefghijklmnopqrstuvwxyz" size: 15
+            spacer
+            label "Aa" size: 72
+
+        row gap: 16, align: "start"
+            column gap: 14, width: 420
+                row gap: 14
+                    button "Button" style: "light", radius: 13, width: 180 -> pick("Button")
+                    button "Button pilled" style: "light", width: 180 -> pick("Button pilled")
+                row gap: 14
+                    button "Button" radius: 13, width: 180 -> pick("Button")
+                    button "Button pilled" width: 180 -> pick("Button pilled")
+                input query placeholder: "Input text", radius: 10
+                row gap: 12
+                    button "" icon: "search" -> pick("search")
+                    button "" icon: "favorite", style: "light" -> pick("favorite")
+                    button "Material" icon: "palette", style: "frosted" -> pick("Material")
+                    button "Material" style: "filled" -> pick("Material")
+            split height: 220, stretch: true
+                column align: "center"
+                    label "Window" size: 16
+                column align: "center"
+                    label "split" size: 16
+
+        row gap: 16, align: "start"
+            group width: 220
+                button "Button" style: "filled" -> pick("Button")
+                button "Group" selected: page == "Group" -> pick("Group")
+                button "button" -> pick("button")
+                button "group" -> pick("group")
+            group stretch: true
+                button "List" -> pick("List")
+                button "Group" -> pick("Group")
+                accordion "accordion" icon: "tune"
+                    label "Content shown when the accordion is open" color: "on-surface-variant"
+                    switch option text: "An option"
+                row
+                    label "group"
+                    spacer
+                    label "{clicks} clicks · {page}" color: "on-surface-variant"

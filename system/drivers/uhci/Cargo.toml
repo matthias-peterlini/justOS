@@ -1,6 +1,6 @@
 [package]
 name = "uhci"
-description = "JustOS driver: USB 1.1 host controllers (UHCI)"
+description = "justOS driver: USB 1.1 host controllers (UHCI)"
 version = "1.1.0"
 edition.workspace = true
 publish.workspace = true

@@ -1,9 +1,9 @@
-//! justtool — builds JustOS: driver packages, bootable disk images, and access
+//! justtool — builds justOS: driver packages, bootable disk images, and access
 //! to JustFS volumes from the host.
 //!
 //! ```text
-//! justtool pack <driver.manifest> <module> <out.adp>
-//! justtool inspect <file.adp>
+//! justtool pack <driver.manifest> <module> <out.jdp>
+//! justtool inspect <file.jdp>
 //! justtool image <out.img> --stage1 <bin> --stage2 <bin> --kernel <elf> --drivers <dir>
 //!               [--efi <BOOTX64.efi>] [--size 256M] [--files <dir>] [--version <v>] [--slot-size 24M]
 //! justtool iso <out.iso> (the same, --efi required) [--size 16M]   a live CD
@@ -54,7 +54,7 @@ fn main() -> ExitCode {
         Some("updates") => updates::cmd_updates(&args[1..]),
         Some("pubkey") => updates::cmd_pubkey(&args[1..]),
         _ => Err(String::from(
-            "usage:\n  justtool pack <driver.manifest> <module> <out.adp>\n  justtool inspect <file.adp>\n  justtool image <out.img> --stage1 <bin> --stage2 <bin> --kernel <elf> --drivers <dir> [--efi <BOOTX64.efi>] [--size 256M] [--files <dir>] [--version <v>] [--slot-size 24M]\n  justtool iso <out.iso> --stage1 <bin> --stage2 <bin> --kernel <elf> --drivers <dir> --efi <BOOTX64.efi> [--size 16M] [--files <dir>]\n  justtool slot <out.slot> --kernel <elf> --drivers <dir> [--version <v>]\n  justtool fs <image> ls [path] | cat <path> | put <local> <path> | get <path> <local> | mkdir <path> | rm <path> | check\n  justtool mkfs <image> [--size 64M] [--label Data]\n  justtool updates <store dir> <out dir> --key <file> --base-url <url> [--serial <n>] [--slot <file>]\n  justtool pubkey <key file>",
+            "usage:\n  justtool pack <driver.manifest> <module> <out.jdp>\n  justtool inspect <file.jdp>\n  justtool image <out.img> --stage1 <bin> --stage2 <bin> --kernel <elf> --drivers <dir> [--efi <BOOTX64.efi>] [--size 256M] [--files <dir>] [--version <v>] [--slot-size 24M]\n  justtool iso <out.iso> --stage1 <bin> --stage2 <bin> --kernel <elf> --drivers <dir> --efi <BOOTX64.efi> [--size 16M] [--files <dir>]\n  justtool slot <out.slot> --kernel <elf> --drivers <dir> [--version <v>]\n  justtool fs <image> ls [path] | cat <path> | put <local> <path> | get <path> <local> | mkdir <path> | rm <path> | check\n  justtool mkfs <image> [--size 64M] [--label Data]\n  justtool updates <store dir> <out dir> --key <file> --base-url <url> [--serial <n>] [--slot <file>]\n  justtool pubkey <key file>",
         )),
     };
     match result {
@@ -76,7 +76,7 @@ fn read(path: impl AsRef<Path>) -> Result<Vec<u8>> {
 
 fn cmd_pack(args: &[String]) -> Result<()> {
     let [manifest, module, out] = args else {
-        return Err("usage: justtool pack <driver.manifest> <module> <out.adp>".into());
+        return Err("usage: justtool pack <driver.manifest> <module> <out.jdp>".into());
     };
     let text = String::from_utf8(read(manifest)?).map_err(|_| format!("{manifest}: not UTF-8"))?;
     let m = Manifest::parse(&text).map_err(|e| format!("{manifest}: {e}"))?;
@@ -94,7 +94,7 @@ fn cmd_pack(args: &[String]) -> Result<()> {
 }
 
 fn cmd_inspect(args: &[String]) -> Result<()> {
-    let [file] = args else { return Err("usage: justtool inspect <file.adp>".into()) };
+    let [file] = args else { return Err("usage: justtool inspect <file.jdp>".into()) };
     let bytes = read(file)?;
     let p = Package::parse(&bytes).map_err(|e| format!("{file}: {e}"))?;
     println!("driver ABI {}, module {} bytes", p.abi_version, p.module.len());
@@ -128,7 +128,7 @@ fn load_drivers(dir: &Path) -> Result<Vec<DriverFile>> {
     let mut entries: Vec<PathBuf> = fs::read_dir(dir)
         .map_err(|e| format!("{}: {e}", dir.display()))?
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "adp"))
+        .filter(|p| p.extension().is_some_and(|x| x == "jdp"))
         .collect();
     entries.sort();
     for path in entries {
@@ -312,7 +312,7 @@ impl Inputs {
     fn summary(&self) -> String {
         let boot: Vec<&str> = self.drivers.iter().filter(|d| d.boot).map(|d| d.name.as_str()).collect();
         format!(
-            "JustOS {}, kernel {} KiB, boot pack {} KiB with {} drivers (at boot: {})",
+            "justOS {}, kernel {} KiB, boot pack {} KiB with {} drivers (at boot: {})",
             self.version,
             self.flat.len() >> 10,
             self.pack.len() >> 10,

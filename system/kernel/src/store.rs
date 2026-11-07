@@ -2,18 +2,18 @@
 //!
 //! Two sources:
 //!
-//! - **On this computer**, `sys:/store/<id>`: the JustOS apps and games that
+//! - **On this computer**, `sys:/store/<id>`: the justOS apps and games that
 //!   come with the system (`info`, `app`, `icon.qoi`).
 //! - **From the internet**: the catalog (`sys:/system/store-catalog.json`,
-//!   refreshed from the JustOS repository) lists real Linux and Windows
+//!   refreshed from the justOS repository) lists real Linux and Windows
 //!   programs by their GitHub project; installing one asks GitHub for its
 //!   latest release, downloads the right file over HTTPS, unpacks it (tar.gz,
-//!   zip, gz) and checks that JustOS can run it (a static x86-64 Linux ELF,
+//!   zip, gz) and checks that justOS can run it (a static x86-64 Linux ELF,
 //!   or a 64-bit Windows PE). Any GitHub project can also be searched and
 //!   installed the same way.
 //!
 //! An installed program is `sys:/apps/<command>` (Linux), `<command>.exe`
-//! (Windows) or `<id>.app` (JustOS), with `<id>.info` (`key=value` lines) and
+//! (Windows) or `<id>.app` (justOS), with `<id>.info` (`key=value` lines) and
 //! `<id>.qoi` (its icon) next to it.
 
 use crate::fs::{self, Error, Path};
@@ -41,7 +41,7 @@ pub enum Platform {
 impl Platform {
     pub fn name(self) -> &'static str {
         match self {
-            Platform::Justos => "JustOS",
+            Platform::Justos => "justOS",
             Platform::Linux => "Linux",
             Platform::Windows => "Windows",
         }
@@ -76,7 +76,7 @@ pub struct PackageInfo {
     /// More about it, for its page in the store.
     pub details: String,
     pub platform: Platform,
-    /// A JustOS program (else Linux or Windows).
+    /// A justOS program (else Linux or Windows).
     pub native: bool,
     /// Has a window (else it runs in the terminal).
     pub gui: bool,
@@ -378,7 +378,7 @@ pub struct Asset {
     pub platform: Platform,
 }
 
-/// Which platform a release file is for, if JustOS can use it.
+/// Which platform a release file is for, if justOS can use it.
 pub fn asset_platform(name: &str) -> Option<Platform> {
     let n = name.to_ascii_lowercase();
     let x64 = n.contains("x86_64") || n.contains("amd64") || n.contains("x64") || n.contains("linux64") || n.contains("win64");
@@ -400,7 +400,7 @@ pub fn asset_platform(name: &str) -> Option<Platform> {
     None
 }
 
-/// The latest release of `repo`: its tag and the files JustOS could use,
+/// The latest release of `repo`: its tag and the files justOS could use,
 /// static Linux builds first.
 pub fn github_release(repo: &str) -> Result<(String, Vec<Asset>), String> {
     let v = github_json(&format!("https://api.github.com/repos/{repo}/releases/latest"))?;
@@ -637,7 +637,7 @@ pub fn is_package(name: &str) -> bool {
 ///   `sys:/apps` like a store program;
 /// - a macOS installer `.pkg`: its payload is unpacked into
 ///   `sys:/home/Applicazioni macOS/<name>`. macOS programs themselves (Mach-O)
-///   cannot run on JustOS; Linux or Windows programs inside are installed.
+///   cannot run on justOS; Linux or Windows programs inside are installed.
 ///
 /// Returns what to tell the user.
 pub fn install_file(file: &str) -> Result<String, String> {
@@ -736,7 +736,7 @@ fn install_mac(data: &[u8], name: &str) -> Result<String, String> {
             return install_program(&n, &d, &stem, platform, name);
         }
     }
-    Ok(format!("{files} file estratti in {dest}. I programmi macOS non possono girare su JustOS"))
+    Ok(format!("{files} file estratti in {dest}. I programmi macOS non possono girare su justOS"))
 }
 
 /// Makes a directory and those above it (those that exist are kept).
@@ -790,7 +790,7 @@ fn unpack(data: &[u8], name: &str, want: &str, command: &str, platform: Platform
     pick(&entries(data, name)?, want, command, platform)
 }
 
-/// Picks the program among the files and checks that JustOS can run it.
+/// Picks the program among the files and checks that justOS can run it.
 fn pick(entries: &[(String, Vec<u8>)], want: &str, command: &str, platform: Platform) -> Result<(String, Vec<u8>), String> {
     let base = |n: &str| n.rsplit('/').next().unwrap_or(n).to_string();
     let is_program = |d: &[u8]| match platform {
@@ -827,7 +827,7 @@ fn pick(entries: &[(String, Vec<u8>)], want: &str, command: &str, platform: Plat
             let phnum = u16::from_le_bytes([d[56], d[57]]) as usize;
             let dynamic = (0..phnum).any(|i| d.get(phoff + i * phent..phoff + i * phent + 4) == Some(&3u32.to_le_bytes()[..]));
             if dynamic {
-                return Err("questa versione richiede librerie Linux (JustOS esegue solo programmi statici)".to_string());
+                return Err("questa versione richiede librerie Linux (justOS esegue solo programmi statici)".to_string());
             }
         }
     }

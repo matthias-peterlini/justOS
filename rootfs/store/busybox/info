@@ -1,7 +1,7 @@
 name=BusyBox
 category=Sviluppatori
 about=Decine di comandi Unix (ls, cat, grep, ash…) in un solo programma, per il Terminale.
-details=Una raccolta dei comandi classici di Unix: file, testo, archivi e una shell compatibile POSIX (ash). Si usa nel Terminale: dopo l'installazione i comandi funzionano con il loro nome. Programma libero (GPL v2), compilato per Linux e avviato dal livello di compatibilità di JustOS.
+details=Una raccolta dei comandi classici di Unix: file, testo, archivi e una shell compatibile POSIX (ash). Si usa nel Terminale: dopo l'installazione i comandi funzionano con il loro nome. Programma libero (GPL v2), compilato per Linux e avviato dal livello di compatibilità di justOS.
 version=1.37
 developer=Progetto BusyBox
 type=linux

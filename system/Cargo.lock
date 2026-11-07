@@ -17,26 +17,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arc-vm"
-version = "0.5.0"
-dependencies = [
- "arcc-core",
-]
-
-[[package]]
-name = "arcc"
-version = "0.5.0"
-dependencies = [
- "arc-vm",
- "arcc-core",
- "justrt",
-]
-
-[[package]]
-name = "arcc-core"
-version = "0.5.0"
-
-[[package]]
 name = "ata"
 version = "1.1.0"
 dependencies = [
@@ -162,12 +142,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "jpk-bundler"
+version = "0.7.0"
+dependencies = [
+ "justc-core",
+]
+
+[[package]]
 name = "just-kernel"
 version = "0.7.0"
 dependencies = [
- "arc-vm",
- "arcc-core",
+ "just-vm",
  "justaml",
+ "justc-core",
  "justdk",
  "justfs",
  "justgfx",
@@ -178,14 +165,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "just-vm"
+version = "0.5.0"
+dependencies = [
+ "justc-core",
+]
+
+[[package]]
 name = "justaml"
 version = "0.7.0"
+
+[[package]]
+name = "justc"
+version = "0.5.0"
+dependencies = [
+ "jpk-bundler",
+ "just-vm",
+ "justc-core",
+ "justrt",
+]
+
+[[package]]
+name = "justc-core"
+version = "0.5.0"
 
 [[package]]
 name = "justdex"
 version = "1.0.0"
 dependencies = [
- "arcc-core",
+ "justc-core",
  "justzip",
 ]
 
@@ -212,7 +220,7 @@ version = "0.7.0"
 name = "justjs"
 version = "0.7.0"
 dependencies = [
- "arcc-core",
+ "justc-core",
 ]
 
 [[package]]
@@ -418,7 +426,7 @@ dependencies = [
 name = "winrun"
 version = "1.0.0"
 dependencies = [
- "arcc-core",
+ "justc-core",
  "justrt",
  "justui",
 ]

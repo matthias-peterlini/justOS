@@ -1,0 +1,13 @@
+[package]
+name = "just-vm"
+description = "JustVM: the stack-based virtual machine and runtime for JustScript"
+version = "0.5.0"
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[dependencies]
+justc-core.workspace = true
+
+[lints]
+workspace = true

@@ -1,7 +1,7 @@
 //! Who an app is, and what it may touch.
 //!
-//! An installed JustOS app (a `.app` in `sys:/apps` with its `.info`, or an
-//! ArcScript package that `arcc` starts with `APP_ENTER`) runs as its
+//! An installed justOS app (a `.app` in `sys:/apps` with its `.info`, or an
+//! JustScript package that `just` starts with `APP_ENTER`) runs as its
 //! `app_id`, such as `dev.justos.disegno`, in a sandbox:
 //!
 //! - its own folder, `sys:/home/.apps/<app_id>`, is all its, and it starts
@@ -79,7 +79,7 @@ pub fn default_id(name: &str) -> String {
     }
 }
 
-/// The app a program file is: an installed JustOS package in `sys:/apps`.
+/// The app a program file is: an installed justOS package in `sys:/apps`.
 pub fn for_program(path: &Path) -> Option<App> {
     if !path.volume.eq_ignore_ascii_case("sys") {
         return None;

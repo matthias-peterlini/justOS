@@ -1,6 +1,6 @@
 [package]
 name = "campominato"
-description = "JustOS store program: campominato"
+description = "justOS store program: campominato"
 version = "1.0.0"
 edition.workspace = true
 publish.workspace = true

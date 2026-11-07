@@ -13,7 +13,7 @@ use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
-use arcc_core::float;
+use justc_core::float;
 use core::cmp::Ordering;
 
 const OBJ: &str = "Ljava/lang/Object;";
@@ -446,7 +446,7 @@ impl Vm {
         }?;
         match found {
             Some(v) => Ok(v),
-            None => self.throw("Ljava/lang/NoSuchMethodError;", &format!("{}.{name}{sig} is not available on JustOS yet", java_name(class))),
+            None => self.throw("Ljava/lang/NoSuchMethodError;", &format!("{}.{name}{sig} is not available on justOS yet", java_name(class))),
         }
     }
 
@@ -761,7 +761,7 @@ impl Vm {
             }
             "printStackTrace" => {
                 let s = self.describe(o);
-                self.write(&format!("{s}\n\tat (JustOS: no stack trace)\n"), true);
+                self.write(&format!("{s}\n\tat (justOS: no stack trace)\n"), true);
                 Val::NULL
             }
             "initCause" => {
@@ -1815,7 +1815,7 @@ impl Vm {
                 "lineSeparator" => self.jstring("\n".into()),
                 "getProperty" | "getenv" => match arg_s(0).as_deref() {
                     Some("line.separator") => self.jstring("\n".into()),
-                    Some("os.name") => self.jstring("JustOS".into()),
+                    Some("os.name") => self.jstring("justOS".into()),
                     Some("java.version") => self.jstring("1.8".into()),
                     _ => args.get(1).cloned().unwrap_or(Val::NULL),
                 },

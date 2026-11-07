@@ -218,7 +218,7 @@ fn send(pid: u32, tid: Option<Tid>, sig: u32, info: [u8; 32]) -> bool {
         return true;
     }
     if with_state_of(pid, |st| queue(st, sig, tid, info)).is_none() {
-        // A JustOS program: only the signals that end a process mean
+        // A justOS program: only the signals that end a process mean
         // something to it.
         if matches!(sig, SIGHUP | SIGINT | SIGQUIT | SIGTERM) {
             user::kill_one(pid);

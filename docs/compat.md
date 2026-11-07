@@ -1,21 +1,21 @@
-# Programmi Linux, Windows e Android su JustOS
+# Programmi Linux, Windows e Android su justOS
 
-JustOS esegue, oltre ai suoi programmi nativi e a quelli ArcScript, anche
+justOS esegue, oltre ai suoi programmi nativi e a quelli JustScript, anche
 programmi **Linux** e **Windows** per x86-64 e app **Android** e programmi
 Java (vedi [più sotto](#programmi-java-e-app-android)), senza modificarli. Non c'è una
 macchina virtuale: il programma gira nello stesso modo degli altri, in ring 3
-e nel suo spazio di indirizzi; quando chiede qualcosa al sistema, JustOS traduce
+e nel suo spazio di indirizzi; quando chiede qualcosa al sistema, justOS traduce
 la richiesta nelle proprie chiamate.
 
 L'idea è la stessa di [Wine](https://www.winehq.org/) e di
 [WSL](https://learn.microsoft.com/windows/wsl/), in piccolo: nessun codice di
-Microsoft o di Linux è copiato in JustOS. Il supporto è scritto da zero a
+Microsoft o di Linux è copiato in justOS. Il supporto è scritto da zero a
 partire dalle interfacce pubbliche (la ABI di System V per Linux, la
 convenzione x64 e i pochi `.dll` di sistema per Windows).
 
 ## Programmi Linux
 
-JustOS carica un eseguibile ELF x86-64 e serve le chiamate di sistema Linux
+justOS carica un eseguibile ELF x86-64 e serve le chiamate di sistema Linux
 che fa. Il programma può essere **collegato staticamente** (con
 [musl](https://musl.libc.org/), `musl-gcc -static`, o costruito da Go e Rust)
 oppure **dinamicamente con la glibc**, come quasi tutti i programmi delle
@@ -44,7 +44,7 @@ busybox ls -la             un programma installato (vedi "Installare programmi")
 
 ### Cosa vede il programma
 
-| Area | Su JustOS |
+| Area | Su justOS |
 |---|---|
 | `stdin`, `stdout`, `stderr` | la console; `stdin` legge una riga per volta, con l'eco dei tasti |
 | file e cartelle | i volumi montati: il "/" di Linux è la radice del volume corrente, così `/home/x` è `<volume>:/home/x` |
@@ -76,12 +76,12 @@ ogni thread).
 ### Programmi con finestre (Wayland)
 
 I programmi Linux con un'interfaccia grafica (GTK, Qt, SDL, i browser)
-parlano con un **compositor Wayland**. Su JustOS il compositor è nel kernel
+parlano con un **compositor Wayland**. Su justOS il compositor è nel kernel
 (`system/kernel/src/linux/wayland/`): ascolta su `/home/tmp/wayland-0`, lo
 stesso posto da ogni volume, e serve ogni programma con un thread suo. Il
 programma usa la sua `libwayland-client` di Debian, senza modifiche.
 
-Ogni finestra del programma diventa una **finestra di JustOS**, con la
+Ogni finestra del programma diventa una **finestra di justOS**, con la
 cornice, i pulsanti, il vetro e le scorciatoie di tutte le altre (Ctrl+Q la
 chiude, F11 la mette a schermo intero): le decorazioni sono del server
 (`xdg-decoration`, e il protocollo di KDE, che GTK guarda), così i programmi
@@ -94,27 +94,27 @@ programma disegna.
 | `wl_shm` | buffer in memoria condivisa (`memfd`), ARGB8888 e XRGB8888; il compositor copia solo la parte cambiata e libera subito il buffer |
 | `wl_output` | lo schermo, con la sua scala: su uno schermo ad alta densità il programma disegna al doppio dei pixel |
 | `xdg_wm_base` | finestre (`xdg_toplevel`: titolo, dimensioni minime e massime, ridimensionamento dalla cornice, stato attivo, chiusura) e popup (`xdg_popup`, posizionati con le regole del loro `xdg_positioner` dentro la finestra; un clic fuori chiude un menu) |
-| `wl_seat` | puntatore (movimento, pulsanti, rotellina) e tastiera, con una mappa XKB di JustOS: i tasti arrivano già tradotti dal layout scelto, anche le lettere accentate |
-| `wl_data_device_manager` | presente, ma gli appunti non passano ancora tra i programmi Linux e JustOS |
+| `wl_seat` | puntatore (movimento, pulsanti, rotellina) e tastiera, con una mappa XKB di justOS: i tasti arrivano già tradotti dal layout scelto, anche le lettere accentate |
+| `wl_data_device_manager` | presente, ma gli appunti non passano ancora tra i programmi Linux e justOS |
 
 `make test-wayland` lo prova con un piccolo client (`scripts/linux/wl-test.c`)
 compilato al volo contro la `libwayland-client` e la `libxkbcommon` di Debian.
 
 ## Programmi Windows
 
-I programmi Windows li esegue `winrun`, un programma di JustOS
+I programmi Windows li esegue `winrun`, un programma di justOS
 (`system/apps/winrun`). `winrun` carica l'eseguibile `.exe` (PE32+ per x64),
 mette i propri indirizzi nella tabella delle importazioni al posto delle
 funzioni di `kernel32.dll` e `msvcrt.dll`, prepara un blocco di thread (TEB) e
 salta al punto d'ingresso. Il programma gira nello stesso processo di `winrun`:
 quando chiama, per esempio, `printf`, chiama il codice di `winrun`, che a sua
-volta usa le chiamate di JustOS.
+volta usa le chiamate di justOS.
 
-Un `.exe` si avvia per nome (JustOS riconosce l'intestazione `MZ` e usa `winrun`
+Un `.exe` si avvia per nome (justOS riconosce l'intestazione `MZ` e usa `winrun`
 da solo) o esplicitamente:
 
 ```
-hello.exe                  JustOS vede che è un programma Windows e lo avvia
+hello.exe                  justOS vede che è un programma Windows e lo avvia
 winrun hello.exe alpha     lo stesso, scritto per esteso
 ```
 
@@ -122,16 +122,16 @@ Sono gestiti i **programmi x64** costruiti con
 [MinGW-w64](https://www.mingw-w64.org/) (`x86_64-w64-mingw32-gcc`), da console
 e con finestre:
 
-| Area | Su JustOS |
+| Area | Su justOS |
 |---|---|
 | console | i tre flussi standard, `printf`/`scanf` e famiglia, `fgets(stdin)`, `getchar`, `ReadConsole` |
-| file | `fopen`/`fread`/`fgets`/`fscanf`/`fseek` e `CreateFile`/`ReadFile`/`WriteFile`; i percorsi Windows (`C:\x`) diventano percorsi di JustOS |
+| file | `fopen`/`fread`/`fgets`/`fscanf`/`fseek` e `CreateFile`/`ReadFile`/`WriteFile`; i percorsi Windows (`C:\x`) diventano percorsi di justOS |
 | runtime C | memoria (`malloc`, `HeapAlloc`, `VirtualAlloc`), stringhe, `ctype`, `strtol`/`strtod`, `qsort`/`bsearch`, `rand`, `time`/`localtime`, matematica |
 | finestre (`user32`) | classi di finestra, `CreateWindowEx`, il ciclo dei messaggi (`GetMessage`, `PeekMessage`, `DispatchMessage`), timer, messaggi di mouse e tastiera, `WM_PAINT`, `MessageBox` |
 | disegno (`gdi32`) | penne, pennelli e caratteri, rettangoli, ellissi, linee, poligoni, testo e `DrawText`, DC in memoria con `BitBlt` |
 
 Un `.exe` con finestre (sottosistema GUI) si apre con un doppio clic senza
-Terminale: le sue finestre sono finestre di JustOS. Una funzione importata che
+Terminale: le sue finestre sono finestre di justOS. Una funzione importata che
 `winrun` non conosce non ferma più il programma: lo stub lo dice una volta e
 restituisce 0.
 
@@ -157,10 +157,10 @@ SelfTest.apk               un'app Android: si apre nella sua finestra
 ```
 
 Un doppio clic su un `.apk` apre l'app nella sua finestra; un `.dex` o un
-`.jar` parte nel Terminale. JustOS riconosce il formato dai primi byte
+`.jar` parte nel Terminale. justOS riconosce il formato dai primi byte
 (`dex\n` o un archivio zip con `classes.dex`).
 
-| Area | Su JustOS |
+| Area | Su justOS |
 |---|---|
 | linguaggio | tutte le istruzioni Dalvik: classi, interfacce, eccezioni con `try`/`catch`, array multidimensionali, `switch`, enum, classi interne e anonime |
 | `java.lang` | `String`, `StringBuilder`, i tipi incapsulati, `Math`, `System`, `Character`, `Thread` (eseguito subito, non in parallelo), le eccezioni con lo stesso messaggio della JVM |
@@ -197,9 +197,9 @@ uninstall lua              lo toglie
 
 [BusyBox](https://busybox.net/) è un programma solo che, a seconda del nome con
 cui lo si chiama, diventa uno di decine di comandi Unix. Dopo `install busybox`,
-JustOS mette a disposizione quei comandi (`cat`, `grep`, `wc`, `seq`, `sort`,
+justOS mette a disposizione quei comandi (`cat`, `grep`, `wc`, `seq`, `sort`,
 `ash`…): digitandone uno, la shell avvia `busybox` passandogli quel nome. I
-comandi propri di JustOS (per esempio `ls`) hanno la precedenza.
+comandi propri di justOS (per esempio `ls`) hanno la precedenza.
 
 ### Pacchetti con un doppio clic
 
@@ -243,7 +243,7 @@ anche senza estensione) lo avvia nel Terminale.
 `make test-compat` compila al volo un piccolo programma Linux (con `musl-gcc`) e
 alcuni Windows (con `x86_64-w64-mingw32-gcc`: console, file, tastiera e una
 finestra), li mette su una copia dell'immagine insieme ai programmi del
-negozio e ai programmi Java e Android di prova, avvia JustOS e controlla che
+negozio e ai programmi Java e Android di prova, avvia justOS e controlla che
 funzionino. Se uno dei due compilatori non c'è, quella parte viene saltata (e
 segnalata). I file `.dex` e `.apk` di prova sono già nel repository
 (`system/libs/justdex/tests`); `build.sh` li ricrea con un JDK e `dx`.

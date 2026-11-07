@@ -1,4 +1,4 @@
-Benvenuto in JustOS!
+Benvenuto in justOS!
 
 Per cominciare:
 
@@ -12,5 +12,5 @@ Per cominciare:
 Le tue cose stanno nella home: Documenti, Immagini, Musica, Note...
 La cartella Musica ha già tre brani da ascoltare.
 
-Per chi programma: il Terminale (tra le applicazioni) ha la shell di JustOS;
-in sys:/home/arcscript ci sono esempi nel linguaggio ArcScript.
+Per chi programma: il Terminale (tra le applicazioni) ha la shell di justOS;
+in sys:/home/justscript ci sono esempi nel linguaggio JustScript.

@@ -1,6 +1,6 @@
 [package]
 name = "ata"
-description = "JustOS driver: ATA/IDE disks"
+description = "justOS driver: ATA/IDE disks"
 version = "1.1.0"
 edition.workspace = true
 publish.workspace = true

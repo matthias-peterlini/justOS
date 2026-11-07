@@ -3,7 +3,7 @@
 # console, files and keyboard, and one with a window), puts them on a copy of
 # the image together with the store programs and two Java programs (a DEX
 # file and an Android app, already built: system/libs/justdex/tests), boots
-# JustOS and checks that they run: the Linux ABI, the Windows loader (winrun),
+# justOS and checks that they run: the Linux ABI, the Windows loader (winrun),
 # the Dalvik interpreter, `install` and the BusyBox applets.
 #
 # Needs musl-gcc (musl-tools) and x86_64-w64-mingw32-gcc (mingw-w64). If either

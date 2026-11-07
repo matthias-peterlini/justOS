@@ -1,9 +1,13 @@
 [workspace]
 resolver = "2"
-members = ["justtool"]
+members = ["justtool", "just-stub"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 publish = false
 authors = ["Matthias Peterlini"]
+
+# The runtime inside every Windows program justc builds: no symbols.
+[profile.release.package.just-stub]
+strip = true

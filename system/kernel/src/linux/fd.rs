@@ -1,4 +1,4 @@
-//! File descriptors of Linux processes: files and folders of the JustOS
+//! File descriptors of Linux processes: files and folders of the justOS
 //! volume, the console, pipes, eventfds, sockets ([`super::sock`],
 //! [`super::unix`]) and epoll
 //! sets ([`super::poll`]), plus the few virtual files programs expect
@@ -134,7 +134,7 @@ pub fn install_from(d: Arc<Desc>, cloexec: bool, min: i32) -> i64 {
     })
 }
 
-/// The JustOS path behind a file descriptor (for `mmap` of a file).
+/// The justOS path behind a file descriptor (for `mmap` of a file).
 pub fn file_path(fd: i32) -> Option<Path> {
     match &get(fd)?.kind {
         Kind::File { path, .. } => Some(path.clone()),
@@ -223,7 +223,7 @@ fn virtual_file(text: &str) -> Option<Kind> {
             data(s)
         }
         "/proc/self/cmdline" => data(alloc::format!("{}\0", user::current_name())),
-        "/proc/cpuinfo" => data(String::from("processor\t: 0\nmodel name\t: JustOS virtual CPU\ncpu cores\t: 1\n\n")),
+        "/proc/cpuinfo" => data(String::from("processor\t: 0\nmodel name\t: justOS virtual CPU\ncpu cores\t: 1\n\n")),
         "/proc/meminfo" => {
             let (free, total) = crate::mem::frame::stats();
             data(alloc::format!("MemTotal: {} kB\nMemFree: {} kB\nMemAvailable: {} kB\n", total / 1024, free / 1024, free / 1024))

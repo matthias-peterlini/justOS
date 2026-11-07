@@ -1,16 +1,16 @@
-//! Runs a Windows x86-64 program (`.exe`) on JustOS.
+//! Runs a Windows x86-64 program (`.exe`) on justOS.
 //!
-//! `winrun` is an ordinary JustOS program that loads a Windows executable into
+//! `winrun` is an ordinary justOS program that loads a Windows executable into
 //! its own address space, fills in the functions the executable imports from
 //! `kernel32.dll` and `msvcrt.dll` with its own code, and jumps to the
 //! program's entry point. The Windows program then runs in the same process:
 //! when it calls, say, `WriteFile` or `printf`, it calls into [`win`], which
-//! turns the request into JustOS system calls.
+//! turns the request into justOS system calls.
 //!
 //! Console programs get the C runtime (output, files, the keyboard, strings,
 //! maths); windowed ones a part of `user32` and `gdi32`: windows with a
 //! message loop, timers, mouse and keyboard, GDI drawing and message boxes,
-//! shown as JustOS windows. Enough for programs built with MinGW-w64
+//! shown as justOS windows. Enough for programs built with MinGW-w64
 //! (`x86_64-w64-mingw32-gcc`, `-mwindows` for a window). There are no child
 //! controls, no registry, no threads or other processes. It is the same idea
 //! as Wine, in miniature.

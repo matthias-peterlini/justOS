@@ -21,8 +21,8 @@ fn main() {
     }
     println!("rt: threads total={total}");
     let mut m = HashMap::new();
-    m.insert("arc", 1);
-    println!("rt: hashmap {}", m["arc"]);
+    m.insert("just", 1);
+    println!("rt: hashmap {}", m["just"]);
     std::fs::write("rt.txt", b"rust file").unwrap();
     println!("rt: file {}", std::fs::read_to_string("rt.txt").unwrap());
     let args: Vec<String> = std::env::args().collect();
