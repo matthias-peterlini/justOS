@@ -19,6 +19,10 @@ const CLONE_SETTLS: u64 = 0x80000;
 const CLONE_PARENT_SETTID: u64 = 0x100000;
 const CLONE_CHILD_CLEARTID: u64 = 0x200000;
 const CLONE_CHILD_SETTID: u64 = 0x1000000;
+/// New namespaces (mount, cgroup, UTS, IPC, user, PID, network): there are
+/// none, and callers fall back to doing without, as on a Linux built
+/// without them.
+const CLONE_NEW_NAMESPACES: u64 = 0x7e02_0000;
 
 /// Linux thread ids: the main thread's is the process id; the others get
 /// their kernel id moved out of the range of process ids.
@@ -35,6 +39,9 @@ pub fn sys_gettid() -> i64 {
 }
 
 pub fn sys_clone(frame: &TrapFrame, flags: u64, stack: u64, ptid: u64, ctid: u64, tls: u64) -> i64 {
+    if flags & CLONE_NEW_NAMESPACES != 0 {
+        return -err::EINVAL;
+    }
     if flags & CLONE_THREAD == 0 {
         return clone_process(frame, flags, stack, ptid, ctid, tls);
     }
@@ -53,6 +60,7 @@ pub fn sys_clone(frame: &TrapFrame, flags: u64, stack: u64, ptid: u64, ctid: u64
     };
     let lt = tid + 100_000;
     super::signal::thread_started(tid);
+    super::seccomp::inherit(tid, task::current_pid());
     if flags & CLONE_PARENT_SETTID != 0 {
         super::mm::populate(ptid, 4);
         if let Ok(b) = user_bytes(ptid, 4) {
@@ -102,6 +110,7 @@ fn clone_process(frame: &TrapFrame, flags: u64, stack: u64, ptid: u64, ctid: u64
         Err(e) => return -super::errno(e),
     };
     super::fork_state(pid, tid);
+    super::seccomp::inherit(tid, pid);
     // The child's main thread has the process's id as its thread id.
     let id = pid.to_le_bytes();
     if flags & CLONE_PARENT_SETTID != 0 {
@@ -148,6 +157,7 @@ pub fn sys_exit(code: i64) -> ! {
         super::signal::thread_ended(st, me);
         st.clear_tid.remove(&me)
     });
+    super::seccomp::thread_ended(me);
     if let Some(ctid) = ctid {
         if ctid != 0 {
             if let Ok(b) = user_bytes(ctid, 4) {

@@ -5,7 +5,8 @@
  * local sockets (pairs, a named server, SCM_RIGHTS, datagrams) and shared
  * memory (memfd, MAP_SHARED across fork and over a socket, shm_open),
  * starting a child the way browsers do (dup2 into place, close the rest),
- * a process-shared semaphore, inotify and prompt wake-ups.
+ * a process-shared semaphore, inotify, seccomp filters and prompt
+ * wake-ups.
  * Built by scripts/test-linux.sh with the host's gcc. */
 #define _GNU_SOURCE
 #include <dirent.h>
@@ -13,19 +14,24 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <gnu/libc-version.h>
+#include <linux/audit.h>
+#include <linux/filter.h>
 #include <linux/futex.h>
+#include <linux/seccomp.h>
 #include <poll.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <setjmp.h>
 #include <signal.h>
 #include <spawn.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
 #include <sys/inotify.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -33,6 +39,7 @@
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <time.h>
+#include <ucontext.h>
 #include <unistd.h>
 
 extern char **environ;
@@ -158,6 +165,73 @@ static void *worker(void *arg) {
     long *n = arg;
     for (int i = 0; i < 100000; i++)
         __atomic_add_fetch(n, 1, __ATOMIC_SEQ_CST);
+    return NULL;
+}
+
+/* seccomp: the first filter fails getpid with 77, turns getppid into a
+   SIGSYS (data 9), kills on uname and fails getpriority(_, 31337) with 33. */
+static struct sock_filter sc_f1[] = {
+    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AUDIT_ARCH_X86_64, 1, 0),
+    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS),
+    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_getpid, 0, 1),
+    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | 77),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_getppid, 0, 1),
+    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRAP | 9),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_uname, 0, 1),
+    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_getpriority, 0, 3),
+    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[1])),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 31337, 0, 1),
+    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | 33),
+    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+};
+
+/* The second, on top: gettid fails with 66 (found with arithmetic, scratch
+   memory and a jump on X), getpid with 88 (the newer of two errors). */
+static struct sock_filter sc_f2[] = {
+    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
+    BPF_STMT(BPF_ST, 2),
+    BPF_STMT(BPF_ALU | BPF_ADD | BPF_K, 1),
+    BPF_STMT(BPF_ALU | BPF_MUL | BPF_K, 2),
+    BPF_STMT(BPF_MISC | BPF_TAX, 0),
+    BPF_STMT(BPF_LD | BPF_IMM, (__NR_gettid + 1) * 2),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_X, 0, 0, 1),
+    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | 66),
+    BPF_STMT(BPF_LD | BPF_MEM, 2),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_getpid, 0, 1),
+    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | 88),
+    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+};
+
+static volatile int sc_nr, sc_code, sc_data, sc_arch, sc_ip, sc_rax;
+static int sc_go[2], sc_back[2];
+
+static void on_sys(int s, siginfo_t *si, void *uc_) {
+    (void)s;
+    ucontext_t *uc = uc_;
+    sc_nr = si->si_syscall;
+    sc_code = si->si_code;
+    sc_data = si->si_errno;
+    sc_arch = si->si_arch == AUDIT_ARCH_X86_64;
+    sc_ip = (greg_t)si->si_call_addr == uc->uc_mcontext.gregs[REG_RIP];
+    sc_rax = uc->uc_mcontext.gregs[REG_RAX] == si->si_syscall;
+    uc->uc_mcontext.gregs[REG_RAX] = 4242;
+}
+
+/* A thread made before the filters: TSYNC gives it the first, not the
+   second. */
+static void *sc_thread(void *arg) {
+    int *res = arg;
+    char c;
+    if (read(sc_go[0], &c, 1) != 1)
+        return NULL;
+    errno = 0;
+    res[0] = syscall(SYS_getpid) == -1 ? errno : 0;
+    if (write(sc_back[1], "b", 1) != 1 || read(sc_go[0], &c, 1) != 1)
+        return NULL;
+    res[1] = syscall(SYS_gettid) > 0;
     return NULL;
 }
 
@@ -787,6 +861,75 @@ int main(int argc, char **argv) {
     printf("dt: inotify %s cookie=%d poll=%d again=%d rm=%d ignored=%d\n", iseen, c_from == c_to && c_from != 0, ipoll, iagain, irm, iignored);
     close(in);
     rmdir("ino");
+
+    /* seccomp, in a child: the probe Firefox makes, no_new_privs, two
+       filters (see sc_f1 and sc_f2), the SIGSYS a filter asks for and what
+       its handler sees, TSYNC; then a grandchild killed by the filter, and
+       strict mode in another child (write goes through, getpid kills). */
+    fflush(stdout);
+    pid_t c14 = fork();
+    if (c14 == 0) {
+        struct sigaction sa;
+        memset(&sa, 0, sizeof sa);
+        sa.sa_sigaction = on_sys;
+        sa.sa_flags = SA_SIGINFO;
+        sigaction(SIGSYS, &sa, NULL);
+        int tres[2] = {-1, -1};
+        if (pipe(sc_go) != 0 || pipe(sc_back) != 0)
+            _exit(1);
+        pthread_t th;
+        pthread_create(&th, NULL, sc_thread, tres);
+        int probe = prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, NULL) == -1 && errno == EFAULT;
+        int nnp = prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0 && prctl(PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) == 1;
+        struct sock_fprog p1 = {sizeof sc_f1 / sizeof sc_f1[0], sc_f1};
+        struct sock_fprog p2 = {sizeof sc_f2 / sizeof sc_f2[0], sc_f2};
+        long set1 = syscall(SYS_seccomp, SECCOMP_SET_MODE_FILTER, SECCOMP_FILTER_FLAG_TSYNC, &p1);
+        char c;
+        if (write(sc_go[1], "g", 1) != 1 || read(sc_back[0], &c, 1) != 1)
+            _exit(1);
+        long set2 = prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &p2);
+        if (write(sc_go[1], "g", 1) != 1)
+            _exit(1);
+        pthread_join(th, NULL);
+        errno = 0;
+        long gp = syscall(SYS_getpid);
+        int gpe = errno;
+        long gpp = syscall(SYS_getppid);
+        errno = 0;
+        syscall(SYS_gettid);
+        int gte = errno;
+        errno = 0;
+        syscall(SYS_getpriority, PRIO_PROCESS, 31337);
+        int pre = errno;
+        long pr = syscall(SYS_getpriority, PRIO_PROCESS, 0);
+        int mode = prctl(PR_GET_SECCOMP, 0, 0, 0, 0);
+        printf("dt: seccomp probe=%d nnp=%d set=%ld,%ld getpid=%ld/%d getppid=%ld sys=%d,%d,%d,%d,%d,%d gettid=%d prio=%d,%ld thread=%d,%d mode=%d\n",
+               probe, nnp, set1, set2, gp, gpe, gpp, sc_nr, sc_code, sc_data, sc_arch, sc_ip, sc_rax, gte, pre, pr, tres[0], tres[1], mode);
+        fflush(stdout);
+        pid_t k = fork();
+        if (k == 0) {
+            syscall(SYS_uname, NULL);
+            _exit(0);
+        }
+        int ks = 0;
+        waitpid(k, &ks, 0);
+        printf("dt: seccomp kill %d\n", WIFSIGNALED(ks) ? WTERMSIG(ks) : -1);
+        fflush(stdout);
+        _exit(0);
+    }
+    int sc_exit = reap(c14);
+    pid_t c15 = fork();
+    if (c15 == 0) {
+        if (syscall(SYS_seccomp, SECCOMP_SET_MODE_STRICT, 0, NULL) != 0)
+            _exit(1);
+        static const char ok[] = "dt: strict write\n";
+        syscall(SYS_write, 1, ok, sizeof ok - 1);
+        syscall(SYS_getpid);
+        syscall(SYS_exit, 3);
+    }
+    int ss = 0;
+    waitpid(c15, &ss, 0);
+    printf("dt: seccomp exit=%d strict %d\n", sc_exit, WIFSIGNALED(ss) ? WTERMSIG(ss) : -1);
 
     /* Waking is prompt: a process waiting in poll on a pipe, a thread in
        epoll_wait on a local socket and one on a futex wake when the other

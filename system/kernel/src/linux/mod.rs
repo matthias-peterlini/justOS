@@ -17,12 +17,14 @@
 //! volume like any file), which maps their shared libraries with `mmap`.
 //! New processes come from fork, vfork and posix_spawn, and execve
 //! replaces a program (scripts with `#!` too); parents wait for children
-//! with wait4. Signals ([`signal`]) run the program's handlers, as on Linux.
+//! with wait4. Signals ([`signal`]) run the program's handlers, as on Linux,
+//! and seccomp filters ([`seccomp`]) can sandbox a program's calls.
 
 pub mod fd;
 mod inotify;
 pub mod mm;
 mod poll;
+mod seccomp;
 mod shm;
 pub mod signal;
 mod sock;
@@ -178,6 +180,7 @@ pub fn forget(pid: u32) {
         signal::forgotten(s);
     }
     drop(st);
+    seccomp::forget(pid);
 }
 
 pub fn with_state<T>(f: impl FnOnce(&mut LinuxState) -> T) -> T {
@@ -222,11 +225,6 @@ pub fn fork_state(child: u32, tid: task::Tid) {
     if let Some(c) = copy {
         states.insert(child, c);
     }
-}
-
-/// The program's path as Linux shows it.
-pub fn exe_path() -> String {
-    with_state(|st| st.exe.clone())
 }
 
 // ----------------------------------------------------------------------------
@@ -635,6 +633,15 @@ fn traced_path(n: u64, a: &[u64; 6]) -> String {
 pub fn syscall(frame: &mut TrapFrame) {
     crate::arch::cpu::enable_irq();
     let n = frame.rax;
+    if task::current_flags() & seccomp::FILTERED != 0 && !seccomp::allows(frame, n) {
+        // A filter answered for the call: an error, or a SIGSYS handler.
+        if user::kill_requested() {
+            user::terminate(-130);
+        }
+        signal::deliver(frame, None);
+        crate::arch::cpu::disable_irq();
+        return;
+    }
     if n == 15 {
         // rt_sigreturn: the registers come back from the signal frame.
         signal::sys_rt_sigreturn(frame);
@@ -777,7 +784,7 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         145 => 0, // sched_getscheduler: SCHED_OTHER
         146 => if matches!(a[0], 1 | 2) { 99 } else { 0 }, // sched_get_priority_max: FIFO, RR
         147 => if matches!(a[0], 1 | 2) { 1 } else { 0 },  // sched_get_priority_min
-        157 => 0, // prctl
+        157 => sys_prctl(a[0], a[1], a[2], a[3], a[4]),
         158 => sys_arch_prctl(a[0], a[1]),
         160 => 0, // setrlimit
         186 => thread::sys_gettid(),
@@ -824,6 +831,7 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         294 => inotify::sys_inotify_init1(a[0] as u32),
         302 => sys_prlimit(a[1], a[3]),
         309 => sys_getcpu(a[0], a[1]),
+        317 => seccomp::sys_seccomp(a[0], a[1], a[2]),
         318 => sys_getrandom(a[0], a[1]),
         322 if a[0] as i32 == fd::AT_FDCWD || a[4] == 0 => sys_execve(a[1], a[2], a[3]), // execveat
         324 => 0, // membarrier
@@ -832,6 +840,15 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         436 => fd::sys_close_range(a[0] as u32, a[1] as u32, a[2] as u32),
         441 => poll::sys_epoll_pwait2(fd0, a[1], a[2] as i32, a[3]),
         _ => -err::ENOSYS,
+    }
+}
+
+/// prctl: seccomp and no_new_privs (see [`seccomp`]); the other options are
+/// accepted and change nothing.
+fn sys_prctl(option: u64, a2: u64, a3: u64, a4: u64, a5: u64) -> i64 {
+    match option {
+        21 | 22 | 38 | 39 => seccomp::prctl(option, a2, a3, a4, a5),
+        _ => 0,
     }
 }
 

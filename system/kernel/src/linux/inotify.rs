@@ -154,12 +154,16 @@ impl State {
         true
     }
 
-    /// Queues what watchers of `c` see; returns whether anything was.
+    /// Queues what watchers of `c` see; returns whether anything was. The
+    /// folder hears first, then the thing itself, except for a deletion: the
+    /// thing's own DELETE_SELF and the end of its watch come first, as on
+    /// Linux.
     fn tell(&mut self, c: &fs::Change<'_>) -> bool {
         let what = c.mask & !IN_ISDIR;
         let mut told = false;
         let mut done = Vec::new();
         let mut queued = Vec::new();
+        let mut gone = Vec::new();
         for (&wd, w) in &self.watches {
             if w.volume != c.volume {
                 continue;
@@ -174,14 +178,19 @@ impl State {
                     IN_MOVED_TO => IN_MOVE_SELF,
                     _ => 0,
                 };
-                if w.mask & own != 0 {
+                if own == IN_DELETE_SELF {
+                    gone.push((wd, w.mask & own != 0));
+                } else if w.mask & own != 0 {
                     queued.push((wd, own, 0, false));
                 }
-                // Gone: the watch goes too.
-                if own == IN_DELETE_SELF {
-                    done.push(wd);
-                }
             }
+        }
+        // Gone: the watch goes too.
+        for (wd, wanted) in gone {
+            if wanted {
+                self.push(wd, IN_DELETE_SELF, 0, "");
+            }
+            told |= wanted | self.forget(wd);
         }
         for (wd, mask, cookie, named) in queued {
             self.push(wd, mask, cookie, if named { c.name } else { "" });

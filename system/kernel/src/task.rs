@@ -108,6 +108,8 @@ struct Thread {
     unstarted: bool,
     /// Mutexes it holds, while it is not running (see [`HOLDING`]).
     holding: u32,
+    /// What [`current_flags`] says while it runs.
+    flags: u32,
 }
 
 impl Thread {
@@ -130,6 +132,7 @@ impl Thread {
             wake_pending: false,
             unstarted: false,
             holding: 0,
+            flags: 0,
         }
     }
 
@@ -259,6 +262,32 @@ static RUNNING: [core::sync::atomic::AtomicU64; MAX_CPUS] = [const { core::sync:
 /// every thread that needs the mutex would wait for its next turn. Saved in
 /// the thread when it stops running and put back when it runs again.
 static HOLDING: [core::sync::atomic::AtomicU32; MAX_CPUS] = [const { core::sync::atomic::AtomicU32::new(0) }; MAX_CPUS];
+
+/// The flags of the thread running on each processor (see [`current_flags`]).
+static FLAGS: [core::sync::atomic::AtomicU32; MAX_CPUS] = [const { core::sync::atomic::AtomicU32::new(0) }; MAX_CPUS];
+
+/// Flags other parts of the kernel keep on a thread, to be read on every
+/// system call without a lock (the Linux layer's: whether a seccomp filter
+/// looks at its calls).
+pub fn current_flags() -> u32 {
+    let irq = cpu::irq_save();
+    let v = FLAGS[smp::this_cpu()].load(Ordering::Relaxed);
+    cpu::irq_restore(irq);
+    v
+}
+
+/// Sets a thread's flags, also if it is running on another processor.
+pub fn set_flags(tid: Tid, flags: u32) {
+    let mut s = SCHED.lock();
+    if let Some(t) = s.threads.get_mut(&tid) {
+        t.flags = flags;
+    }
+    for (cpu, c) in s.cpus.iter().enumerate() {
+        if c.current == tid {
+            FLAGS[cpu].store(flags, Ordering::Relaxed);
+        }
+    }
+}
 
 /// A processor whose thread kept running past its slice: it yields when it
 /// lets go of its last mutex.
@@ -461,6 +490,7 @@ fn schedule() {
                 None
             } else {
                 let (new_rsp, top, cr3, fs, gs, has_stack, pid, holding) = (n.rsp, n.stack_top(), n.cr3, n.fs_base, n.gs_base, n.stack != 0, n.pid, n.holding);
+                FLAGS[me].store(n.flags, Ordering::Relaxed);
                 let new_fpu: *const FpuArea = &*n.fpu;
                 let c = s.threads.get_mut(&cur).unwrap();
                 (c.fs_base, c.gs_base) = syscall::user_bases();

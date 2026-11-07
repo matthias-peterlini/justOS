@@ -11,8 +11,10 @@
 //! the call fails with EINTR, or starts again after the handler if the
 //! handler asked for SA_RESTART. Faults (bad memory, invalid instructions,
 //! division by zero) become SIGSEGV, SIGBUS, SIGILL, SIGFPE or SIGTRAP for
-//! a program that handles them, a child's end sends SIGCHLD to its
-//! parent, and a write to a pipe nobody reads sends SIGPIPE. Signals that nobody handles do what Linux does by default: end
+//! a program that handles them, a seccomp filter can turn a system call into
+//! a SIGSYS, a child's end sends SIGCHLD to its parent, and a write to a
+//! pipe nobody reads sends SIGPIPE. Signals that nobody handles do what
+//! Linux does by default: end
 //! the process, or nothing. There is no job control: SIGSTOP and SIGTSTP
 //! do nothing.
 
@@ -43,6 +45,7 @@ const SIGTTIN: u32 = 21;
 const SIGTTOU: u32 = 22;
 const SIGURG: u32 = 23;
 const SIGWINCH: u32 = 28;
+pub const SIGSYS: u32 = 31;
 
 const SIG_DFL: u64 = 0;
 const SIG_IGN: u64 = 1;
@@ -442,8 +445,39 @@ pub fn fault(frame: &mut TrapFrame, cr2: u64) -> bool {
         17 => (SIGBUS, 1), // BUS_ADRALN
         _ => return false,
     };
+    let Some((a, restore, alt)) = take_now(sig) else { return false };
+    let mut i = info(sig, code, 0);
+    let addr = if frame.vector == 14 { cr2 } else { frame.rip };
+    i[16..24].copy_from_slice(&addr.to_le_bytes());
+    let p = Pending { sig, tid: Some(task::current_tid()), info: i };
+    let trap = (frame.vector, frame.error, cr2);
+    setup_frame(frame, &p, &a, restore, alt, Some(trap)).is_ok()
+}
+
+/// A seccomp filter turned system call `nr` into a SIGSYS (`data` is what
+/// the filter added): the call did not run, and the handler sees it as it
+/// was made, its number in rax and where it was made in the siginfo. False
+/// when nothing handles it (no handler, or SIGSYS blocked): the process
+/// ends, as on Linux.
+pub fn seccomp_trap(frame: &mut TrapFrame, nr: u64, data: u32, arch: u32) -> bool {
+    let Some((a, restore, alt)) = take_now(SIGSYS) else { return false };
+    const SYS_SECCOMP: i32 = 1;
+    let mut i = info(SIGSYS, SYS_SECCOMP, 0);
+    i[4..8].copy_from_slice(&data.to_le_bytes()); // si_errno
+    i[16..24].copy_from_slice(&frame.rip.to_le_bytes()); // si_call_addr
+    i[24..28].copy_from_slice(&(nr as u32).to_le_bytes()); // si_syscall
+    i[28..32].copy_from_slice(&arch.to_le_bytes()); // si_arch
+    frame.rax = nr;
+    let p = Pending { sig: SIGSYS, tid: Some(task::current_tid()), info: i };
+    setup_frame(frame, &p, &a, restore, alt, None).is_ok()
+}
+
+/// A signal the calling thread raised itself, to be handled right away: its
+/// action, the mask to put back and the alternate stack, with the mask for
+/// the handler set. None if it has no handler or is blocked.
+fn take_now(sig: u32) -> Option<(Act, u64, AltStack)> {
     let me = task::current_tid();
-    let ready = try_state(|st| {
+    try_state(|st| {
         if action(st, sig) != Action::Handle || mask_of(st, me) & bit(sig) != 0 {
             return None;
         }
@@ -456,14 +490,8 @@ pub fn fault(frame: &mut TrapFrame, cr2: u64) -> bool {
             st.sigactions[sig as usize] = [0; 32];
         }
         Some((a, restore, alt))
-    });
-    let Some(Some((a, restore, alt))) = ready else { return false };
-    let mut i = info(sig, code, 0);
-    let addr = if frame.vector == 14 { cr2 } else { frame.rip };
-    i[16..24].copy_from_slice(&addr.to_le_bytes());
-    let p = Pending { sig, tid: Some(me), info: i };
-    let trap = (frame.vector, frame.error, cr2);
-    setup_frame(frame, &p, &a, restore, alt, Some(trap)).is_ok()
+    })
+    .flatten()
 }
 
 // ----------------------------------------------------------------------------

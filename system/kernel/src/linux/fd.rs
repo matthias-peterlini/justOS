@@ -249,9 +249,59 @@ pub fn sys_eventfd2(init: u32, flags: u32) -> i64 {
 // ----------------------------------------------------------------------------
 // Opening
 
+/// A process's own /proc files: /proc/self/…, /proc/thread-self/… and
+/// /proc/<pid>/… of a running process (/proc/<pid>/task/<tid>/… are the
+/// process's): which process, and the name in its folder.
+fn proc_of(text: &str) -> Option<(u32, &str)> {
+    let (who, rest) = text.strip_prefix("/proc/")?.split_once('/')?;
+    let pid = match who {
+        "self" | "thread-self" => task::current_pid(),
+        n => n.parse().ok().filter(|&p| user::is_running(p))?,
+    };
+    let rest = match rest.strip_prefix("task/") {
+        Some(r) => r.split_once('/')?.1,
+        None => rest,
+    };
+    Some((pid, rest))
+}
+
+/// The files in a process's /proc folder.
+fn proc_file(pid: u32, name: &str) -> Option<String> {
+    let (prog, parent, threads) = user::proc_info(pid)?;
+    // The name as Linux keeps it ("comm"): at most 15 bytes.
+    let comm: String = prog.chars().take(15).collect();
+    Some(match name {
+        "maps" => {
+            let mut s = String::new();
+            for (a, b, prot, off, file) in super::mm::areas(pid) {
+                let r = |bit, c| if prot & bit != 0 { c } else { '-' };
+                let line = alloc::format!("{a:x}-{b:x} {}{}{}p {off:08x} 00:00 0", r(1, 'r'), r(2, 'w'), r(4, 'x'));
+                s.push_str(&alloc::format!("{line:<72} {file}\n"));
+            }
+            s
+        }
+        // One file system: GIO (through libmount) reads these to know the
+        // mounts it shows and watches.
+        "mounts" => String::from("/dev/root / justfs rw,relatime 0 0\n"),
+        "mountinfo" => String::from("1 1 0:1 / / rw,relatime shared:1 - justfs /dev/root rw\n"),
+        "cmdline" => alloc::format!("{prog}\0"),
+        "comm" => alloc::format!("{comm}\n"),
+        "stat" => alloc::format!("{pid} ({comm}) R {parent} {pid} {pid} 0 -1 0 0 0 0 0 0 0 0 0 20 0 {threads} 0 0 0 0\n"),
+        "status" => alloc::format!(
+            "Name:\t{comm}\nUmask:\t0022\nState:\tR (running)\nTgid:\t{pid}\nPid:\t{pid}\nPPid:\t{parent}\nTracerPid:\t0\n\
+             Uid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\nThreads:\t{threads}\nSeccomp:\t{}\n",
+            super::seccomp::mode_of(pid)
+        ),
+        _ => return None,
+    })
+}
+
 /// Contents of the virtual files, by Linux path.
 fn virtual_file(text: &str) -> Option<Kind> {
     let data = |s: String| Some(Kind::Virtual { data: s.into_bytes(), pos: IrqLock::new(0) });
+    if let Some((pid, name)) = proc_of(text) {
+        return proc_file(pid, name).and_then(data);
+    }
     match text {
         "/dev/null" => Some(Kind::Null),
         "/dev/zero" => Some(Kind::Zero),
@@ -265,26 +315,12 @@ fn virtual_file(text: &str) -> Option<Kind> {
         "/etc/passwd" => data(String::from("root:x:0:0:root:/home:/bin/sh\n")),
         "/etc/group" => data(String::from("root:x:0:\n")),
         "/etc/localtime" => None,
-        "/proc/self/maps" => {
-            let mut s = String::new();
-            for (a, b, prot, off, name) in super::mm::areas() {
-                let r = |bit, c| if prot & bit != 0 { c } else { '-' };
-                let line = alloc::format!("{a:x}-{b:x} {}{}{}p {off:08x} 00:00 0", r(1, 'r'), r(2, 'w'), r(4, 'x'));
-                s.push_str(&alloc::format!("{line:<72} {name}\n"));
-            }
-            data(s)
-        }
-        // One file system: GIO (through libmount) reads these to know the
-        // mounts it shows and watches.
-        "/proc/mounts" | "/proc/self/mounts" | "/etc/mtab" => data(String::from("/dev/root / justfs rw,relatime 0 0\n")),
-        "/proc/self/mountinfo" => data(String::from("1 1 0:1 / / rw,relatime shared:1 - justfs /dev/root rw\n")),
-        "/proc/self/cmdline" => data(alloc::format!("{}\0", user::current_name())),
+        "/proc/mounts" | "/etc/mtab" => proc_file(task::current_pid(), "mounts").and_then(data),
         "/proc/cpuinfo" => data(String::from("processor\t: 0\nmodel name\t: justOS virtual CPU\ncpu cores\t: 1\n\n")),
         "/proc/meminfo" => {
             let (free, total) = crate::mem::frame::stats();
             data(alloc::format!("MemTotal: {} kB\nMemFree: {} kB\nMemAvailable: {} kB\n", total / 1024, free / 1024, free / 1024))
         }
-        "/proc/self/stat" => data(alloc::format!("{} (prog) R 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 0 0 0\n", task::current_pid())),
         _ => None,
     }
 }
@@ -322,7 +358,7 @@ fn dir_join(dir: &Path, rel: &str) -> Path {
 /// Whether a Linux path names /proc/self/fd, the folder of the calling
 /// process's descriptors.
 fn is_proc_fd(text: &str) -> bool {
-    matches!(text.trim_end_matches('/'), "/proc/self/fd" | "/proc/thread-self/fd")
+    proc_of(text.trim_end_matches('/')) == Some((task::current_pid(), "fd"))
 }
 
 fn open_path(path: &Path, text: &str, flags: u32) -> i64 {
@@ -1009,10 +1045,14 @@ pub fn sys_renameat(olddir: i32, old: u64, newdir: i32, new: u64) -> i64 {
 
 pub fn sys_readlinkat(dirfd: i32, path_ptr: u64, buf: u64, cap: u64) -> i64 {
     let text = user::user_cstr(path_ptr, 4096).unwrap_or_default();
-    let target = match text.as_str() {
-        "/proc/self/exe" => super::exe_path(),
-        t if t.starts_with("/proc/self/fd/") => {
-            let n: i32 = t[14..].parse().unwrap_or(-1);
+    let me = task::current_pid();
+    let target = match proc_of(&text) {
+        Some((pid, "exe")) => match super::with_state_of(pid, |st| st.exe.clone()) {
+            Some(exe) => exe,
+            None => return -err::ENOENT,
+        },
+        Some((pid, fd)) if pid == me && fd.starts_with("fd/") => {
+            let n: i32 = fd[3..].parse().unwrap_or(-1);
             match get(n).map(|d| match &d.kind {
                 Kind::File { path, .. } | Kind::Dir { path, .. } => show_path(path),
                 Kind::Memfd { shm, .. } => shm.name.clone(),

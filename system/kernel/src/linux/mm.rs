@@ -555,10 +555,10 @@ pub fn describe(pid: u32, addr: u64) -> String {
     found.unwrap_or_else(|| alloc::format!("{addr:#x} (not mapped)"))
 }
 
-/// The areas, for /proc/self/maps, by address: start, end, protection,
-/// offset in the file and its name (or [heap], [stack]).
-pub fn areas() -> Vec<(u64, u64, u32, u64, String)> {
-    let mut out = with_state(|st| {
+/// The areas of process `pid`, for /proc/<pid>/maps, by address: start,
+/// end, protection, offset in the file and its name (or [heap], [stack]).
+pub fn areas(pid: u32) -> Vec<(u64, u64, u32, u64, String)> {
+    let mut out = super::with_state_of(pid, |st| {
         let mut out: Vec<(u64, u64, u32, u64, String)> = st.images.iter().map(|i| (i.start, i.end, i.prot, i.off, String::from(&*i.name))).collect();
         let heap_end = mem::align_up(st.brk_cur, PAGE_SIZE);
         if heap_end > st.brk_start {
@@ -576,7 +576,8 @@ pub fn areas() -> Vec<(u64, u64, u32, u64, String)> {
             out.push((s, v.end, v.prot, v.off, name));
         }
         out
-    });
+    })
+    .unwrap_or_default();
     out.sort_by_key(|a| a.0);
     out
 }

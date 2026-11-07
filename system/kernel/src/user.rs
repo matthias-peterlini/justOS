@@ -360,6 +360,12 @@ pub(crate) fn only_thread() -> bool {
     PROCS.lock().get(&pid).is_some_and(|p| p.threads.len() <= 1)
 }
 
+/// The threads of the calling process.
+pub(crate) fn threads() -> Vec<Tid> {
+    let pid = task::current_pid();
+    PROCS.lock().get(&pid).map(|p| p.threads.clone()).unwrap_or_default()
+}
+
 /// execve: the calling process gets a fresh, empty address space and the
 /// new program's name. The old memory is freed (or, for a vfork child,
 /// left to the parent, which stops waiting). The caller loads the program.
@@ -398,6 +404,12 @@ pub(crate) fn start_loaded(entry: u64, rsp: u64) -> ! {
 pub(crate) fn parent_pid() -> u32 {
     let pid = task::current_pid();
     PROCS.lock().get(&pid).and_then(|p| p.parent).unwrap_or(1)
+}
+
+/// What /proc shows of a running process: its name, its parent (as
+/// [`parent_pid`] says) and how many threads it has.
+pub(crate) fn proc_info(pid: u32) -> Option<(String, u32, usize)> {
+    PROCS.lock().get(&pid).filter(|p| p.state == State::Running).map(|p| (p.name.clone(), p.parent.unwrap_or(1), p.threads.len()))
 }
 
 /// wait4: a child of the calling process that has ended (`want`: that one,
