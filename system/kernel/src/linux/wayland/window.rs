@@ -6,8 +6,8 @@
 use crate::dev::input::KeyEvent;
 use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::wm::{Action, App};
-use crate::net::EVENTS;
 use crate::sync::{IrqLock, Mutex};
+use crate::task::WaitQueue;
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::string::String;
@@ -70,11 +70,13 @@ impl Win {
 /// Input of all the windows of one client.
 pub struct Inbox {
     pub queue: IrqLock<VecDeque<(u32, Input)>>,
+    /// Told when input comes: the client's thread waits on it.
+    pub wq: WaitQueue,
 }
 
 impl Inbox {
     pub fn new() -> Arc<Inbox> {
-        Arc::new(Inbox { queue: IrqLock::new(VecDeque::new()) })
+        Arc::new(Inbox { queue: IrqLock::new(VecDeque::new()), wq: WaitQueue::new() })
     }
 
     pub fn push(&self, id: u32, ev: Input) {
@@ -85,7 +87,7 @@ impl Inbox {
                 if *last_id == id {
                     *last = ev;
                     drop(q);
-                    EVENTS.notify_all();
+                    self.wq.notify_all();
                     return;
                 }
             }
@@ -93,7 +95,7 @@ impl Inbox {
                 q.push_back((id, ev));
             }
         }
-        EVENTS.notify_all();
+        self.wq.notify_all();
     }
 
     pub fn is_empty(&self) -> bool {

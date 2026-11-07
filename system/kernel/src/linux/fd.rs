@@ -12,7 +12,7 @@ use super::{err, errno, linux_path, show_path, user_bytes, with_state};
 use crate::fs::{self, Path};
 use crate::net::EVENTS;
 use crate::sync::IrqLock;
-use crate::task;
+use crate::task::{self, WaitQueue};
 use crate::user;
 use alloc::collections::VecDeque;
 use alloc::string::String;
@@ -36,6 +36,8 @@ pub struct Pipe {
     buf: IrqLock<VecDeque<u8>>,
     readers: AtomicU32,
     writers: AtomicU32,
+    /// Told whenever the pipe fills, empties or loses an end.
+    wq: Arc<WaitQueue>,
 }
 
 const PIPE_SIZE: usize = 64 * 1024;
@@ -43,6 +45,7 @@ const PIPE_SIZE: usize = 64 * 1024;
 pub struct EventFd {
     count: AtomicU64,
     semaphore: bool,
+    wq: Arc<WaitQueue>,
 }
 
 pub enum Kind {
@@ -94,11 +97,11 @@ impl Drop for Desc {
         match &self.kind {
             Kind::PipeRead(p) => {
                 p.readers.fetch_sub(1, Ordering::Relaxed);
-                EVENTS.notify_all();
+                p.wq.notify_all();
             }
             Kind::PipeWrite(p) => {
                 p.writers.fetch_sub(1, Ordering::Relaxed);
-                EVENTS.notify_all();
+                p.wq.notify_all();
             }
             Kind::Socket(s) => s.close(),
             Kind::Unix(u) => u.close(),
@@ -132,6 +135,16 @@ pub fn install_from(d: Arc<Desc>, cloexec: bool, min: i32) -> i64 {
         st.fds.insert(fd, (d, cloexec));
         fd as i64
     })
+}
+
+/// fsync, fdatasync, syncfs: what was written reaches the disk (only files
+/// have anything to write).
+pub fn sys_fsync(fd: i32) -> i64 {
+    let Some(d) = get(fd) else { return -err::EBADF };
+    if let Kind::File { path, .. } = &d.kind {
+        crate::fs::flush(path);
+    }
+    0
 }
 
 /// The justOS path behind a file descriptor (for `mmap` of a file).
@@ -212,7 +225,7 @@ pub fn sys_pipe2(ptr: u64, flags: u32) -> i64 {
         Ok(b) => b,
         Err(e) => return e,
     };
-    let p = Arc::new(Pipe { buf: IrqLock::new(VecDeque::new()), readers: AtomicU32::new(0), writers: AtomicU32::new(0) });
+    let p = Arc::new(Pipe { buf: IrqLock::new(VecDeque::new()), readers: AtomicU32::new(0), writers: AtomicU32::new(0), wq: Arc::default() });
     let nb = flags & O_NONBLOCK;
     let cloexec = flags & O_CLOEXEC != 0;
     let r = install(Desc::new(Kind::PipeRead(p.clone()), nb), cloexec);
@@ -224,7 +237,7 @@ pub fn sys_pipe2(ptr: u64, flags: u32) -> i64 {
 
 pub fn sys_eventfd2(init: u32, flags: u32) -> i64 {
     const EFD_SEMAPHORE: u32 = 1;
-    let e = Arc::new(EventFd { count: AtomicU64::new(init as u64), semaphore: flags & EFD_SEMAPHORE != 0 });
+    let e = Arc::new(EventFd { count: AtomicU64::new(init as u64), semaphore: flags & EFD_SEMAPHORE != 0, wq: Arc::default() });
     install(Desc::new(Kind::Event(e), O_RDWR | (flags & O_NONBLOCK)), flags & O_CLOEXEC != 0)
 }
 
@@ -301,13 +314,19 @@ fn dir_join(dir: &Path, rel: &str) -> Path {
     Path::parse(rel, dir).unwrap_or_else(|_| dir.clone())
 }
 
+/// Whether a Linux path names /proc/self/fd, the folder of the calling
+/// process's descriptors.
+fn is_proc_fd(text: &str) -> bool {
+    matches!(text.trim_end_matches('/'), "/proc/self/fd" | "/proc/thread-self/fd")
+}
+
 fn open_path(path: &Path, text: &str, flags: u32) -> i64 {
     let cloexec = flags & O_CLOEXEC != 0;
     let keep = flags & (O_NONBLOCK | O_APPEND | 3);
     if let Some(kind) = virtual_file(text) {
         return install(Desc::new(kind, keep), cloexec);
     }
-    if matches!(text.trim_end_matches('/'), "/proc/self/fd" | "/proc/thread-self/fd") {
+    if is_proc_fd(text) {
         // The open descriptors, as a folder of numbers (programs read it to
         // close what a child must not inherit).
         let mut names = vec![(String::from("."), true), (String::from(".."), true)];
@@ -361,7 +380,64 @@ pub fn wait_until(d: &Desc, mut ready: impl FnMut() -> bool) -> Result<(), i64> 
         if let Some(e) = super::signal::interrupted() {
             return Err(e);
         }
-        EVENTS.wait_for_timeout(20, || ready().then_some(()));
+        let w = Waits::of(&[d]);
+        w.wait(None, || ready().then_some(()));
+    }
+}
+
+/// What wakes a thread that waits for descriptors to change: the queues
+/// their sources tell, and for the rest, the network's queue or a look
+/// every few milliseconds (the console).
+#[derive(Default)]
+pub struct Waits {
+    queues: Vec<Arc<WaitQueue>>,
+    events: bool,
+    tick: bool,
+}
+
+/// How long a wait sleeps at most even when nothing tells it: a safety
+/// net (signals wake their thread; every source tells its queue).
+const NAP_MS: u64 = 200;
+
+impl Waits {
+    pub fn of(descs: &[&Desc]) -> Waits {
+        let mut w = Waits::default();
+        for d in descs {
+            w.add(d, 0);
+        }
+        w
+    }
+
+    /// Adds what wakes a wait on `d` (`depth`: epoll sets inside epoll
+    /// sets).
+    pub fn add(&mut self, d: &Desc, depth: u32) {
+        match &d.kind {
+            Kind::PipeRead(p) | Kind::PipeWrite(p) => self.queue(&p.wq),
+            Kind::Event(e) => self.queue(&e.wq),
+            Kind::Unix(u) => u.waits(self),
+            Kind::Epoll(e) if depth < 4 => e.waits(self, depth + 1),
+            Kind::Epoll(_) | Kind::Socket(_) => self.events = true,
+            Kind::Console => self.tick = true,
+            _ => {}
+        }
+    }
+
+    pub fn queue(&mut self, wq: &Arc<WaitQueue>) {
+        if !self.queues.iter().any(|x| Arc::ptr_eq(x, wq)) {
+            self.queues.push(wq.clone());
+        }
+    }
+
+    /// Sleeps until a source changes, `until` (uptime ms) comes or a short
+    /// while passes, unless `check` finds something first (see
+    /// [`task::wait_any`]).
+    pub fn wait<T>(&self, until: Option<u64>, check: impl FnOnce() -> Option<T>) -> Option<T> {
+        let mut refs: Vec<&WaitQueue> = self.queues.iter().map(|q| &**q).collect();
+        if self.events {
+            refs.push(&EVENTS);
+        }
+        let nap = crate::time::uptime_ms() + if self.tick { 10 } else { NAP_MS };
+        task::wait_any(&refs, Some(until.map_or(nap, |u| u.min(nap))), check)
     }
 }
 
@@ -412,7 +488,7 @@ pub fn read_desc(d: &Desc, buf: &mut [u8]) -> i64 {
                 *dst = src;
             }
             drop(q);
-            EVENTS.notify_all();
+            p.wq.notify_all();
             n as i64
         }
         Kind::Event(e) => {
@@ -429,7 +505,7 @@ pub fn read_desc(d: &Desc, buf: &mut [u8]) -> i64 {
                 e.count.swap(0, Ordering::Relaxed)
             };
             buf[..8].copy_from_slice(&v.to_le_bytes());
-            EVENTS.notify_all();
+            e.wq.notify_all();
             8
         }
         Kind::Memfd { shm, pos } => {
@@ -481,7 +557,7 @@ pub fn write_desc(d: &Desc, data: &[u8]) -> i64 {
                 q.extend(&data[done..done + n]);
                 done += n;
                 drop(q);
-                EVENTS.notify_all();
+                p.wq.notify_all();
             }
             done as i64
         }
@@ -491,7 +567,7 @@ pub fn write_desc(d: &Desc, data: &[u8]) -> i64 {
             }
             let v = u64::from_le_bytes(data[..8].try_into().unwrap());
             e.count.fetch_add(v, Ordering::Relaxed);
-            EVENTS.notify_all();
+            e.wq.notify_all();
             8
         }
         Kind::Memfd { shm, pos } => {
@@ -581,7 +657,8 @@ pub fn sys_pwrite(fd: i32, ptr: u64, len: u64, off: u64) -> i64 {
 pub fn sys_lseek(fd: i32, off: i64, whence: i32) -> i64 {
     let Some(d) = get(fd) else { return -err::EBADF };
     let (pos, size) = match &d.kind {
-        Kind::File { path, pos, .. } => (pos, fs::stat(path).map(|s| s.size).unwrap_or(0) as i64),
+        // The size only matters from the end (and costs a lookup).
+        Kind::File { path, pos, .. } => (pos, if whence == 2 { fs::stat(path).map(|s| s.size).unwrap_or(0) as i64 } else { 0 }),
         Kind::Virtual { data, pos } => (pos, data.len() as i64),
         Kind::Memfd { shm, pos } => (pos, shm.size() as i64),
         Kind::Dir { names, .. } => {
@@ -624,12 +701,7 @@ pub fn sys_ftruncate(fd: i32, len: u64) -> i64 {
 
 pub fn truncate_path(path: &Path, len: u64) -> i64 {
     super::mm::forget_file(path);
-    let mut data = match fs::read_file(path) {
-        Ok(d) => d,
-        Err(e) => return -errno(user::fs_error(e)),
-    };
-    data.resize(len as usize, 0);
-    match fs::write_file(path, &data) {
+    match fs::truncate(path, len) {
         Ok(()) => 0,
         Err(e) => -errno(user::fs_error(e)),
     }
@@ -658,6 +730,11 @@ pub fn lstat_of_path(path: &Path) -> Result<StatInfo, i64> {
 fn stat_info(path: &Path, st: Result<fs::Stat, justfs::Error>) -> Result<StatInfo, i64> {
     if matches!(st, Err(justfs::Error::NotFound)) && super::unix::is_bound(path) {
         return Ok(StatInfo { mode: 0o140777, size: 0, time: crate::time::unix_now(), ino: 4 });
+    }
+    // The generated folder of descriptors (glibc's opendir checks with
+    // fstat that it opened a folder).
+    if matches!(st, Err(justfs::Error::NotFound)) && is_proc_fd(&path.inner) {
+        return Ok(StatInfo { mode: 0o040500, size: 0, time: crate::time::unix_now(), ino: 6 });
     }
     let st = st.map_err(|e| -errno(user::fs_error(e)))?;
     // Names without an extension are programs (Linux ones are); the

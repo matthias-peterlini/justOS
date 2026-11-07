@@ -63,6 +63,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("ps", "", "running programs and threads"),
     ("kill", "<pid>", "stop a program"),
     ("cpus", "", "what each processor runs, and the TLB flushes programs cost"),
+    ("locks", "[reset]", "where the kernel waited for locks, and held its mutexes longest"),
     ("where", "<tid>|busy [samples]", "where a thread of a Linux program is (library+offset), sampled; busy: the four busiest"),
     ("ports", "", "named message ports and who owns them"),
     ("perms", "[allow|deny|ask <app> <perm>]", "what apps may use outside their sandbox"),
@@ -583,6 +584,27 @@ impl Shell {
                 }
                 let (flushes, ipis, spins) = crate::arch::smp::user_flush_stats();
                 println!("{ready} threads ready; program TLB flushes on other processors: {flushes} ({ipis} IPIs, {spins} spins waiting)");
+                let mut sig = [0u8; 12];
+                match crate::arch::cpu::hypervisor(&mut sig) {
+                    Some(h) => println!("hypervisor {h}{}", if crate::arch::cpu::emulated() { " (emulated: spin loops skip pause)" } else { "" }),
+                    None => println!("no hypervisor"),
+                }
+            }
+            "locks" => {
+                use crate::sync::contention::{HOLDS, WAITS};
+                if rest.first() == Some(&"reset") {
+                    WAITS.reset();
+                    HOLDS.reset();
+                } else {
+                    println!("  waits  Mcycles  place");
+                    for (at, waits, cycles) in WAITS.top(20) {
+                        println!("{waits:>7}  {:>7}  {}:{}", cycles / 1_000_000, at.file(), at.line());
+                    }
+                    println!("  holds  Mcycles  place (Mutex)");
+                    for (at, holds, cycles) in HOLDS.top(12) {
+                        println!("{holds:>7}  {:>7}  {}:{}", cycles / 1_000_000, at.file(), at.line());
+                    }
+                }
             }
             "where" => {
                 if need(1, "<tid> [samples]") {

@@ -186,6 +186,45 @@ pub fn cpuid(leaf: u32, sub: u32) -> CpuidResult {
     CpuidResult { eax: r.eax, ebx: r.ebx, ecx: r.ecx, edx: r.edx }
 }
 
+static EMULATED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// The hypervisor's signature (CPUID 0x40000000), if there is one:
+/// "TCGTCGTCGTCG" under QEMU's emulator, "KVMKVMKVM" under KVM.
+pub fn hypervisor(out: &mut [u8; 12]) -> Option<&str> {
+    if cpuid(1, 0).ecx & (1 << 31) == 0 {
+        return None;
+    }
+    let r = cpuid(0x4000_0000, 0);
+    out[0..4].copy_from_slice(&r.ebx.to_le_bytes());
+    out[4..8].copy_from_slice(&r.ecx.to_le_bytes());
+    out[8..12].copy_from_slice(&r.edx.to_le_bytes());
+    let len = out.iter().position(|&b| b == 0).unwrap_or(12);
+    core::str::from_utf8(&out[..len]).ok()
+}
+
+/// Notes whether the processor is emulated (QEMU's TCG): there `pause`
+/// stops the virtual processor and takes QEMU's global lock, which every
+/// other virtual processor needs for its devices and interrupts, so spin
+/// loops leave it out ([`relax`]).
+pub fn detect_emulation() {
+    let mut sig = [0u8; 12];
+    let tcg = hypervisor(&mut sig) == Some("TCGTCGTCGTCG");
+    EMULATED.store(tcg, core::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn emulated() -> bool {
+    EMULATED.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+/// One turn of a spin loop: `pause` on a real processor, nothing on an
+/// emulated one (see [`detect_emulation`]).
+#[inline]
+pub fn relax() {
+    if !emulated() {
+        core::hint::spin_loop();
+    }
+}
+
 /// The CPU brand string ("QEMU Virtual CPU", "Intel(R) Core(TM) ...").
 pub fn brand(out: &mut [u8; 48]) -> &str {
     if cpuid(0x8000_0000, 0).eax < 0x8000_0004 {

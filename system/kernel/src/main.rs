@@ -92,6 +92,7 @@ extern "C" fn kmain(boot_phys: u64) -> ! {
     sysupdate::init(boot.slot);
 
     cpu::enable_sse();
+    cpu::detect_emulation();
     gdt::init();
     arch::smp::init_bsp();
     idt::init();

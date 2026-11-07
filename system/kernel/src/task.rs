@@ -22,6 +22,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::arch::global_asm;
 use core::ffi::c_void;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 pub type Tid = u32;
 
@@ -100,6 +101,13 @@ struct Thread {
     /// Running on a processor, or not yet handed over after it stopped:
     /// its registers are not saved yet.
     on_cpu: bool,
+    /// Woken while it was not waiting: the next [`park`] returns at once.
+    wake_pending: bool,
+    /// Made suspended and not let go yet ([`wake_new`]): nothing else wakes
+    /// it (a signal for its process, say).
+    unstarted: bool,
+    /// Mutexes it holds, while it is not running (see [`HOLDING`]).
+    holding: u32,
 }
 
 impl Thread {
@@ -119,6 +127,9 @@ impl Thread {
             gs_base: 0,
             fpu: FpuArea::new(),
             on_cpu: false,
+            wake_pending: false,
+            unstarted: false,
+            holding: 0,
         }
     }
 
@@ -139,6 +150,8 @@ struct Cpu {
     current: Tid,
     idle: Tid,
     slice: u32,
+    /// Ticks the running thread kept past its slice because it held a mutex.
+    overtime: u32,
     /// The thread just switched away from, and whether it goes back in the
     /// ready queue (see [`after_switch`]).
     prev: Option<(Tid, bool)>,
@@ -186,7 +199,7 @@ static SCHED: IrqLock<Sched> = IrqLock::new(Sched {
     threads: BTreeMap::new(),
     ready: VecDeque::new(),
     sleepers: Vec::new(),
-    cpus: [Cpu { current: 0, idle: 0, slice: SLICE_TICKS, prev: None }; MAX_CPUS],
+    cpus: [Cpu { current: 0, idle: 0, slice: SLICE_TICKS, overtime: 0, prev: None }; MAX_CPUS],
     next_tid: 1,
     started: false,
 });
@@ -236,6 +249,58 @@ extern "C" fn thread_start(entry: Entry, arg: *mut c_void) -> ! {
     exit();
 }
 
+/// What each processor runs: the thread (low half) and its process (high
+/// half), so that [`current_tid`] and [`current_pid`], asked on nearly
+/// every system call, need not take the scheduler's lock.
+static RUNNING: [core::sync::atomic::AtomicU64; MAX_CPUS] = [const { core::sync::atomic::AtomicU64::new(0) }; MAX_CPUS];
+
+/// Mutexes the thread running on each processor holds: one that holds any
+/// keeps running past its slice for a while ([`OVERTIME_TICKS`]), since
+/// every thread that needs the mutex would wait for its next turn. Saved in
+/// the thread when it stops running and put back when it runs again.
+static HOLDING: [core::sync::atomic::AtomicU32; MAX_CPUS] = [const { core::sync::atomic::AtomicU32::new(0) }; MAX_CPUS];
+
+/// A processor whose thread kept running past its slice: it yields when it
+/// lets go of its last mutex.
+static OVERDUE: [AtomicBool; MAX_CPUS] = [const { AtomicBool::new(false) }; MAX_CPUS];
+
+/// How long a thread holding a mutex may run past its slice, at most.
+const OVERTIME_TICKS: u32 = 5;
+
+/// The running thread took a mutex.
+pub fn mutex_taken() {
+    let irq = cpu::irq_save();
+    HOLDING[smp::this_cpu()].fetch_add(1, Ordering::Relaxed);
+    cpu::irq_restore(irq);
+}
+
+/// The running thread let go of a mutex: if it ran past its slice and
+/// holds no other, others get their turn now (unless interrupts are off: a
+/// spinlock is held, and switching away from it could deadlock).
+pub fn mutex_released() {
+    let irq = cpu::irq_save();
+    let me = smp::this_cpu();
+    let last = HOLDING[me].fetch_sub(1, Ordering::Relaxed) == 1;
+    let overdue = last && irq && OVERDUE[me].swap(false, Ordering::Relaxed);
+    cpu::irq_restore(irq);
+    if overdue {
+        yield_now();
+    }
+}
+
+fn set_running(cpu: usize, tid: Tid, pid: u32) {
+    RUNNING[cpu].store((pid as u64) << 32 | tid as u64, core::sync::atomic::Ordering::Relaxed);
+}
+
+fn running() -> u64 {
+    // Interrupts off: the thread cannot move to another processor between
+    // asking which one it is on and reading.
+    let irq = cpu::irq_save();
+    let v = RUNNING[smp::this_cpu()].load(core::sync::atomic::Ordering::Relaxed);
+    cpu::irq_restore(irq);
+    v
+}
+
 /// Turns the boot code into thread 1 and creates the idle thread.
 pub fn init() {
     let mut s = SCHED.lock();
@@ -245,6 +310,7 @@ pub fn init() {
     init.on_cpu = true;
     s.threads.insert(tid, Box::new(init));
     s.cpus[0].current = tid;
+    set_running(0, tid, 0);
     drop(s);
     let idle = spawn_raw("idle", idle_main, core::ptr::null_mut()).expect("cannot create the idle thread");
     let mut s = SCHED.lock();
@@ -262,7 +328,8 @@ pub fn start_cpu(cpu: usize, stack: u64, pages: u64) {
     let mut idle = Thread::new(tid, "idle", State::Running);
     (idle.stack, idle.stack_pages, idle.on_cpu) = (stack, pages, true);
     s.threads.insert(tid, Box::new(idle));
-    s.cpus[cpu] = Cpu { current: tid, idle: tid, slice: SLICE_TICKS, prev: None };
+    s.cpus[cpu] = Cpu { current: tid, idle: tid, slice: SLICE_TICKS, overtime: 0, prev: None };
+    set_running(cpu, tid, 0);
 }
 
 unsafe extern "C" fn idle_main(_: *mut c_void) {
@@ -302,6 +369,7 @@ fn spawn_sized(name: &str, entry: Entry, arg: *mut c_void, cr3: u64, pid: u32, s
     s.next_tid += 1;
     let mut t = Thread::new(tid, name, if suspended { State::Blocked } else { State::Ready });
     (t.rsp, t.stack, t.stack_pages, t.cr3, t.pid) = (rsp, stack, pages, cr3, pid);
+    t.unstarted = suspended;
     s.threads.insert(tid, Box::new(t));
     if !suspended {
         s.ready.push_back(tid);
@@ -384,16 +452,19 @@ fn schedule() {
                 None => idle,
             };
             s.cpus[me].slice = SLICE_TICKS;
+            s.cpus[me].overtime = 0;
+            OVERDUE[me].store(false, Ordering::Relaxed);
             let n = s.threads.get_mut(&next).unwrap();
             n.state = State::Running;
             n.on_cpu = true;
             if next == cur {
                 None
             } else {
-                let (new_rsp, top, cr3, fs, gs, has_stack) = (n.rsp, n.stack_top(), n.cr3, n.fs_base, n.gs_base, n.stack != 0);
+                let (new_rsp, top, cr3, fs, gs, has_stack, pid, holding) = (n.rsp, n.stack_top(), n.cr3, n.fs_base, n.gs_base, n.stack != 0, n.pid, n.holding);
                 let new_fpu: *const FpuArea = &*n.fpu;
                 let c = s.threads.get_mut(&cur).unwrap();
                 (c.fs_base, c.gs_base) = syscall::user_bases();
+                c.holding = HOLDING[me].swap(holding, Ordering::Relaxed);
                 // SAFETY: the area is this thread's own aligned buffer.
                 unsafe { fxsave(&mut *c.fpu) };
                 // SAFETY: new_fpu is the next thread's aligned buffer; the
@@ -410,6 +481,7 @@ fn schedule() {
                     unsafe { smp::load_cr3(target) };
                 }
                 s.cpus[me].current = next;
+                set_running(me, next, pid);
                 s.cpus[me].prev = Some((cur, requeue));
                 let old_ptr: *mut u64 = &mut s.threads.get_mut(&cur).unwrap().rsp;
                 Some((old_ptr, new_rsp))
@@ -521,7 +593,15 @@ fn tick(wake_sleepers: bool) {
         let c = &mut s.cpus[me];
         c.slice = c.slice.saturating_sub(1);
         let leave = me != 0 && cur != c.idle && smp::parking();
-        leave || ((c.slice == 0 || cur == c.idle) && s.ready.iter().any(|&t| s.runnable_on(t, me)))
+        let others = (c.slice == 0 || cur == c.idle) && s.ready.iter().any(|&t| s.runnable_on(t, me));
+        let c = &mut s.cpus[me];
+        if !leave && others && cur != c.idle && HOLDING[me].load(Ordering::Relaxed) != 0 && c.overtime < OVERTIME_TICKS {
+            c.overtime += 1;
+            OVERDUE[me].store(true, Ordering::Relaxed);
+            false
+        } else {
+            leave || others
+        }
     };
     if preempt {
         schedule();
@@ -553,17 +633,19 @@ pub fn enter_address_space(cr3: u64) {
 
 /// The running thread.
 pub fn current_tid() -> Tid {
-    SCHED.lock().current()
+    running() as Tid
 }
 
 /// Lets a thread made with [`spawn_suspended`] run.
 pub fn wake_new(tid: Tid) {
+    if let Some(t) = SCHED.lock().threads.get_mut(&tid) {
+        t.unstarted = false;
+    }
     wake(tid);
 }
 
 pub fn current_pid() -> u32 {
-    let s = SCHED.lock();
-    s.threads.get(&s.current()).map(|t| t.pid).unwrap_or(0)
+    (running() >> 32) as u32
 }
 
 /// The process a thread belongs to.
@@ -610,15 +692,97 @@ fn unblock_current() {
     s.threads.get_mut(&cur).unwrap().state = State::Running;
 }
 
-/// Makes a waiting thread ready again.
+/// Makes a waiting thread ready again. A thread that is not waiting (it
+/// is about to) finds its next [`park`] return at once.
 pub fn wake(tid: Tid) {
     let mut s = SCHED.lock();
     if let Some(t) = s.threads.get_mut(&tid) {
+        if t.unstarted {
+            return;
+        }
         if t.state == State::Blocked || t.state == State::Sleeping {
             t.state = State::Ready;
             s.ready.push_back(tid);
+        } else {
+            t.wake_pending = true;
         }
     }
+}
+
+/// Wakes every waiting thread of process `pid` (a signal for the process:
+/// whichever thread can take it will).
+pub fn wake_process(pid: u32) {
+    let mut s = SCHED.lock();
+    let mut woken = Vec::new();
+    for t in s.threads.values_mut() {
+        if t.pid == pid && !t.unstarted && (t.state == State::Blocked || t.state == State::Sleeping) {
+            t.state = State::Ready;
+            woken.push(t.tid);
+        }
+    }
+    s.ready.extend(woken);
+}
+
+/// Forgets wake-ups that came before: the start of a [`park`] wait.
+pub fn clear_wake() {
+    let mut s = SCHED.lock();
+    let cur = s.current();
+    if let Some(t) = s.threads.get_mut(&cur) {
+        t.wake_pending = false;
+    }
+}
+
+/// Sleeps until [`wake`] or the uptime `until` (ms), unless woken since
+/// [`clear_wake`]. The waker changes what the thread waits for, then wakes
+/// it; the thread clears, makes itself findable (a queue, a list), looks
+/// at the condition and parks: a wake-up between looking and parking is
+/// not lost. Returns early now and then for no reason, so callers loop.
+pub fn park(until: Option<u64>) {
+    let irq = cpu::irq_save();
+    let blocked = {
+        let mut s = SCHED.lock();
+        let cur = s.current();
+        let started = s.started;
+        let t = s.threads.get_mut(&cur).unwrap();
+        if !started || core::mem::take(&mut t.wake_pending) {
+            false
+        } else {
+            match until {
+                Some(at) => {
+                    t.state = State::Sleeping;
+                    t.wake_at = at;
+                    s.sleepers.push(cur);
+                }
+                None => t.state = State::Blocked,
+            }
+            true
+        }
+    };
+    if blocked {
+        schedule();
+    }
+    cpu::irq_restore(irq);
+}
+
+/// Waits until one of `queues` is notified or the uptime `until` (ms)
+/// comes, unless `check` finds what the caller waits for (it runs as an
+/// ordinary call, once the thread is in every queue). Returns what `check`
+/// found; the caller loops (a notification says something changed, not
+/// what).
+pub fn wait_any<T>(queues: &[&WaitQueue], until: Option<u64>, check: impl FnOnce() -> Option<T>) -> Option<T> {
+    clear_wake();
+    let me = current_tid();
+    for q in queues {
+        q.waiters.lock().push_back(me);
+    }
+    let found = check();
+    if found.is_none() {
+        park(until);
+    }
+    for q in queues {
+        q.waiters.lock().retain(|&t| t != me);
+    }
+    found
 }
 
 /// A set of threads waiting for something to happen.

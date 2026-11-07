@@ -28,7 +28,6 @@ use super::fd::{Desc, Kind};
 use super::shm::Shm;
 use super::unix::{self, Conn};
 use crate::gui::gfx::{self, Canvas, Rect};
-use crate::net::EVENTS;
 use crate::sync::{IrqLock, Mutex};
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::string::String;
@@ -381,8 +380,10 @@ impl Client {
                 None => 1000,
             };
             {
+                // Asleep until the client writes or input comes.
                 let (conn, inbox) = (&self.conn, &self.inbox);
-                EVENTS.wait_for_timeout(wait, || (conn.ready() || !inbox.is_empty()).then_some(()));
+                let until = crate::time::uptime_ms() + wait;
+                crate::task::wait_any(&[conn.queue(), &inbox.wq], Some(until), || (conn.ready() || !inbox.is_empty()).then_some(()));
             }
             let open = self.conn.take(&mut self.inbuf, &mut self.infds);
             self.requests();

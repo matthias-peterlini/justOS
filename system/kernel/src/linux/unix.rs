@@ -11,9 +11,8 @@
 
 use super::fd::{self, Desc, Kind, O_NONBLOCK, O_RDWR};
 use super::{err, linux_path, user_bytes};
-use crate::net::EVENTS;
 use crate::sync::IrqLock;
-use crate::task;
+use crate::task::{self, WaitQueue};
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
@@ -244,6 +243,9 @@ pub struct Queue {
     shut_write: AtomicBool,
     /// No reader any more: writers get EPIPE.
     shut_read: AtomicBool,
+    /// Told whenever messages come or go, or an end shuts: readers and
+    /// writers of this direction wait on it.
+    wq: Arc<WaitQueue>,
 }
 
 impl Queue {
@@ -253,13 +255,14 @@ impl Queue {
             bytes: AtomicUsize::new(0),
             shut_write: AtomicBool::new(false),
             shut_read: AtomicBool::new(false),
+            wq: Arc::default(),
         })
     }
 
     fn push(&self, m: Msg) {
         self.bytes.fetch_add(m.data.len(), Ordering::Relaxed);
         self.msgs.lock().push_back(m);
-        EVENTS.notify_all();
+        self.wq.notify_all();
     }
 
     fn waiting(&self) -> usize {
@@ -302,7 +305,8 @@ impl Drop for End {
         self.tx.shut_write.store(true, Ordering::Relaxed);
         self.rx.shut_read.store(true, Ordering::Relaxed);
         self.rx.purge();
-        EVENTS.notify_all();
+        self.tx.wq.notify_all();
+        self.rx.wq.notify_all();
     }
 }
 
@@ -313,6 +317,8 @@ struct Listener {
     pid: u32,
     name: Name,
     closed: AtomicBool,
+    /// Told when connections come or are taken, and at close.
+    wq: Arc<WaitQueue>,
 }
 
 impl Listener {
@@ -320,7 +326,7 @@ impl Listener {
         self.closed.store(true, Ordering::Relaxed);
         let gone = core::mem::take(&mut *self.backlog.lock());
         drop(gone);
-        EVENTS.notify_all();
+        self.wq.notify_all();
     }
 }
 
@@ -332,7 +338,7 @@ pub struct KernelListener(Arc<Listener>);
 
 pub fn kernel_listen(path: &str) -> Result<KernelListener, i64> {
     let name = Name { key: Key::Path(String::from(path)), raw: path.as_bytes().to_vec() };
-    let l = Arc::new(Listener { backlog: IrqLock::new(VecDeque::new()), max: AtomicUsize::new(128), pid: 0, name, closed: AtomicBool::new(false) });
+    let l = Arc::new(Listener { backlog: IrqLock::new(VecDeque::new()), max: AtomicUsize::new(128), pid: 0, name, closed: AtomicBool::new(false), wq: Arc::default() });
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     register(&l.name.key, id, Bound::Listener(Arc::downgrade(&l)))?;
     // The listener lives as long as the kernel.
@@ -343,8 +349,8 @@ pub fn kernel_listen(path: &str) -> Result<KernelListener, i64> {
 impl KernelListener {
     /// The next connection, waiting up to `ms` milliseconds for one.
     pub fn accept(&self, ms: u64) -> Option<Conn> {
-        let end = EVENTS.wait_for_timeout(ms, || self.0.backlog.lock().pop_front())?;
-        EVENTS.notify_all();
+        let end = self.0.wq.wait_for_timeout(ms, || self.0.backlog.lock().pop_front())?;
+        self.0.wq.notify_all();
         Some(Conn { end })
     }
 }
@@ -358,6 +364,11 @@ impl Conn {
     /// The process that connected.
     pub fn peer_pid(&self) -> u32 {
         self.end.peer_pid
+    }
+
+    /// What is told when something arrives or the other end closes.
+    pub fn queue(&self) -> &WaitQueue {
+        &self.end.rx.wq
     }
 
     /// Something to read, or the other end closed.
@@ -377,7 +388,7 @@ impl Conn {
         }
         if n != 0 {
             self.end.rx.bytes.fetch_sub(n.min(self.end.rx.waiting()), Ordering::Relaxed);
-            EVENTS.notify_all();
+            self.end.rx.wq.notify_all();
         }
         !(self.end.rx.shut_write.load(Ordering::Relaxed) && self.end.rx.is_empty())
     }
@@ -473,16 +484,17 @@ fn nonblocking(d: &Desc, flags: u64) -> bool {
     d.nonblocking() || flags & MSG_DONTWAIT != 0
 }
 
-/// Waits a little for `ready`; the error a blocking call should stop with
-/// (EAGAIN when non-blocking, or a signal).
-fn pause(nb: bool, ready: impl Fn() -> bool) -> Result<(), i64> {
+/// Waits a little for `ready`, asleep until `wq` is told; the error a
+/// blocking call should stop with (EAGAIN when non-blocking, or a signal).
+fn pause(nb: bool, wq: &WaitQueue, ready: impl Fn() -> bool) -> Result<(), i64> {
     if nb {
         return Err(-err::EAGAIN);
     }
     if let Some(e) = super::signal::interrupted() {
         return Err(e);
     }
-    EVENTS.wait_for_timeout(50, || ready().then_some(()));
+    let nap = crate::time::uptime_ms() + 200;
+    task::wait_any(&[wq], Some(nap), || ready().then_some(()));
     Ok(())
 }
 
@@ -497,10 +509,24 @@ impl Unix {
             St::Dgram { rx, .. } => {
                 rx.shut_read.store(true, Ordering::Relaxed);
                 rx.purge();
+                rx.wq.notify_all();
             }
+            // A connection's end tells both directions as it goes.
             _ => {}
         }
-        EVENTS.notify_all();
+    }
+
+    /// What tells a thread waiting on this socket that it changed.
+    pub fn waits(&self, w: &mut fd::Waits) {
+        match &*self.state.lock() {
+            St::Connected(e) => {
+                w.queue(&e.rx.wq);
+                w.queue(&e.tx.wq);
+            }
+            St::Listening(l) => w.queue(&l.wq),
+            St::Dgram { rx, .. } => w.queue(&rx.wq),
+            St::Fresh | St::Closed => {}
+        }
     }
 
     pub fn bind(&self, addr: u64, len: u64) -> i64 {
@@ -549,6 +575,7 @@ impl Unix {
             pid: task::current_pid(),
             name: name.clone(),
             closed: AtomicBool::new(false),
+            wq: Arc::default(),
         });
         if let Err(e) = register(&name.key, self.id, Bound::Listener(Arc::downgrade(&l))) {
             return e;
@@ -603,11 +630,11 @@ impl Unix {
                 break;
             }
             let room = || l.closed.load(Ordering::Relaxed) || l.backlog.lock().len() < l.max.load(Ordering::Relaxed);
-            if let Err(e) = pause(d.nonblocking(), room) {
+            if let Err(e) = pause(d.nonblocking(), &l.wq, room) {
                 return e;
             }
         }
-        EVENTS.notify_all();
+        l.wq.notify_all();
         *self.state.lock() = St::Connected(mine);
         0
     }
@@ -621,11 +648,11 @@ impl Unix {
             if let Some(e) = l.backlog.lock().pop_front() {
                 break e;
             }
-            if let Err(e) = pause(d.nonblocking(), || !l.backlog.lock().is_empty()) {
+            if let Err(e) = pause(d.nonblocking(), &l.wq, || !l.backlog.lock().is_empty()) {
                 return e;
             }
         };
-        EVENTS.notify_all();
+        l.wq.notify_all();
         write_name(addr, lenp, end.peer_name.as_ref());
         let s = new_socket(self.ty, St::Connected(end));
         *s.name.lock() = Some(l.name.clone());
@@ -687,7 +714,7 @@ impl Unix {
                     return data.len() as i64;
                 }
                 let ready = || tx.shut_read.load(Ordering::Relaxed) || tx.waiting() + data.len() <= CAP;
-                if let Err(e) = pause(nb, ready) {
+                if let Err(e) = pause(nb, &tx.wq, ready) {
                     return e;
                 }
             }
@@ -706,7 +733,7 @@ impl Unix {
                 continue;
             }
             let ready = || tx.shut_read.load(Ordering::Relaxed) || tx.waiting() < CAP;
-            if let Err(e) = pause(nb, ready) {
+            if let Err(e) = pause(nb, &tx.wq, ready) {
                 return if done > 0 { done as i64 } else { e };
             }
         }
@@ -756,7 +783,7 @@ impl Unix {
                             got.fds = m.fds;
                         }
                         drop(q);
-                        EVENTS.notify_all();
+                        rx.wq.notify_all();
                         return Ok(got);
                     }
                 } else {
@@ -785,7 +812,7 @@ impl Unix {
                     let enough = got.n > 0 && (flags & MSG_WAITALL == 0 || got.n == buf.len() || !got.fds.is_empty() || peek);
                     drop(q);
                     if got.n > 0 {
-                        EVENTS.notify_all();
+                        rx.wq.notify_all();
                     }
                     if enough {
                         got.full = got.n;
@@ -799,7 +826,7 @@ impl Unix {
                 return Ok(got);
             }
             let ready = || !rx.is_empty() || rx.shut_write.load(Ordering::Relaxed);
-            if let Err(e) = pause(nb, ready) {
+            if let Err(e) = pause(nb, &rx.wq, ready) {
                 if got.n > 0 {
                     got.full = got.n;
                     return Ok(got);
@@ -830,7 +857,8 @@ impl Unix {
                 if how == 1 || how == 2 {
                     e.tx.shut_write.store(true, Ordering::Relaxed);
                 }
-                EVENTS.notify_all();
+                e.rx.wq.notify_all();
+                e.tx.wq.notify_all();
                 0
             }
             _ => -err::ENOTCONN,

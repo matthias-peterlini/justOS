@@ -603,7 +603,11 @@ pub(crate) fn terminate(code: i64) -> ! {
             }
             teardown(pid, cr3)
         }
-        None => task::exit(),
+        None => {
+            // The others stop as they leave their blocking calls.
+            task::wake_process(pid);
+            task::exit()
+        }
     }
 }
 
@@ -784,11 +788,14 @@ pub fn interrupt_foreground() -> bool {
     let stop: Vec<u32> = tree.into_iter().filter(|&id| !crate::linux::signal::interrupt(id)).collect();
     {
         let mut procs = PROCS.lock();
-        for id in stop {
+        for &id in &stop {
             if let Some(p) = procs.get_mut(&id) {
                 p.kill = true;
             }
         }
+    }
+    for id in stop {
+        task::wake_process(id);
     }
     EXITED.notify_all();
     true
@@ -796,6 +803,7 @@ pub fn interrupt_foreground() -> bool {
 
 /// Asks a process to stop, with the processes it made (fork) and theirs.
 pub fn kill(pid: u32) -> bool {
+    let mut killed = Vec::new();
     let found = {
         let mut procs = PROCS.lock();
         let found = procs.get(&pid).is_some_and(|p| p.state == State::Running);
@@ -804,13 +812,18 @@ pub fn kill(pid: u32) -> bool {
             if let Some(p) = procs.get_mut(&id) {
                 if p.state == State::Running {
                     p.kill = true;
+                    killed.push(id);
                 }
             }
             todo.extend(procs.iter().filter(|(_, c)| c.parent == Some(id)).map(|(&c, _)| c));
         }
         found
     };
-    // Wake those waiting for children or for a vfork child, so they see it.
+    // Their threads in blocking calls look at it now, and so do those
+    // waiting for children or for a vfork child.
+    for id in killed {
+        task::wake_process(id);
+    }
     EXITED.notify_all();
     found
 }
@@ -832,6 +845,7 @@ pub(crate) fn kill_one(pid: u32) {
             p.kill = true;
         }
     }
+    task::wake_process(pid);
     EXITED.notify_all();
 }
 

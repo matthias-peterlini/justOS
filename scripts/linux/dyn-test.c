@@ -13,6 +13,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <gnu/libc-version.h>
+#include <linux/futex.h>
 #include <poll.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -22,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/epoll.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
@@ -29,6 +31,7 @@
 #include <sys/syscall.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 extern char **environ;
@@ -121,6 +124,33 @@ static int reap(pid_t pid) {
     if (waitpid(pid, &st, 0) != pid)
         return -2;
     return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+}
+
+static long long now_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static int futex_word;
+static volatile long long futex_sent;
+
+static void *futex_waker(void *arg) {
+    (void)arg;
+    usleep(100000);
+    futex_sent = now_ns();
+    __atomic_store_n(&futex_word, 1, __ATOMIC_SEQ_CST);
+    syscall(SYS_futex, &futex_word, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
+    return NULL;
+}
+
+static void *sock_writer(void *arg) {
+    int fd = *(int *)arg;
+    usleep(100000);
+    long long t = now_ns();
+    if (write(fd, &t, sizeof t) != sizeof t)
+        return NULL;
+    return NULL;
 }
 
 static void *worker(void *arg) {
@@ -710,5 +740,62 @@ int main(int argc, char **argv) {
     usleep(300000);
     sem_post(sem);
     printf("dt: pshared semaphore exit=%d\n", reap(c13));
+
+    /* Waking is prompt: a process waiting in poll on a pipe, a thread in
+       epoll_wait on a local socket and one on a futex wake when the other
+       side acts, not at some later look. Each is measured from the moment
+       of the write (the worst of a few rounds). */
+    long long worst_pipe = 0, worst_unix = 0, worst_futex = 0, stamp = 0, d;
+    for (int round = 0; round < 4; round++) {
+        int wp[2];
+        if (pipe(wp) != 0)
+            return 1;
+        fflush(stdout);
+        pid_t c = fork();
+        if (c == 0) {
+            usleep(100000);
+            long long t = now_ns();
+            _exit(write(wp[1], &t, sizeof t) == sizeof t ? 0 : 1);
+        }
+        struct pollfd pf = {wp[0], POLLIN, 0};
+        if (poll(&pf, 1, 5000) == 1 && read(wp[0], &stamp, sizeof stamp) == sizeof stamp)
+            d = now_ns() - stamp;
+        else
+            d = 1LL << 40;
+        worst_pipe = d > worst_pipe ? d : worst_pipe;
+        reap(c);
+        close(wp[0]);
+        close(wp[1]);
+
+        int sp[2];
+        if (socketpair(AF_UNIX, SOCK_STREAM, 0, sp) != 0)
+            return 1;
+        int ep = epoll_create1(0);
+        struct epoll_event ev = {.events = EPOLLIN, .data.fd = sp[0]}, got;
+        epoll_ctl(ep, EPOLL_CTL_ADD, sp[0], &ev);
+        pthread_t th;
+        pthread_create(&th, NULL, sock_writer, &sp[1]);
+        if (epoll_wait(ep, &got, 1, 5000) == 1 && read(sp[0], &stamp, sizeof stamp) == sizeof stamp)
+            d = now_ns() - stamp;
+        else
+            d = 1LL << 40;
+        worst_unix = d > worst_unix ? d : worst_unix;
+        pthread_join(th, NULL);
+        close(ep);
+        close(sp[0]);
+        close(sp[1]);
+
+        futex_word = 0;
+        pthread_create(&th, NULL, futex_waker, NULL);
+        while (__atomic_load_n(&futex_word, __ATOMIC_SEQ_CST) == 0)
+            syscall(SYS_futex, &futex_word, FUTEX_WAIT_PRIVATE, 0, NULL, NULL, 0);
+        d = now_ns() - futex_sent;
+        worst_futex = d > worst_futex ? d : worst_futex;
+        pthread_join(th, NULL);
+    }
+    const long long fast = 100000000; /* 100 ms */
+    printf("dt: prompt wake pipe=%d unix=%d futex=%d\n", worst_pipe < fast, worst_unix < fast, worst_futex < fast);
+    if (getenv("DT_WAKE_MS"))
+        printf("dt: wake ms pipe=%lld unix=%lld futex=%lld\n", worst_pipe / 1000000, worst_unix / 1000000, worst_futex / 1000000);
     return 0;
 }

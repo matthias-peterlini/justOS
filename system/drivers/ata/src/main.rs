@@ -1,9 +1,12 @@
-//! ATA/IDE disk driver (PIO).
+//! ATA/IDE disk driver.
 //!
 //! Drives every hard disk on the two channels of an IDE controller, in
 //! compatibility (legacy ports) or native (PCI BARs) mode, with 28- and
-//! 48-bit addressing. Transfers use programmed I/O and polling, which is
-//! slow but works on every controller and in every emulator.
+//! 48-bit addressing. When the controller has a bus master (BAR 4) and the
+//! disk can do DMA, transfers go through a 64 KiB buffer the controller
+//! fills or empties by itself, and other threads run meanwhile; otherwise,
+//! or after a DMA error, they use programmed I/O, which is slow but works on
+//! every controller and in every emulator. Completion is polled.
 
 #![no_std]
 #![no_main]
@@ -13,12 +16,13 @@ extern crate alloc;
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
-use justdrv::{port, BlockDesc, DeviceInfo, Mutex, Status, E_INVAL, E_IO, E_NODEV, E_TIMEOUT, OK, RES_IO};
+use justdrv::{port, BlockDesc, DeviceInfo, Dma, Mutex, Status, E_INVAL, E_IO, E_NODEV, E_TIMEOUT, OK, RES_IO};
 use core::ffi::c_void;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 justdrv::driver! {
     name: "ata",
-    version: "1.1.0",
+    version: "1.2.0",
     probe: probe,
 }
 
@@ -46,10 +50,41 @@ const CMD_FLUSH: u8 = 0xE7;
 const CMD_FLUSH_EXT: u8 = 0xEA;
 const CMD_IDENTIFY: u8 = 0xEC;
 const CMD_STANDBY_IMMEDIATE: u8 = 0xE0;
+const CMD_READ_DMA: u8 = 0xC8;
+const CMD_READ_DMA_EXT: u8 = 0x25;
+const CMD_WRITE_DMA: u8 = 0xCA;
+const CMD_WRITE_DMA_EXT: u8 = 0x35;
+const CMD_SET_FEATURES: u8 = 0xEF;
+const FEATURE_TRANSFER_MODE: u8 = 0x03;
+
+// Bus master registers, from the channel's base in BAR 4.
+const BM_COMMAND: u16 = 0;
+const BM_STATUS: u16 = 2;
+const BM_PRDT: u16 = 4;
+const BM_START: u8 = 0x01;
+/// The controller writes to memory (a disk read).
+const BM_TO_MEMORY: u8 = 0x08;
+const BM_ACTIVE: u8 = 0x01;
+const BM_ERROR: u8 = 0x02;
+const BM_IRQ: u8 = 0x04;
+/// "Drive 0/1 can do DMA" bits, kept when the status is written.
+const BM_CAPABLE: u8 = 0x60;
+
+/// Sectors per DMA transfer (the size of the buffer).
+const DMA_SECTORS: u32 = 128;
+
+/// A channel's bus master: its registers, the table describing the buffer
+/// and the buffer.
+struct BusMaster {
+    base: u16,
+    prdt: Dma,
+    buf: Dma,
+}
 
 struct Channel {
     base: u16,
     ctrl: u16,
+    bm: Option<BusMaster>,
 }
 
 struct Disk {
@@ -57,6 +92,86 @@ struct Disk {
     slave: bool,
     lba48: bool,
     sectors: u64,
+    /// Transfers use the bus master (until one fails).
+    dma: AtomicBool,
+}
+
+/// How long [`poll`] keeps the processor before letting other threads run.
+const POLL_SPIN_MS: u64 = 20;
+
+/// Like [`justdrv::wait_until`], but lets other threads run when the drive
+/// is slow. Not at once: the caller holds the volume's lock, which every
+/// file system call waits for, and with many threads ready its turn would
+/// come back long after the transfer ended.
+fn poll(timeout_ms: u64, mut cond: impl FnMut() -> bool) -> bool {
+    let start = justdrv::time_ms();
+    loop {
+        if cond() {
+            return true;
+        }
+        let waited = justdrv::time_ms().saturating_sub(start);
+        if waited >= timeout_ms {
+            return cond();
+        }
+        if waited >= POLL_SPIN_MS {
+            justdrv::yield_now();
+        } else {
+            // A pause between looks that is neither `pause` nor a port
+            // access: both cost an emulator its global lock, which the
+            // transfer itself needs.
+            for i in 0..64u32 {
+                core::hint::black_box(i);
+            }
+        }
+    }
+}
+
+impl BusMaster {
+    fn new(base: u16) -> Option<BusMaster> {
+        Some(BusMaster { base, prdt: Dma::new(4096)?, buf: Dma::new(DMA_SECTORS as usize * 512)? })
+    }
+
+    /// Describes the first `bytes` of the buffer (entries that do not cross
+    /// a 64 KiB boundary, the last one marked) and stops the bus master.
+    fn prepare(&self, bytes: usize, write: bool) {
+        let mut phys = self.buf.phys();
+        let end = phys + bytes as u64;
+        let mut i = 0;
+        while phys < end {
+            let next = ((phys >> 16) + 1) << 16;
+            let len = next.min(end) - phys;
+            let last = next >= end;
+            self.prdt.write::<u32>(i * 8, phys as u32);
+            // A length of 0 means 64 KiB.
+            self.prdt.write::<u32>(i * 8 + 4, (len as u32 & 0xFFFF) | if last { 1 << 31 } else { 0 });
+            phys += len;
+            i += 1;
+        }
+        let dir = if write { 0 } else { BM_TO_MEMORY };
+        port::outb(self.base + BM_COMMAND, dir);
+        let st = port::inb(self.base + BM_STATUS);
+        port::outb(self.base + BM_STATUS, (st & BM_CAPABLE) | BM_ERROR | BM_IRQ);
+        port::outl(self.base + BM_PRDT, self.prdt.phys() as u32);
+    }
+
+    /// Starts the transfer the drive was just told about and waits for it.
+    fn run(&self, ch: &Channel, write: bool) -> Status {
+        let dir = if write { 0 } else { BM_TO_MEMORY };
+        port::outb(self.base + BM_COMMAND, dir | BM_START);
+        let mut st = 0;
+        let ended = poll(10_000, || {
+            st = port::inb(self.base + BM_STATUS);
+            st & BM_ACTIVE == 0 || st & BM_ERROR != 0
+        });
+        let drive = if ended { ch.wait_not_busy(5000) } else { Err(E_TIMEOUT) };
+        port::outb(self.base + BM_COMMAND, dir);
+        port::outb(self.base + BM_STATUS, (st & BM_CAPABLE) | BM_ERROR | BM_IRQ);
+        match drive {
+            Err(e) => e,
+            Ok(s) if s & (ERR | DF) != 0 || st & BM_ERROR != 0 => E_IO,
+            Ok(_) => OK,
+        }
+    }
 }
 
 impl Channel {
@@ -129,6 +244,29 @@ impl Channel {
         }
     }
 
+    /// Picks the fastest DMA mode the drive offers (Ultra DMA, else
+    /// multiword DMA); false if it has none or refuses.
+    fn set_dma_mode(&self, slave: bool, id: &[u16; 256]) -> bool {
+        if id[49] & (1 << 8) == 0 {
+            return false;
+        }
+        let udma = id[88] & 0x7F;
+        let mwdma = id[63] & 0x07;
+        let mode = if id[53] & (1 << 2) != 0 && udma != 0 {
+            0x40 | (15 - udma.leading_zeros()) as u8
+        } else if mwdma != 0 {
+            0x20 | (15 - mwdma.leading_zeros()) as u8
+        } else {
+            return false;
+        };
+        self.select(slave, 0);
+        port::outb(self.base + ERROR, FEATURE_TRANSFER_MODE);
+        port::outb(self.base + COUNT, mode);
+        port::outb(self.base + COMMAND, CMD_SET_FEATURES);
+        self.delay();
+        matches!(self.wait_not_busy(2000), Ok(s) if s & (ERR | DF) == 0)
+    }
+
     /// IDENTIFY DEVICE: 256 words, or None for no (or a non-ATA) drive.
     fn identify(&self, slave: bool) -> Option<[u16; 256]> {
         self.select(slave, 0);
@@ -159,6 +297,56 @@ impl Disk {
             return E_INVAL;
         }
         let ch = self.channel.lock();
+        if let Some(bm) = ch.bm.as_ref().filter(|_| self.dma.load(Ordering::Relaxed)) {
+            let st = self.transfer_dma(&ch, bm, lba, count, buf, write);
+            if st == OK {
+                return OK;
+            }
+            justdrv::warn!("DMA {} at sector {lba} failed ({st}): programmed I/O from now on", if write { "write" } else { "read" });
+            self.dma.store(false, Ordering::Relaxed);
+        }
+        self.transfer_pio(&ch, lba, count, buf, write)
+    }
+
+    fn transfer_dma(&self, ch: &Channel, bm: &BusMaster, lba: u64, count: u32, buf: *mut u8, write: bool) -> Status {
+        let mut done = 0u32;
+        while done < count {
+            let n = (count - done).min(DMA_SECTORS);
+            let at = lba + done as u64;
+            let bytes = n as usize * 512;
+            // SAFETY: the kernel passes a buffer of `count` sectors.
+            let part = unsafe { core::slice::from_raw_parts_mut(buf.add(done as usize * 512), bytes) };
+            if write {
+                bm.buf.as_mut_slice()[..bytes].copy_from_slice(part);
+            }
+            let lba48 = self.lba48 && at + n as u64 > 1 << 28;
+            if let Err(e) = ch.wait_not_busy(5000) {
+                return e;
+            }
+            bm.prepare(bytes, write);
+            ch.setup(self.slave, at, n, lba48);
+            port::outb(
+                ch.base + COMMAND,
+                match (write, lba48) {
+                    (false, false) => CMD_READ_DMA,
+                    (false, true) => CMD_READ_DMA_EXT,
+                    (true, false) => CMD_WRITE_DMA,
+                    (true, true) => CMD_WRITE_DMA_EXT,
+                },
+            );
+            let st = bm.run(ch, write);
+            if st != OK {
+                return st;
+            }
+            if !write {
+                part.copy_from_slice(&bm.buf.as_slice()[..bytes]);
+            }
+            done += n;
+        }
+        OK
+    }
+
+    fn transfer_pio(&self, ch: &Channel, lba: u64, count: u32, buf: *mut u8, write: bool) -> Status {
         let mut done = 0u32;
         while done < count {
             let lba48 = self.lba48 && (lba + done as u64 + 256 > 1 << 28 || count - done > 256);
@@ -296,17 +484,20 @@ fn probe(dev: &DeviceInfo) -> Status {
     // prog-if bit 0/2: channel in native mode, ports in the BARs.
     let primary = if dev.prog_if & 1 != 0 { (io(0), io(1).map(|p| p + 2)) } else { (Some(0x1F0), Some(0x3F6)) };
     let secondary = if dev.prog_if & 4 != 0 { (io(2), io(3).map(|p| p + 2)) } else { (Some(0x170), Some(0x376)) };
-    justdrv::Pci(dev.id).enable(true, false, false);
+    // BAR 4: the bus master's registers, 8 bytes per channel.
+    let bm_base = io(4);
+    justdrv::Pci(dev.id).enable(true, false, bm_base.is_some());
 
     let mut found = 0;
     let mut ctl = Controller { channels: Vec::new(), disks: Vec::new() };
-    for (base, ctrl) in [primary, secondary] {
+    for (i, (base, ctrl)) in [primary, secondary].into_iter().enumerate() {
         let (Some(base), Some(ctrl)) = (base, ctrl) else { continue };
-        let channel = Channel { base, ctrl };
+        let channel = Channel { base, ctrl, bm: None };
         if channel.status() == 0xFF {
             continue; // floating bus: nothing attached
         }
         port::outb(ctrl, 0x02); // no interrupts: we poll
+        let channel = Channel { bm: bm_base.and_then(|b| BusMaster::new(b + 8 * i as u16)), ..channel };
         let channel: &'static Mutex<Channel> = Box::leak(Box::new(Mutex::new(channel)));
         ctl.channels.push(channel);
         for slave in [false, true] {
@@ -320,7 +511,12 @@ fn probe(dev: &DeviceInfo) -> Status {
             if sectors == 0 {
                 continue;
             }
-            let disk: &'static Disk = Box::leak(Box::new(Disk { channel, slave, lba48, sectors }));
+            let dma = {
+                let ch = channel.lock();
+                ch.bm.is_some() && ch.set_dma_mode(slave, &id)
+            };
+            justdrv::info!("{} {}: {} MiB, {}", if i == 0 { "primary" } else { "secondary" }, if slave { "slave" } else { "master" }, sectors / 2048, if dma { "DMA" } else { "programmed I/O" });
+            let disk: &'static Disk = Box::leak(Box::new(Disk { channel, slave, lba48, sectors, dma: AtomicBool::new(dma) }));
             let desc: &'static BlockDesc = Box::leak(Box::new(BlockDesc {
                 ctx: disk as *const Disk as *mut c_void,
                 sector_size: 512,

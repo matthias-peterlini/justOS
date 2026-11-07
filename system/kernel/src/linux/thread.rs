@@ -8,7 +8,7 @@ use crate::arch::cpu;
 use crate::arch::idt::TrapFrame;
 use crate::mem::paging;
 use crate::sync::IrqLock;
-use crate::task::{self, Tid, WaitQueue};
+use crate::task::{self, Tid};
 use crate::user;
 use alloc::vec::Vec;
 
@@ -170,7 +170,6 @@ struct Waiter {
 }
 
 static WAITERS: IrqLock<Vec<Waiter>> = IrqLock::new(Vec::new());
-static FUTEX_QUEUE: WaitQueue = WaitQueue::new();
 
 const FUTEX_WAIT: u64 = 0;
 const FUTEX_WAKE: u64 = 1;
@@ -219,11 +218,12 @@ fn futex_wake(key: Key, n: u32, bitset: u32) -> i64 {
             if !x.woken && x.key == key && x.bitset & bitset != 0 {
                 x.woken = true;
                 count += 1;
+                // Under the lock: the waiter is still waiting (it leaves
+                // the list under it), so the wake-up cannot reach it later
+                // in some other wait.
+                task::wake(x.tid);
             }
         }
-    }
-    if count > 0 {
-        FUTEX_QUEUE.notify_all();
     }
     count as i64
 }
@@ -253,6 +253,9 @@ fn futex_wait(addr: u64, shared: bool, val: u32, deadline: Option<u64>, bitset: 
     }
     let woken = |me: Tid| WAITERS.lock().iter().any(|x| x.tid == me && x.woken);
     let result = loop {
+        // futex_wake marks the entry, then wakes the thread: cleared before
+        // looking, a wake-up that comes before parking makes it return.
+        task::clear_wake();
         if woken(me) {
             break 0;
         }
@@ -263,8 +266,9 @@ fn futex_wait(addr: u64, shared: bool, val: u32, deadline: Option<u64>, bitset: 
         if let Some(e) = super::signal::interrupted_then(|| WAITERS.lock().retain(|x| x.tid != me)) {
             break e;
         }
-        let slice = deadline.map_or(100, |d| (d - now).clamp(1, 100));
-        FUTEX_QUEUE.wait_for_timeout(slice, || woken(me).then_some(()));
+        // Signals wake the thread too; the nap is only a safety net.
+        let nap = now + 500;
+        task::park(Some(deadline.map_or(nap, |d| d.min(nap))));
     };
     WAITERS.lock().retain(|x| x.tid != me);
     result
@@ -348,7 +352,7 @@ pub fn sys_futex(addr: u64, op: u64, val: u64, ts: u64, addr2: u64, val3: u64) -
                 // SAFETY: four mapped, aligned bytes of the program's memory.
                 let word = unsafe { &*(b.as_ptr() as *const core::sync::atomic::AtomicU32) };
                 let order = core::sync::atomic::Ordering::SeqCst;
-                let r = word.fetch_update(order, order, |old| {
+                let r = word.try_update(order, order, |old| {
                     Some(match opcode & 7 {
                         0 => oparg,
                         1 => old.wrapping_add(oparg),

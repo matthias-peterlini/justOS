@@ -233,7 +233,7 @@ pub fn shootdown() {
         let mut spins = 0u64;
         while c.tlb_seen.load(Ordering::Acquire) < gen && c.online.load(Ordering::Acquire) && spins < 200_000_000 {
             service();
-            core::hint::spin_loop();
+            cpu::relax();
             spins += 1;
         }
     }
@@ -287,7 +287,7 @@ pub fn shootdown_user(pml4: u64) {
         let start = spins;
         while asked[i] != 0 && loaded_elsewhere(c, me, i, pml4) && c.flush_done.load(Ordering::Acquire) < asked[i] && spins - start < 200_000_000 {
             service();
-            core::hint::spin_loop();
+            cpu::relax();
             spins += 1;
         }
     }
@@ -314,7 +314,7 @@ pub fn wait_unloaded(pml4: u64) {
     for (i, c) in CPUS.iter().enumerate() {
         while loaded_elsewhere(c, me, i, pml4) {
             service();
-            core::hint::spin_loop();
+            cpu::relax();
         }
     }
 }
@@ -517,7 +517,7 @@ fn park_here(index: usize) {
     ONLINE.fetch_sub(1, Ordering::AcqRel);
     PARKED.fetch_add(1, Ordering::AcqRel);
     while PARK.load(Ordering::Acquire) {
-        core::hint::spin_loop();
+        cpu::relax();
     }
     // Woken without sleeping: the kernel's mappings may have changed.
     me.tlb_seen.store(TLB_GEN.load(Ordering::Acquire), Ordering::Release);

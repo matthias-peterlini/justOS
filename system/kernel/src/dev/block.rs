@@ -325,7 +325,8 @@ fn scan_gpt(disk: &Arc<Disk>) -> Vec<Arc<Disk>> {
 }
 
 /// JustFS on top of a disk or partition: 4 KiB blocks over its sectors,
-/// with the blocks used last kept in memory.
+/// with the blocks used last kept in memory and writes held back until a
+/// flush.
 pub struct DiskBlocks {
     pub disk: Arc<Disk>,
     cache: BlockCache,
@@ -339,14 +340,29 @@ impl DiskBlocks {
 
 /// Blocks read or written last, so that walking a path or reading a file
 /// again does not go to the disk each time: JustFS reads a folder's node and
-/// all its entries for every name on a path. Writes go to the disk at once
-/// and update their copy (nothing is held back). Sets of [`WAYS`] blocks,
-/// the newest first; a block can only be in the set its number picks.
+/// all its entries for every name on a path. Written blocks stay here
+/// (dirty) until the volume is flushed (by its flusher within a second, by
+/// fsync, at shutdown) or until they make room for another block: a file
+/// written a little at a time, and the nodes and bitmap blocks every write
+/// changes, go to the disk once. Sets of [`WAYS`] blocks, the newest first;
+/// a block can only be in the set its number picks.
 struct BlockCache {
-    sets: Vec<Vec<(u64, alloc::boxed::Box<justfs::Block>)>>,
+    sets: Vec<Vec<Entry>>,
+}
+
+struct Entry {
+    block: u64,
+    data: alloc::boxed::Box<justfs::Block>,
+    /// Changed since it was read from or written to the disk.
+    dirty: bool,
 }
 
 const WAYS: usize = 4;
+/// Blocks a flush writes with one command, when they follow each other.
+const FLUSH_RUN: usize = 16;
+/// Blocks a miss reads with one command: the block and those after it that
+/// are not here either (files are mostly runs of blocks, read forward).
+const READ_AHEAD: u64 = 8;
 
 impl BlockCache {
     /// A thirty-second of the memory, between 1 and 64 MiB.
@@ -356,34 +372,111 @@ impl BlockCache {
         BlockCache { sets: (0..blocks / WAYS).map(|_| Vec::new()).collect() }
     }
 
-    fn set(&mut self, block: u64) -> &mut Vec<(u64, alloc::boxed::Box<justfs::Block>)> {
+    fn set(&mut self, block: u64) -> &mut Vec<Entry> {
         let n = self.sets.len() as u64;
         &mut self.sets[(block % n) as usize]
     }
 
     fn get(&mut self, block: u64, buf: &mut justfs::Block) -> bool {
         let set = self.set(block);
-        let Some(i) = set.iter().position(|(b, _)| *b == block) else { return false };
+        let Some(i) = set.iter().position(|e| e.block == block) else { return false };
         let hit = set.remove(i);
-        buf.copy_from_slice(&hit.1[..]);
+        buf.copy_from_slice(&hit.data[..]);
         set.insert(0, hit);
         true
     }
 
-    fn put(&mut self, block: u64, data: &justfs::Block) {
+    fn contains(&mut self, block: u64) -> bool {
+        self.set(block).iter().any(|e| e.block == block)
+    }
+
+    /// The dirty block that keeping `block` would push out, if any.
+    fn dirty_victim(&mut self, block: u64) -> Option<&mut Entry> {
         let set = self.set(block);
-        let mut entry = match set.iter().position(|(b, _)| *b == block) {
-            Some(i) => set.remove(i),
-            None if set.len() == WAYS => set.pop().unwrap(),
-            None => (block, alloc::boxed::Box::new([0u8; justfs::BLOCK_SIZE])),
+        if set.len() < WAYS || set.iter().any(|e| e.block == block) {
+            return None;
+        }
+        set.last_mut().filter(|e| e.dirty)
+    }
+
+    /// Keeps `data` as `block` (dirty: not on the disk yet). Whatever it
+    /// pushes out must be clean ([`dirty_victim`](Self::dirty_victim)).
+    fn put(&mut self, block: u64, data: &justfs::Block, dirty: bool) {
+        let set = self.set(block);
+        let mut entry = match set.iter().position(|e| e.block == block) {
+            Some(i) => {
+                let e = set.remove(i);
+                Entry { dirty: e.dirty || dirty, ..e }
+            }
+            None if set.len() == WAYS => Entry { block, dirty, ..set.pop().unwrap() },
+            None => Entry { block, data: alloc::boxed::Box::new([0u8; justfs::BLOCK_SIZE]), dirty },
         };
-        entry.0 = block;
-        entry.1.copy_from_slice(data);
+        entry.data.copy_from_slice(data);
         set.insert(0, entry);
     }
 
-    fn forget(&mut self, block: u64) {
-        self.set(block).retain(|(b, _)| *b != block);
+    /// Where the dirty blocks are (set, way), in block order.
+    fn dirty(&self) -> Vec<(u64, usize, usize)> {
+        let mut v: Vec<_> = self
+            .sets
+            .iter()
+            .enumerate()
+            .flat_map(|(s, set)| set.iter().enumerate().filter(|(_, e)| e.dirty).map(move |(w, e)| (e.block, s, w)))
+            .collect();
+        v.sort_unstable();
+        v
+    }
+}
+
+impl DiskBlocks {
+    fn sectors_per_block(&self) -> u64 {
+        justfs::BLOCK_SIZE as u64 / self.disk.sector_size as u64
+    }
+
+    /// Writes out the block that keeping `block` would push out, if it was
+    /// not on the disk yet.
+    fn make_room(&mut self, block: u64) -> justfs::Result<()> {
+        let per = self.sectors_per_block();
+        let disk = &self.disk;
+        if let Some(e) = self.cache.dirty_victim(block) {
+            if disk.write(e.block * per, &e.data[..]) != OK {
+                return Err(justfs::Error::Io);
+            }
+            e.dirty = false;
+        }
+        Ok(())
+    }
+
+    /// Writes every dirty block, those that follow each other together.
+    fn write_dirty(&mut self) -> justfs::Result<()> {
+        let per = self.sectors_per_block();
+        let dirty = self.cache.dirty();
+        let mut buf = Vec::with_capacity(FLUSH_RUN * justfs::BLOCK_SIZE);
+        let mut failed = false;
+        let mut i = 0;
+        while i < dirty.len() {
+            let mut n = 1;
+            while i + n < dirty.len() && n < FLUSH_RUN && dirty[i + n].0 == dirty[i].0 + n as u64 {
+                n += 1;
+            }
+            buf.clear();
+            for &(_, s, w) in &dirty[i..i + n] {
+                buf.extend_from_slice(&self.cache.sets[s][w].data[..]);
+            }
+            if self.disk.write(dirty[i].0 * per, &buf) == OK {
+                for &(_, s, w) in &dirty[i..i + n] {
+                    self.cache.sets[s][w].dirty = false;
+                }
+            } else {
+                failed = true;
+            }
+            i += n;
+        }
+        if failed {
+            Err(justfs::Error::Io)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -392,32 +485,49 @@ impl justfs::BlockDevice for DiskBlocks {
         if self.cache.get(block, buf) {
             return Ok(());
         }
-        let per = justfs::BLOCK_SIZE as u64 / self.disk.sector_size as u64;
-        if self.disk.read(block * per, buf) == OK {
-            self.cache.put(block, buf);
-            Ok(())
-        } else {
-            Err(justfs::Error::Io)
+        self.make_room(block)?;
+        let per = self.sectors_per_block();
+        let max = READ_AHEAD.min(self.block_count().saturating_sub(block)).max(1);
+        let mut n = 1;
+        while n < max && !self.cache.contains(block + n) {
+            n += 1;
         }
+        let bs = justfs::BLOCK_SIZE;
+        let mut run = alloc::vec![0u8; n as usize * bs];
+        if self.disk.read(block * per, &mut run) != OK {
+            return Err(justfs::Error::Io);
+        }
+        buf.copy_from_slice(&run[..bs]);
+        self.cache.put(block, buf, false);
+        for i in 1..n {
+            if self.make_room(block + i).is_err() {
+                break;
+            }
+            let data: &justfs::Block = run[i as usize * bs..(i as usize + 1) * bs].try_into().unwrap();
+            self.cache.put(block + i, data, false);
+        }
+        Ok(())
     }
 
     fn write_block(&mut self, block: u64, buf: &justfs::Block) -> justfs::Result<()> {
-        let per = justfs::BLOCK_SIZE as u64 / self.disk.sector_size as u64;
-        if self.disk.write(block * per, buf) == OK {
-            self.cache.put(block, buf);
-            Ok(())
-        } else {
-            // What the disk holds now is not known.
-            self.cache.forget(block);
-            Err(justfs::Error::Io)
+        if self.disk.readonly {
+            return Err(justfs::Error::Io);
         }
+        self.make_room(block)?;
+        self.cache.put(block, buf, true);
+        Ok(())
     }
 
     fn block_count(&self) -> u64 {
         self.disk.size_bytes() / justfs::BLOCK_SIZE as u64
     }
 
+    fn write_back(&mut self) -> justfs::Result<()> {
+        self.write_dirty()
+    }
+
     fn flush(&mut self) -> justfs::Result<()> {
+        self.write_dirty()?;
         if self.disk.flush() == OK {
             Ok(())
         } else {

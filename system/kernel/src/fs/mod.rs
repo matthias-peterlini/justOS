@@ -16,10 +16,12 @@
 use crate::dev::block::{Disk, DiskBlocks};
 use crate::sync::{IrqLock, Mutex};
 use alloc::boxed::Box;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use justfs::{BlockDevice, DirEntry, Fs, Kind, MemDisk};
+use core::sync::atomic::{AtomicBool, Ordering};
+use justfs::{BlockDevice, DirEntry, Fs, Kind, MemDisk, NodeId};
 
 pub use justfs::Error;
 
@@ -41,6 +43,107 @@ pub struct Volume {
     /// Disk the volume lives on ("memory" for RAM volumes).
     pub source: String,
     fs: Mutex<Fs<Box<dyn BlockDevice + Send>>>,
+    /// Changed since it was last flushed (see [`changed`]).
+    dirty: AtomicBool,
+    /// Only used with `fs` locked.
+    names: IrqLock<Names>,
+    /// The disk under it (not for volumes in memory).
+    disk: Option<Arc<Disk>>,
+}
+
+type VolFs = Fs<Box<dyn BlockDevice + Send>>;
+
+/// Paths looked up before, so that most calls on a path do not walk its
+/// folders again: JustFS reads the entries of each folder on the way, and
+/// programs ask about the same paths over and over. A path found stays right
+/// until a name goes away or moves; a path not found until a name is added.
+/// Paths whose last link is followed ([`Follow::Yes`]) and paths whose last
+/// link is not are kept apart.
+#[derive(Default)]
+struct Names {
+    found: [BTreeMap<String, NodeId>; 2],
+    missing: [BTreeSet<String>; 2],
+}
+
+/// Paths kept, at most, of each kind.
+const NAMES_MAX: usize = 4096;
+
+/// Whether a link at the end of a path is followed.
+#[derive(Clone, Copy)]
+enum Follow {
+    Yes = 0,
+    No = 1,
+}
+
+/// The node at `path` in `v`, whose file system `fs` is (locked): from the
+/// names known, or found and then known. The names lock is not held while
+/// the folders are read (the disk may be slow, and that lock keeps
+/// interrupts off); the volume's lock keeps the names right meanwhile.
+fn find(v: &Volume, fs: &mut VolFs, path: &str, follow: Follow) -> Result<NodeId> {
+    if let Some(known) = v.names.lock().get(follow, path) {
+        return known;
+    }
+    let found = match follow {
+        Follow::Yes => fs.lookup(path),
+        Follow::No => fs.lookup_link(path),
+    };
+    v.names.lock().put(follow, path, &found);
+    found
+}
+
+/// The folder `path` is in, and its last name (like `Fs::lookup_parent`,
+/// through the names known).
+fn find_parent<'p>(v: &Volume, fs: &mut VolFs, path: &'p str) -> Result<(NodeId, &'p str)> {
+    let path = path.trim_end_matches('/');
+    let (dir, name) = path.rsplit_once('/').unwrap_or(("", path));
+    justfs::valid_name(name)?;
+    Ok((find(v, fs, dir, Follow::Yes)?, name))
+}
+
+impl Names {
+    fn get(&self, follow: Follow, path: &str) -> Option<Result<NodeId>> {
+        let k = follow as usize;
+        if let Some(&id) = self.found[k].get(path) {
+            return Some(Ok(id));
+        }
+        self.missing[k].contains(path).then_some(Err(Error::NotFound))
+    }
+
+    fn put(&mut self, follow: Follow, path: &str, found: &Result<NodeId>) {
+        let k = follow as usize;
+        match *found {
+            Ok(id) => {
+                if self.found[k].len() >= NAMES_MAX {
+                    self.found[k].clear();
+                }
+                self.found[k].insert(String::from(path), id);
+            }
+            Err(Error::NotFound) => {
+                if self.missing[k].len() >= NAMES_MAX {
+                    self.missing[k].clear();
+                }
+                self.missing[k].insert(String::from(path));
+            }
+            Err(_) => {}
+        }
+    }
+
+    /// A name was added.
+    fn added(&mut self) {
+        self.missing.iter_mut().for_each(BTreeSet::clear);
+    }
+
+    /// Node `id` lost its name. Paths through a removed link or folder may
+    /// lead elsewhere now, so they all go then.
+    fn removed(&mut self, id: NodeId, kind: Kind) {
+        for found in &mut self.found {
+            if kind == Kind::File {
+                found.retain(|_, n| *n != id);
+            } else {
+                found.clear();
+            }
+        }
+    }
 }
 
 impl Volume {
@@ -64,9 +167,17 @@ pub fn volume(name: &str) -> Option<Arc<Volume>> {
     VOLUMES.lock().iter().find(|v| v.name.eq_ignore_ascii_case(name)).cloned()
 }
 
-fn mount(name: &str, source: &str, fs: Fs<Box<dyn BlockDevice + Send>>) -> Arc<Volume> {
+fn mount(name: &str, source: &str, disk: Option<Arc<Disk>>, fs: Fs<Box<dyn BlockDevice + Send>>) -> Arc<Volume> {
     let label = fs.superblock().label.clone();
-    let v = Arc::new(Volume { name: String::from(name), label, source: String::from(source), fs: Mutex::new(fs) });
+    let v = Arc::new(Volume {
+        name: String::from(name),
+        label,
+        source: String::from(source),
+        fs: Mutex::new(fs),
+        dirty: AtomicBool::new(false),
+        names: IrqLock::new(Names::default()),
+        disk,
+    });
     VOLUMES.lock().push(v.clone());
     crate::info!("fs", "mounted {}: ({}, {})", v.name, if v.label.is_empty() { "no label" } else { &v.label }, source);
     v
@@ -106,7 +217,7 @@ pub fn mount_boot_pack(phys: u64, size: u64) {
     let disk = MemDisk { data: bytes.to_vec(), read_only: true };
     match Fs::mount(Box::new(disk) as Box<dyn BlockDevice + Send>, &CLOCK) {
         Ok(fs) => {
-            mount("boot", "memory", fs);
+            mount("boot", "memory", None, fs);
         }
         Err(e) => crate::error!("fs", "boot pack: {e}"),
     }
@@ -120,7 +231,7 @@ pub fn mount_live_system(phys: u64, size: u64) {
     let disk = MemDisk { data: bytes.to_vec(), read_only: false };
     match Fs::mount(Box::new(disk) as Box<dyn BlockDevice + Send>, &CLOCK) {
         Ok(fs) => {
-            mount("sys", "memory (live CD)", fs);
+            mount("sys", "memory (live CD)", None, fs);
         }
         Err(e) => crate::error!("fs", "live system volume: {e}"),
     }
@@ -131,7 +242,7 @@ pub fn mount_ram(bytes: usize) {
     let disk = MemDisk::new(bytes / justfs::BLOCK_SIZE);
     match Fs::format(Box::new(disk) as Box<dyn BlockDevice + Send>, "RAM", &CLOCK) {
         Ok(fs) => {
-            mount("ram", "memory", fs);
+            mount("ram", "memory", None, fs);
         }
         Err(e) => crate::error!("fs", "RAM disk: {e}"),
     }
@@ -150,7 +261,7 @@ pub fn offer(disk: &Arc<Disk>) {
     match Fs::mount(Box::new(dev) as Box<dyn BlockDevice + Send>, &CLOCK) {
         Ok(fs) => {
             let name = name_for(&fs.superblock().label.clone(), &disk.name);
-            mount(&name, &disk.name, fs);
+            mount(&name, &disk.name, Some(disk.clone()), fs);
         }
         Err(e) => crate::warn!("fs", "{}: JustFS volume not mounted: {e}", disk.name),
     }
@@ -186,16 +297,59 @@ pub fn format(disk: &Arc<Disk>, label: &str) -> Result<String> {
     let dev = DiskBlocks::new(disk.clone());
     let fs = Fs::format(Box::new(dev) as Box<dyn BlockDevice + Send>, label, &CLOCK)?;
     let name = name_for(label, &disk.name);
-    mount(&name, &disk.name, fs);
+    mount(&name, &disk.name, Some(disk.clone()), fs);
     Ok(name)
 }
 
 /// Flushes every volume.
 pub fn sync_all() {
     for v in volumes() {
+        v.dirty.store(false, Ordering::SeqCst);
         if let Err(e) = v.fs.lock().sync() {
             crate::warn!("fs", "{}: {e}", v.name);
         }
+    }
+}
+
+/// Notes a change. Its blocks are on the disk already; the superblock and
+/// the disk's write cache are flushed within a second by the flusher
+/// thread, or at once by [`flush`] (fsync) and [`sync_all`] (shutdown), not
+/// after every write: a flush makes the disk write out its cache, and a
+/// program like Firefox writes thousands of times.
+fn changed(v: &Volume) -> Result<()> {
+    static FLUSHER: AtomicBool = AtomicBool::new(false);
+    v.dirty.store(true, Ordering::SeqCst);
+    if !FLUSHER.swap(true, Ordering::SeqCst) {
+        crate::task::spawn("fs-flush", || loop {
+            crate::task::sleep_ms(1000);
+            for v in volumes() {
+                flush_volume(&v);
+            }
+        });
+    }
+    Ok(())
+}
+
+/// Writes out what changed on the volume and has its disk make it durable.
+/// Only the writing holds the volume: a disk takes a while to empty its
+/// cache, and programs like Firefox fsync many times a second.
+fn flush_volume(v: &Volume) {
+    if v.dirty.swap(false, Ordering::SeqCst) {
+        let written = v.fs.lock().write_back();
+        let flushed = match (&written, &v.disk) {
+            (Ok(()), Some(disk)) if disk.flush() != justdk::OK => Err(Error::Io),
+            _ => written,
+        };
+        if let Err(e) = flushed {
+            crate::warn!("fs", "{}: {e}", v.name);
+        }
+    }
+}
+
+/// Makes what was written to the volume of `path` reach the disk (fsync).
+pub fn flush(path: &Path) {
+    if let Ok(v) = vol(path) {
+        flush_volume(&v);
     }
 }
 
@@ -304,7 +458,7 @@ pub struct Stat {
 pub fn stat(path: &Path) -> Result<Stat> {
     let v = vol(path)?;
     let mut fs = v.fs.lock();
-    let id = fs.lookup(&path.inner)?;
+    let id = find(&v, &mut fs, &path.inner, Follow::Yes)?;
     let n = fs.node(id)?;
     Ok(Stat { kind: n.kind, size: n.size, modified: n.modified, node: id, hidden: n.flags & justfs::FLAG_HIDDEN != 0 })
 }
@@ -314,7 +468,7 @@ pub fn stat(path: &Path) -> Result<Stat> {
 pub fn lstat(path: &Path) -> Result<Stat> {
     let v = vol(path)?;
     let mut fs = v.fs.lock();
-    let id = fs.lookup_link(&path.inner)?;
+    let id = find(&v, &mut fs, &path.inner, Follow::No)?;
     let n = fs.node(id)?;
     Ok(Stat { kind: n.kind, size: n.size, modified: n.modified, node: id, hidden: n.flags & justfs::FLAG_HIDDEN != 0 })
 }
@@ -324,14 +478,15 @@ pub fn symlink(path: &Path, target: &str) -> Result<()> {
     let v = vol(path)?;
     let mut fs = v.fs.lock();
     fs.symlink(&path.inner, target)?;
-    fs.sync()
+    v.names.lock().added();
+    changed(&v)
 }
 
 /// Where the symbolic link at `path` points.
 pub fn read_link(path: &Path) -> Result<String> {
     let v = vol(path)?;
     let mut fs = v.fs.lock();
-    let id = fs.lookup_link(&path.inner)?;
+    let id = find(&v, &mut fs, &path.inner, Follow::No)?;
     fs.read_link(id)
 }
 
@@ -346,21 +501,29 @@ pub fn is_dir(path: &Path) -> bool {
 pub fn read_file(path: &Path) -> Result<Vec<u8>> {
     let v = vol(path)?;
     let mut fs = v.fs.lock();
-    fs.read_file(&path.inner)
+    let id = find(&v, &mut fs, &path.inner, Follow::Yes)?;
+    fs.read_all(id)
 }
 
 pub fn write_file(path: &Path, data: &[u8]) -> Result<()> {
     let v = vol(path)?;
     let mut fs = v.fs.lock();
-    fs.write_file(&path.inner, data)?;
-    fs.sync()
+    let known = find(&v, &mut fs, &path.inner, Follow::Yes);
+    match known {
+        Ok(id) if !fs.node(id)?.is_dir() => fs.write_all(id, data)?,
+        _ => {
+            fs.write_file(&path.inner, data)?;
+            v.names.lock().added();
+        }
+    }
+    changed(&v)
 }
 
 /// Reads up to `buf.len()` bytes at `offset`.
 pub fn read_at(path: &Path, offset: u64, buf: &mut [u8]) -> Result<usize> {
     let v = vol(path)?;
     let mut fs = v.fs.lock();
-    let id = fs.lookup(&path.inner)?;
+    let id = find(&v, &mut fs, &path.inner, Follow::Yes)?;
     fs.read(id, offset, buf)
 }
 
@@ -368,39 +531,54 @@ pub fn read_at(path: &Path, offset: u64, buf: &mut [u8]) -> Result<usize> {
 pub fn write_at(path: &Path, offset: u64, data: &[u8]) -> Result<()> {
     let v = vol(path)?;
     let mut fs = v.fs.lock();
-    let id = match fs.lookup(&path.inner) {
+    let known = find(&v, &mut fs, &path.inner, Follow::Yes);
+    let id = match known {
         Ok(id) => id,
         Err(Error::NotFound) => {
-            let (dir, name) = fs.lookup_parent(&path.inner)?;
-            fs.create(dir, name, Kind::File)?
+            let (dir, name) = find_parent(&v, &mut fs, &path.inner)?;
+            let id = fs.create(dir, name, Kind::File)?;
+            v.names.lock().added();
+            id
         }
         Err(e) => return Err(e),
     };
     fs.write(id, offset, data)?;
-    fs.sync()
+    changed(&v)
+}
+
+/// Sets a file's size: cuts it, or adds zeros.
+pub fn truncate(path: &Path, len: u64) -> Result<()> {
+    let v = vol(path)?;
+    let mut fs = v.fs.lock();
+    let id = find(&v, &mut fs, &path.inner, Follow::Yes)?;
+    fs.truncate(id, len)?;
+    changed(&v)
 }
 
 /// Appends to a file, creating it if needed.
 pub fn append_file(path: &Path, data: &[u8]) -> Result<()> {
     let v = vol(path)?;
     let mut fs = v.fs.lock();
-    let id = match fs.lookup(&path.inner) {
+    let known = find(&v, &mut fs, &path.inner, Follow::Yes);
+    let id = match known {
         Ok(id) => id,
         Err(Error::NotFound) => {
-            let (dir, name) = fs.lookup_parent(&path.inner)?;
-            fs.create(dir, name, Kind::File)?
+            let (dir, name) = find_parent(&v, &mut fs, &path.inner)?;
+            let id = fs.create(dir, name, Kind::File)?;
+            v.names.lock().added();
+            id
         }
         Err(e) => return Err(e),
     };
     let size = fs.node(id)?.size;
     fs.write(id, size, data)?;
-    fs.sync()
+    changed(&v)
 }
 
 pub fn list_dir(path: &Path) -> Result<Vec<(DirEntry, Stat)>> {
     let v = vol(path)?;
     let mut fs = v.fs.lock();
-    let id = fs.lookup(&path.inner)?;
+    let id = find(&v, &mut fs, &path.inner, Follow::Yes)?;
     let mut out = Vec::new();
     for e in fs.read_dir(id)? {
         // A link is listed as what it points to (a dangling one as a link),
@@ -409,7 +587,7 @@ pub fn list_dir(path: &Path) -> Result<Vec<(DirEntry, Stat)>> {
         let mut node = e.node;
         if e.kind == Kind::Link {
             let full = alloc::format!("{}/{}", path.inner.trim_end_matches('/'), e.name);
-            node = fs.lookup(&full).unwrap_or(e.node);
+            node = find(&v, &mut fs, &full, Follow::Yes).unwrap_or(e.node);
         }
         let n = fs.node(node)?;
         out.push((e, Stat { kind: n.kind, size: n.size, modified: n.modified, node, hidden }));
@@ -421,16 +599,24 @@ pub fn list_dir(path: &Path) -> Result<Vec<(DirEntry, Stat)>> {
 pub fn make_dir(path: &Path) -> Result<()> {
     let v = vol(path)?;
     let mut fs = v.fs.lock();
+    let known = find(&v, &mut fs, &path.inner, Follow::Yes);
+    if known.is_ok_and(|id| fs.node(id).is_ok_and(|n| n.is_dir())) {
+        return Ok(());
+    }
     fs.create_dirs(&path.inner)?;
-    fs.sync()
+    v.names.lock().added();
+    changed(&v)
 }
 
 pub fn remove(path: &Path) -> Result<()> {
     let v = vol(path)?;
     let mut fs = v.fs.lock();
-    let (dir, name) = fs.lookup_parent(&path.inner)?;
+    let (dir, name) = find_parent(&v, &mut fs, &path.inner)?;
+    let id = fs.find(dir, name)?;
+    let kind = fs.node(id)?.kind;
     fs.remove(dir, name)?;
-    fs.sync()
+    v.names.lock().removed(id, kind);
+    changed(&v)
 }
 
 /// Removes a file or a folder with everything in it (a link to a folder
@@ -451,10 +637,17 @@ pub fn rename(from: &Path, to: &Path) -> Result<()> {
     }
     let v = vol(from)?;
     let mut fs = v.fs.lock();
-    let (dir, name) = fs.lookup_parent(&from.inner)?;
-    let (new_dir, new_name) = fs.lookup_parent(&to.inner)?;
+    let (dir, name) = find_parent(&v, &mut fs, &from.inner)?;
+    let (new_dir, new_name) = find_parent(&v, &mut fs, &to.inner)?;
+    let id = fs.find(dir, name)?;
+    let kind = fs.node(id)?.kind;
     fs.rename(dir, name, new_dir, new_name)?;
-    fs.sync()
+    // The old name went away, a new one came.
+    let mut names = v.names.lock();
+    names.removed(id, kind);
+    names.added();
+    drop(names);
+    changed(&v)
 }
 
 /// Copies a file (across volumes too).

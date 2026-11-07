@@ -225,8 +225,13 @@ fn send(pid: u32, tid: Option<Tid>, sig: u32, info: [u8; 32]) -> bool {
         }
         return true;
     }
-    // A thread waiting for a child should see the signal.
+    // A thread waiting for a child should see the signal, and so should
+    // the thread it is for, or any of the process's, in a blocking call.
     user::wake_waiters();
+    match tid {
+        Some(t) => task::wake(t),
+        None => task::wake_process(pid),
+    }
     true
 }
 

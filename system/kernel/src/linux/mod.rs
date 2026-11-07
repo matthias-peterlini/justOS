@@ -730,7 +730,12 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         62 => signal::sys_kill(a[0] as i64, a[1]),
         63 => sys_uname(a[0]),
         72 => fd::sys_fcntl(fd0, a[1], a[2]),
-        73 | 74 | 75 => 0, // flock, fsync, fdatasync
+        73 => 0, // flock
+        74 | 75 | 306 => fd::sys_fsync(fd0), // fsync, fdatasync, syncfs
+        162 => {
+            crate::fs::sync_all();
+            0
+        }
         76 => match linux_arg_path(a[0]) {
             Ok(p) => fd::truncate_path(&p, a[1]),
             Err(e) => e,
@@ -1155,16 +1160,20 @@ fn sys_fchdir(fd: i32) -> i64 {
 
 /// Sleeps; false if a signal handler is to run first (the call fails
 /// with EINTR).
-fn sleep_interruptible(mut ms: u64) -> bool {
-    while ms > 0 {
+fn sleep_interruptible(ms: u64) -> bool {
+    // A signal wakes the thread (also one another thread takes): the time
+    // left is measured again after every wake-up.
+    let until = crate::time::uptime_ms().saturating_add(ms);
+    loop {
         if signal::interrupted().is_some() {
             return false;
         }
-        let step = ms.min(50);
-        task::sleep_ms(step);
-        ms -= step;
+        let now = crate::time::uptime_ms();
+        if now >= until {
+            return true;
+        }
+        task::sleep_ms((until - now).min(1000));
     }
-    true
 }
 
 fn read_timespec(ptr: u64) -> Result<(u64, u64), i64> {

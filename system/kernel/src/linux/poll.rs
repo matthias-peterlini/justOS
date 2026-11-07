@@ -4,14 +4,16 @@
 //! on descriptors that are always ready, like files: there the one edge is
 //! when the watch is set, as on Linux, and they are reported once).
 //!
-//! Every source of readiness (network, pipes, eventfds) signals the one
-//! queue [`crate::net::EVENTS`]; the console is looked at every few
-//! milliseconds.
+//! A waiting thread sleeps on the queues of the descriptors it waits for
+//! (pipes, eventfds and local sockets each tell their own, see
+//! [`fd::Waits`]), so that a change wakes only the threads it concerns;
+//! network sockets share [`crate::net::EVENTS`], and the console is looked
+//! at every few milliseconds.
 
 use super::fd::{self, Desc, Kind};
 use super::{err, user_bytes};
-use crate::net::EVENTS;
 use crate::sync::IrqLock;
+use crate::task::WaitQueue;
 use alloc::collections::BTreeMap;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
@@ -33,15 +35,14 @@ const EPOLLONESHOT: u32 = 1 << 30;
 const EPOLLET: u32 = 1 << 31;
 
 /// Waits until `check` returns something, or the timeout (ms; negative:
-/// forever) runs out.
-fn wait<T>(timeout_ms: i64, mut check: impl FnMut() -> Option<T>) -> Result<Option<T>, i64> {
-    let start = crate::time::uptime_ms();
+/// forever) runs out, asleep until one of `descs` changes.
+fn wait<T>(descs: &[&Desc], timeout_ms: i64, mut check: impl FnMut() -> Option<T>) -> Result<Option<T>, i64> {
+    let deadline = (timeout_ms >= 0).then(|| crate::time::uptime_ms() + timeout_ms as u64);
     loop {
         if let Some(v) = check() {
             return Ok(Some(v));
         }
-        let elapsed = (crate::time::uptime_ms() - start) as i64;
-        if timeout_ms >= 0 && elapsed >= timeout_ms {
+        if deadline.is_some_and(|d| crate::time::uptime_ms() >= d) {
             return Ok(None);
         }
         // A signal handler to run: poll, select and epoll_wait fail with
@@ -49,8 +50,10 @@ fn wait<T>(timeout_ms: i64, mut check: impl FnMut() -> Option<T>) -> Result<Opti
         if super::signal::interrupted().is_some() {
             return Err(-err::EINTR);
         }
-        let slice = if timeout_ms < 0 { 10 } else { (timeout_ms - elapsed).clamp(1, 10) as u64 };
-        EVENTS.wait_for_timeout(slice, || None::<()>);
+        // Looked at again for each sleep: an epoll set may have changed.
+        if let Some(v) = fd::Waits::of(descs).wait(deadline, &mut check) {
+            return Ok(Some(v));
+        }
     }
 }
 
@@ -82,7 +85,8 @@ pub fn sys_poll(ptr: u64, n: u64, timeout_ms: i64) -> i64 {
     };
     let entries: Vec<(i32, u16)> = fds.chunks(8).map(|c| (i32::from_le_bytes(c[0..4].try_into().unwrap()), u16::from_le_bytes([c[4], c[5]]))).collect();
     let descs: Vec<Option<Arc<Desc>>> = entries.iter().map(|&(f, _)| if f < 0 { None } else { fd::get(f) }).collect();
-    let r = wait(timeout_ms, || {
+    let refs: Vec<&Desc> = descs.iter().flatten().map(|d| &**d).collect();
+    let r = wait(&refs, timeout_ms, || {
         let mut count = 0;
         let mut out = Vec::with_capacity(entries.len());
         for (i, &(f, want)) in entries.iter().enumerate() {
@@ -151,7 +155,8 @@ pub fn sys_select(n: u64, rd: u64, wr: u64, ex: u64, timeout_ms: i64) -> i64 {
             }
         }
     }
-    let r = wait(timeout_ms, || {
+    let refs: Vec<&Desc> = descs.values().map(|d| &**d).collect();
+    let r = wait(&refs, timeout_ms, || {
         let (mut r1, mut w1) = (alloc::vec![0u8; bytes], alloc::vec![0u8; bytes]);
         let mut count = 0;
         for (&i, d) in &descs {
@@ -219,9 +224,21 @@ struct Watch {
 
 pub struct Epoll {
     watches: IrqLock<BTreeMap<i32, Watch>>,
+    /// Told when the set changes.
+    wq: Arc<WaitQueue>,
 }
 
 impl Epoll {
+    /// What wakes a wait on this set: its own queue (the set changed) and
+    /// what wakes a wait on each armed descriptor in it.
+    pub fn waits(&self, w: &mut fd::Waits, depth: u32) {
+        w.queue(&self.wq);
+        let list: Vec<Arc<Desc>> = self.watches.lock().values().filter(|x| x.armed).filter_map(|x| x.desc.upgrade()).collect();
+        for d in list {
+            w.add(&d, depth);
+        }
+    }
+
     /// Whether a wait would report something; it reports nothing itself,
     /// so one-shot entries stay armed for the wait that follows.
     pub fn any_ready(&self) -> bool {
@@ -268,7 +285,7 @@ impl Epoll {
 }
 
 pub fn sys_epoll_create1(flags: u32) -> i64 {
-    let e = Epoll { watches: IrqLock::new(BTreeMap::new()) };
+    let e = Epoll { watches: IrqLock::new(BTreeMap::new()), wq: Arc::default() };
     fd::install(Desc::new(Kind::Epoll(e), 0), flags & fd::O_CLOEXEC != 0)
 }
 
@@ -311,7 +328,7 @@ pub fn sys_epoll_ctl(epfd: i32, op: u32, fd_: i32, ev: u64) -> i64 {
         _ => return -err::EINVAL,
     }
     drop(w);
-    EVENTS.notify_all();
+    e.wq.notify_all();
     0
 }
 
@@ -322,7 +339,7 @@ pub fn sys_epoll_wait(epfd: i32, out: u64, max: i32, timeout_ms: i64) -> i64 {
     let Some(ep) = fd::get(epfd) else { return -err::EBADF };
     let Kind::Epoll(e) = &ep.kind else { return -err::EINVAL };
     let max = (max as usize).min(1024);
-    let got = match wait(timeout_ms, || {
+    let got = match wait(&[&ep], timeout_ms, || {
         let v = e.collect(max, true);
         (!v.is_empty()).then_some(v)
     }) {

@@ -95,7 +95,14 @@ pub trait BlockDevice {
     fn read_block(&mut self, block: u64, buf: &mut Block) -> Result<()>;
     fn write_block(&mut self, block: u64, buf: &Block) -> Result<()>;
     fn block_count(&self) -> u64;
+    /// Makes every block written so far durable.
     fn flush(&mut self) -> Result<()> {
+        self.write_back()
+    }
+    /// Hands every block written so far to the device (out of any cache of
+    /// the caller's), without waiting for the device to make it durable:
+    /// [`BlockDevice::flush`] does both.
+    fn write_back(&mut self) -> Result<()> {
         Ok(())
     }
     fn read_only(&self) -> bool {
@@ -115,6 +122,9 @@ impl<T: BlockDevice + ?Sized> BlockDevice for alloc::boxed::Box<T> {
     }
     fn flush(&mut self) -> Result<()> {
         (**self).flush()
+    }
+    fn write_back(&mut self) -> Result<()> {
+        (**self).write_back()
     }
     fn read_only(&self) -> bool {
         (**self).read_only()
@@ -333,6 +343,8 @@ pub struct Fs<D: BlockDevice> {
     sb: Superblock,
     bitmap: Vec<u8>,
     alloc_hint: u64,
+    /// No free node below this one (so a search for one starts here).
+    node_hint: NodeId,
     clock: &'static dyn Clock,
 }
 
@@ -382,7 +394,7 @@ impl<D: BlockDevice> Fs<D> {
         for b in block_count..(bitmap.len() as u64 * 8) {
             bitmap[(b / 8) as usize] |= 1 << (b % 8);
         }
-        let mut fs = Fs { dev, sb, bitmap, alloc_hint: data_start as u64, clock };
+        let mut fs = Fs { dev, sb, bitmap, alloc_hint: data_start as u64, node_hint: 2, clock };
         for i in 0..bitmap_blocks as u64 {
             fs.write_bitmap_block(i)?;
         }
@@ -412,7 +424,7 @@ impl<D: BlockDevice> Fs<D> {
         // The bitmap is the truth; the counter may be stale after a crash.
         let used: u64 = bitmap.iter().map(|b| b.count_ones() as u64).sum();
         sb.free_blocks = (bitmap.len() as u64 * 8).saturating_sub(used);
-        Ok(Fs { dev, sb, bitmap, alloc_hint, clock })
+        Ok(Fs { dev, sb, bitmap, alloc_hint, node_hint: 2, clock })
     }
 
     /// Does the block hold a JustFS superblock?
@@ -453,6 +465,16 @@ impl<D: BlockDevice> Fs<D> {
             self.write_superblock()?;
         }
         self.dev.flush()
+    }
+
+    /// Like [`Fs::sync`], but only hands everything to the device
+    /// ([`BlockDevice::write_back`]): the caller then has the device make it
+    /// durable, without holding the file system meanwhile.
+    pub fn write_back(&mut self) -> Result<()> {
+        if !self.read_only() {
+            self.write_superblock()?;
+        }
+        self.dev.write_back()
     }
 
     fn check_writable(&self) -> Result<()> {
@@ -581,19 +603,29 @@ impl<D: BlockDevice> Fs<D> {
         self.dev.write_block(block, &b)
     }
 
+    /// A free node, the lowest one (the caller writes it, or it stays free).
     fn alloc_node(&mut self) -> Result<NodeId> {
         let mut b = [0u8; BLOCK_SIZE];
-        for blk in 0..self.sb.nodes_blocks {
+        let first = self.node_hint.max(2) as usize;
+        for blk in first / NODES_PER_BLOCK..self.sb.nodes_blocks as usize {
             self.dev.read_block(self.sb.nodes_start as u64 + blk as u64, &mut b)?;
             for slot in 0..NODES_PER_BLOCK {
-                let id = blk as usize * NODES_PER_BLOCK + slot;
-                if id >= 2 && b[slot * NODE_SIZE] == Kind::Free as u8 {
+                let id = blk * NODES_PER_BLOCK + slot;
+                if id >= first && (id as u64) < self.sb.node_count as u64 && b[slot * NODE_SIZE] == Kind::Free as u8 {
                     self.sb.free_nodes = self.sb.free_nodes.saturating_sub(1);
+                    self.node_hint = id as NodeId + 1;
                     return Ok(id as NodeId);
                 }
             }
         }
+        self.node_hint = self.sb.node_count;
         Err(Error::NoNodes)
+    }
+
+    /// Node `id` became free.
+    fn freed_node(&mut self, id: NodeId) {
+        self.sb.free_nodes += 1;
+        self.node_hint = self.node_hint.min(id);
     }
 
     // ------------------------------------------------------------------
@@ -835,23 +867,45 @@ impl<D: BlockDevice> Fs<D> {
     // ------------------------------------------------------------------
     // Directories
 
-    /// Lists a directory.
-    pub fn read_dir(&mut self, dir: NodeId) -> Result<Vec<DirEntry>> {
+    /// The directory `dir`'s node.
+    fn dir_node(&mut self, dir: NodeId) -> Result<Node> {
         let node = self.node(dir)?;
         if !node.is_dir() {
             return Err(Error::NotDir);
         }
-        let mut raw = vec![0u8; node.size as usize];
-        self.read_node(&node, 0, &mut raw)?;
-        let mut out = Vec::new();
-        for e in raw.as_chunks::<DIRENT_SIZE>().0 {
-            let id = le32(e, 0);
-            if id == 0 {
-                continue;
+        Ok(node)
+    }
+
+    /// Goes through the entry slots of a directory, empty ones too, a block
+    /// at a time, until `f` returns true for one; returns its index.
+    fn scan_dir(&mut self, node: &Node, mut f: impl FnMut(&[u8; DIRENT_SIZE]) -> bool) -> Result<Option<usize>> {
+        let extents = self.load_extents(node)?;
+        let mut b = [0u8; BLOCK_SIZE];
+        let mut pos = 0;
+        while pos < node.size {
+            let disk = Self::map_block(&extents, pos / BLOCK_SIZE as u64).ok_or(Error::Corrupt)?;
+            self.dev.read_block(disk, &mut b)?;
+            let n = (node.size - pos).min(BLOCK_SIZE as u64) as usize;
+            if let Some(i) = b[..n].as_chunks::<DIRENT_SIZE>().0.iter().position(&mut f) {
+                return Ok(Some(pos as usize / DIRENT_SIZE + i));
             }
-            let len = (e[5] as usize).min(MAX_NAME);
-            out.push(DirEntry { name: String::from_utf8_lossy(&e[8..8 + len]).into_owned(), node: id, kind: Kind::from_u8(e[4]) });
+            pos += BLOCK_SIZE as u64;
         }
+        Ok(None)
+    }
+
+    /// Lists a directory.
+    pub fn read_dir(&mut self, dir: NodeId) -> Result<Vec<DirEntry>> {
+        let node = self.dir_node(dir)?;
+        let mut out = Vec::new();
+        self.scan_dir(&node, |e| {
+            let id = le32(e, 0);
+            if id != 0 {
+                let len = (e[5] as usize).min(MAX_NAME);
+                out.push(DirEntry { name: String::from_utf8_lossy(&e[8..8 + len]).into_owned(), node: id, kind: Kind::from_u8(e[4]) });
+            }
+            false
+        })?;
         Ok(out)
     }
 
@@ -860,9 +914,29 @@ impl<D: BlockDevice> Fs<D> {
         self.find_entry(dir, name).map(|(id, _)| id)
     }
 
-    /// Looks up one name in a directory; returns its node and kind.
+    /// Looks up one name in a directory; returns its node and kind. Names
+    /// compare as [`same_name`] does, on the bytes in place.
     fn find_entry(&mut self, dir: NodeId, name: &str) -> Result<(NodeId, Kind)> {
-        self.read_dir(dir)?.into_iter().find(|e| same_name(&e.name, name)).map(|e| (e.node, e.kind)).ok_or(Error::NotFound)
+        let node = self.dir_node(dir)?;
+        let want = name.as_bytes();
+        let mut found = (0, Kind::Free);
+        self.scan_dir(&node, |e| {
+            let id = le32(e, 0);
+            let len = (e[5] as usize).min(MAX_NAME);
+            let hit = id != 0 && e[8..8 + len].eq_ignore_ascii_case(want);
+            if hit {
+                found = (id, Kind::from_u8(e[4]));
+            }
+            hit
+        })?
+        .map(|_| found)
+        .ok_or(Error::NotFound)
+    }
+
+    /// Whether a directory has no entries.
+    fn dir_empty(&mut self, dir: NodeId) -> Result<bool> {
+        let node = self.dir_node(dir)?;
+        Ok(self.scan_dir(&node, |e| le32(e, 0) != 0)?.is_none())
     }
 
     /// Resolves a `/`-separated path from the root, following symbolic
@@ -939,22 +1013,18 @@ impl<D: BlockDevice> Fs<D> {
 
     fn dir_insert(&mut self, dir: NodeId, name: &str, id: NodeId, kind: Kind) -> Result<()> {
         let mut node = self.node(dir)?;
-        let mut raw = vec![0u8; node.size as usize];
-        self.read_node(&node, 0, &mut raw)?;
         let mut entry = [0u8; DIRENT_SIZE];
         put32(&mut entry, 0, id);
         entry[4] = kind as u8;
         entry[5] = name.len() as u8;
         entry[8..8 + name.len()].copy_from_slice(name.as_bytes());
-        let slot = raw.as_chunks::<DIRENT_SIZE>().0.iter().position(|e| le32(e, 0) == 0).unwrap_or(raw.len() / DIRENT_SIZE);
+        let slot = self.scan_dir(&node, |e| le32(e, 0) == 0)?.unwrap_or(node.size as usize / DIRENT_SIZE);
         self.write_node_data(dir, &mut node, (slot * DIRENT_SIZE) as u64, &entry)
     }
 
     fn dir_remove(&mut self, dir: NodeId, id: NodeId) -> Result<()> {
         let mut node = self.node(dir)?;
-        let mut raw = vec![0u8; node.size as usize];
-        self.read_node(&node, 0, &mut raw)?;
-        let slot = raw.as_chunks::<DIRENT_SIZE>().0.iter().position(|e| le32(e, 0) == id).ok_or(Error::NotFound)?;
+        let slot = self.scan_dir(&node, |e| le32(e, 0) == id)?.ok_or(Error::NotFound)?;
         self.write_node_data(dir, &mut node, (slot * DIRENT_SIZE) as u64, &[0u8; DIRENT_SIZE])
     }
 
@@ -975,7 +1045,7 @@ impl<D: BlockDevice> Fs<D> {
             let mut free = node;
             free.kind = Kind::Free;
             self.write_node(id, &free)?;
-            self.sb.free_nodes += 1;
+            self.freed_node(id);
             return Err(e);
         }
         Ok(id)
@@ -1004,7 +1074,7 @@ impl<D: BlockDevice> Fs<D> {
         self.check_writable()?;
         let id = self.find(dir, name)?;
         let mut node = self.node(id)?;
-        if node.is_dir() && !self.read_dir(id)?.is_empty() {
+        if node.is_dir() && !self.dir_empty(id)? {
             return Err(Error::NotEmpty);
         }
         let mut extents = self.load_extents(&node)?;
@@ -1013,7 +1083,7 @@ impl<D: BlockDevice> Fs<D> {
         node.kind = Kind::Free;
         node.size = 0;
         self.write_node(id, &node)?;
-        self.sb.free_nodes += 1;
+        self.freed_node(id);
         Ok(())
     }
 
@@ -1269,6 +1339,32 @@ mod tests {
         assert!(fs.read_all(a).unwrap().iter().all(|&x| x == 1));
         assert_eq!(fs.check().unwrap(), 0);
         fs.remove(ROOT, "a").unwrap();
+        assert_eq!(fs.check().unwrap(), 0);
+    }
+
+    #[test]
+    fn big_folders_and_node_reuse() {
+        let mut fs = fs(1024);
+        let dir = fs.create(ROOT, "many", Kind::Dir).unwrap();
+        // 200 entries: more than three blocks of them.
+        let ids: Vec<NodeId> = (0..200).map(|i| fs.create(dir, &format!("File{i}"), Kind::File).unwrap()).collect();
+        assert!(fs.node(dir).unwrap().size > 3 * BLOCK_SIZE as u64);
+        assert_eq!(fs.find(dir, "file199").unwrap(), ids[199]);
+        assert_eq!(fs.find(dir, "FILE70").unwrap(), ids[70]);
+        assert_eq!(fs.find(dir, "File2000"), Err(Error::NotFound));
+        assert_eq!(fs.find(dir, "File1"), Ok(ids[1]));
+        // A freed slot and a freed node are used again.
+        fs.remove(dir, "File70").unwrap();
+        let size = fs.node(dir).unwrap().size;
+        let again = fs.create(dir, "again", Kind::File).unwrap();
+        assert_eq!(again, ids[70]);
+        assert_eq!(fs.node(dir).unwrap().size, size);
+        assert_eq!(fs.read_dir(dir).unwrap().len(), 200);
+        assert_eq!(fs.remove(ROOT, "many"), Err(Error::NotEmpty));
+        for e in fs.read_dir(dir).unwrap() {
+            fs.remove(dir, &e.name).unwrap();
+        }
+        fs.remove(ROOT, "many").unwrap();
         assert_eq!(fs.check().unwrap(), 0);
     }
 
