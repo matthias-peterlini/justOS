@@ -2,11 +2,14 @@
 //! reserves. Pages are given out when first touched (demand paging): a
 //! reservation costs nothing until it is used, as runtimes such as Go's
 //! expect when they set aside gigabytes of address space. Private file
-//! mappings are filled from the file on first touch.
+//! mappings are filled from the file on first touch. Shared mappings of
+//! shared memory ([`super::shm`]: memfd, /dev/shm, MAP_SHARED |
+//! MAP_ANONYMOUS) map its frames, the same ones in every process.
 
+use super::shm::Shm;
 use super::{err, with_state, LinuxState};
 use crate::arch::cpu;
-use crate::mem::{self, frame, paging, PAGE_SIZE};
+use crate::mem::{self, frame, paging, phys_to_virt, PAGE_SIZE};
 use crate::user;
 use crate::fs::Path;
 use crate::sync::IrqLock;
@@ -30,13 +33,32 @@ const MMAP_TOP: u64 = 0x6000_0000_0000;
 /// The main thread's stack may grow down to this size.
 pub const STACK_RESERVE: u64 = 8 * 1024 * 1024;
 
+/// What fills an area's pages.
+#[derive(Clone)]
+pub enum Backing {
+    /// Zeroes.
+    Anon,
+    /// A private copy of a file's bytes.
+    File(Arc<Vec<u8>>),
+    /// Shared memory: the same frames for every mapping (true), or a
+    /// private copy of each page made when it is first touched.
+    Shm(Arc<Shm>, bool),
+}
+
 /// A reserved area.
 #[derive(Clone)]
 pub struct Vma {
     pub end: u64,
     pub prot: u32,
-    /// For a file mapping: the file's bytes and the offset of `start` in it.
-    pub file: Option<(Arc<Vec<u8>>, u64)>,
+    pub backing: Backing,
+    /// Where the area's start is in the backing.
+    pub off: u64,
+}
+
+impl Vma {
+    pub fn anon(end: u64, prot: u32) -> Vma {
+        Vma { end, prot, backing: Backing::Anon, off: 0 }
+    }
 }
 
 /// Is `[start, end)` free of areas?
@@ -45,8 +67,11 @@ fn free_range(st: &LinuxState, start: u64, end: u64) -> bool {
 }
 
 /// Removes `[start, end)` from the areas, splitting those that straddle it.
-fn cut(st: &mut LinuxState, start: u64, end: u64) {
+/// Returns the areas it touched: the caller keeps them until the pages are
+/// unmapped, so that shared memory is not freed while still mapped.
+fn cut(st: &mut LinuxState, start: u64, end: u64) -> Vec<Vma> {
     let hit: Vec<(u64, Vma)> = st.vmas.range(..end).filter(|(&s, v)| s < end && v.end > start).map(|(&s, v)| (s, v.clone())).collect();
+    let mut gone = Vec::new();
     for (s, v) in hit {
         st.vmas.remove(&s);
         if s < start {
@@ -56,12 +81,12 @@ fn cut(st: &mut LinuxState, start: u64, end: u64) {
         }
         if v.end > end {
             let mut right = v.clone();
-            if let Some((data, off)) = &v.file {
-                right.file = Some((data.clone(), off + (end - s)));
-            }
+            right.off = v.off + (end - s);
             st.vmas.insert(end, right);
         }
+        gone.push(v);
     }
+    gone
 }
 
 /// Frees the pages of a range that were handed out.
@@ -70,7 +95,7 @@ fn release_pages(start: u64, end: u64) {
     let mut p = start;
     while p < end {
         if paging::user_accessible(cr3, p) {
-            if let Some(phys) = paging::unmap_in(cr3, p) {
+            if let Some(phys) = paging::unmap_owned_in(cr3, p) {
                 frame::free(phys);
             }
         }
@@ -140,16 +165,33 @@ pub fn sys_mmap(addr: u64, len: u64, prot: u32, flags: u32, fd: i32, off: u64) -
         return -err::EINVAL;
     }
     let len = mem::align_up(len, PAGE_SIZE);
-    let file = if flags & MAP_ANONYMOUS == 0 {
-        match file_bytes(fd) {
-            Ok(d) => Some((d, off)),
-            Err(e) => return e,
-        }
+    let shared = flags & MAP_SHARED != 0;
+    let (backing, off) = if flags & MAP_ANONYMOUS != 0 {
+        (if shared { Backing::Shm(super::shm::anonymous(len), true) } else { Backing::Anon }, 0)
     } else {
-        None
+        let memfd = match super::fd::get(fd) {
+            Some(d) => match &d.kind {
+                super::fd::Kind::Memfd { shm, .. } => Some(shm.clone()),
+                _ => None,
+            },
+            None => return -err::EBADF,
+        };
+        match memfd {
+            Some(shm) => (Backing::Shm(shm, shared), off),
+            // A shared mapping of a file is a private copy here.
+            None => match file_bytes(fd) {
+                Ok(d) => (Backing::File(d), off),
+                Err(e) => return e,
+            },
+        }
     };
-    let _ = MAP_SHARED; // shared file maps are private copies here
+    map(addr, len, prot, flags, backing, off)
+}
+
+/// Reserves an area of `len` bytes (a multiple of the page size).
+fn map(addr: u64, len: u64, prot: u32, flags: u32, backing: Backing, off: u64) -> i64 {
     let fixed = flags & (MAP_FIXED | MAP_FIXED_NOREPLACE) != 0;
+    let mut old = Vec::new();
     let r = with_state(|st| {
         let at = if fixed {
             if addr % PAGE_SIZE != 0 || addr == 0 || addr + len > USER_TOP {
@@ -158,7 +200,7 @@ pub fn sys_mmap(addr: u64, len: u64, prot: u32, flags: u32, fd: i32, off: u64) -
             if flags & MAP_FIXED_NOREPLACE != 0 && !free_range(st, addr, addr + len) {
                 return Err(-err::EEXIST);
             }
-            cut(st, addr, addr + len);
+            old = cut(st, addr, addr + len);
             addr
         } else if addr != 0 && addr % PAGE_SIZE == 0 && addr + len <= USER_TOP && free_range(st, addr, addr + len) {
             addr
@@ -167,7 +209,7 @@ pub fn sys_mmap(addr: u64, len: u64, prot: u32, flags: u32, fd: i32, off: u64) -
             st.mmap_next = at + len;
             at
         };
-        st.vmas.insert(at, Vma { end: at + len, prot, file });
+        st.vmas.insert(at, Vma { end: at + len, prot, backing, off });
         Ok(at)
     });
     match r {
@@ -176,6 +218,7 @@ pub fn sys_mmap(addr: u64, len: u64, prot: u32, flags: u32, fd: i32, off: u64) -
                 // Whatever was mapped there before is gone.
                 release_pages(at, at + len);
             }
+            drop(old);
             at as i64
         }
         Err(e) => e,
@@ -187,8 +230,9 @@ pub fn sys_munmap(addr: u64, len: u64) -> i64 {
         return -err::EINVAL;
     }
     let end = addr.saturating_add(mem::align_up(len, PAGE_SIZE)).min(USER_TOP);
-    with_state(|st| cut(st, addr, end));
+    let old = with_state(|st| cut(st, addr, end));
     release_pages(addr, end);
+    drop(old);
     0
 }
 
@@ -202,14 +246,14 @@ pub fn sys_mprotect(addr: u64, len: u64, prot: u32) -> i64 {
         for (s, v) in parts {
             let (a, b) = (s.max(addr), v.end.min(end));
             cut(st, a, b);
-            let file = v.file.as_ref().map(|(d, o)| (d.clone(), o + (a - s)));
-            st.vmas.insert(a, Vma { end: b, prot, file });
+            st.vmas.insert(a, Vma { end: b, prot, backing: v.backing.clone(), off: v.off + (a - s) });
         }
     });
     0
 }
 
-/// mremap: moves (or grows) an area by copying it.
+/// mremap: grows an area in place, or moves it: shared memory moves as it
+/// is, other memory by copying the pages that were touched.
 pub fn sys_mremap(old: u64, old_len: u64, new_len: u64, flags: u32) -> i64 {
     const MREMAP_MAYMOVE: u32 = 1;
     let old_len = mem::align_up(old_len, PAGE_SIZE);
@@ -236,15 +280,17 @@ pub fn sys_mremap(old: u64, old_len: u64, new_len: u64, flags: u32) -> i64 {
     if flags & MREMAP_MAYMOVE == 0 {
         return -err::ENOMEM;
     }
-    let prot = with_state(|st| st.vmas.range(..=old).next_back().map(|(_, v)| v.prot).unwrap_or(PROT_READ | PROT_WRITE));
-    let new = sys_mmap(0, new_len, prot, MAP_ANONYMOUS, -1, 0);
+    let area = with_state(|st| st.vmas.range(..=old).next_back().map(|(&s, v)| (v.prot, v.backing.clone(), v.off + (old - s))));
+    let (prot, backing, off) = area.unwrap_or((PROT_READ | PROT_WRITE, Backing::Anon, 0));
+    let shared = matches!(backing, Backing::Shm(_, true));
+    let new = map(0, new_len, prot, 0, backing, off);
     if new < 0 {
         return new;
     }
-    // Copy only the pages that exist; the rest are still untouched zeroes.
+    // Copy only the pages that exist; the rest come from the backing.
     let cr3 = cpu::read_cr3();
     let mut p = 0;
-    while p < old_len {
+    while p < old_len && !shared {
         if paging::user_accessible(cr3, old + p) {
             if fault(new as u64 + p, true) {
                 // SAFETY: both pages are mapped user memory of this process.
@@ -290,18 +336,33 @@ pub fn fault(addr: u64, _write: bool) -> bool {
     if paging::translate_in(cr3, page).is_some() {
         return paging::user_accessible(cr3, page);
     }
+    let at = vma.off + (page - start);
+    if let Backing::Shm(shm, true) = &vma.backing {
+        // The shared frame itself.
+        let Some(phys) = shm.frame(at / PAGE_SIZE) else { return false };
+        return paging::map_in(cr3, page, phys, paging::USER | paging::WRITE | paging::SHARED).is_some();
+    }
     let Some(phys) = frame::alloc() else { return false };
     if paging::map_in(cr3, page, phys, paging::USER | paging::WRITE).is_none() {
         frame::free(phys);
         return false;
     }
-    if let Some((data, off)) = &vma.file {
-        let at = (off + (page - start)) as usize;
-        if at < data.len() {
-            let n = (data.len() - at).min(PAGE_SIZE as usize);
-            // SAFETY: the page was just mapped in this address space.
-            unsafe { core::ptr::copy_nonoverlapping(data.as_ptr().add(at), page as *mut u8, n) };
+    match &vma.backing {
+        Backing::File(data) => {
+            let at = at as usize;
+            if at < data.len() {
+                let n = (data.len() - at).min(PAGE_SIZE as usize);
+                // SAFETY: the page was just mapped in this address space.
+                unsafe { core::ptr::copy_nonoverlapping(data.as_ptr().add(at), page as *mut u8, n) };
+            }
         }
+        Backing::Shm(shm, false) => {
+            if let Some(f) = shm.existing(at / PAGE_SIZE) {
+                // SAFETY: the page was just mapped; the frame is the Shm's.
+                unsafe { core::ptr::copy_nonoverlapping(phys_to_virt(f) as *const u8, page as *mut u8, PAGE_SIZE as usize) };
+            }
+        }
+        _ => {}
     }
     true
 }

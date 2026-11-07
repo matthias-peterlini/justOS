@@ -5,7 +5,8 @@
 //! (`/dev/null`, `/dev/urandom`, `/etc/resolv.conf`, `/proc/self/...`).
 //!
 //! A descriptor is an `Arc<Desc>`: `dup` shares it, with its position and
-//! flags, as on Linux.
+//! flags, as on Linux. A memfd ([`super::shm`]) reads and writes like a
+//! file.
 
 use super::{err, errno, linux_path, show_path, user_bytes, with_state};
 use crate::fs::{self, Path};
@@ -56,6 +57,8 @@ pub enum Kind {
     PipeRead(Arc<Pipe>),
     PipeWrite(Arc<Pipe>),
     Event(Arc<EventFd>),
+    /// Shared memory: memfd_create, or /dev/shm.
+    Memfd { shm: Arc<super::shm::Shm>, pos: IrqLock<u64> },
     Socket(super::sock::Socket),
     Unix(super::unix::Unix),
     Epoll(super::poll::Epoll),
@@ -235,6 +238,9 @@ pub fn sys_openat(dirfd: i32, path_ptr: u64, flags: u32) -> i64 {
         Ok(t) => t,
         Err(e) => return -errno(e),
     };
+    if let Some(name) = super::shm::named(&text) {
+        return super::shm::open_named(name, flags);
+    }
     if dirfd != AT_FDCWD && !text.starts_with('/') {
         // Relative to an open folder.
         match get(dirfd).map(|d| match &d.kind {
@@ -381,6 +387,12 @@ pub fn read_desc(d: &Desc, buf: &mut [u8]) -> i64 {
             EVENTS.notify_all();
             8
         }
+        Kind::Memfd { shm, pos } => {
+            let at = *pos.lock();
+            let n = shm.read_at(at, buf);
+            *pos.lock() = at + n as u64;
+            n as i64
+        }
         Kind::Socket(s) => s.recv(d, buf, 0).0,
         Kind::Unix(u) => u.read(d, buf),
         Kind::PipeWrite(_) | Kind::Epoll(_) => -err::EBADF,
@@ -437,6 +449,16 @@ pub fn write_desc(d: &Desc, data: &[u8]) -> i64 {
             EVENTS.notify_all();
             8
         }
+        Kind::Memfd { shm, pos } => {
+            let at = *pos.lock();
+            match shm.write_at(at, data) {
+                Ok(n) => {
+                    *pos.lock() = at + n as u64;
+                    n as i64
+                }
+                Err(e) => e,
+            }
+        }
         Kind::Socket(s) => s.send(d, data, 0),
         Kind::Unix(u) => u.write(d, data),
         _ => -err::EBADF,
@@ -484,6 +506,7 @@ pub fn sys_pread(fd: i32, ptr: u64, len: u64, off: u64) -> i64 {
             buf[..n].copy_from_slice(&data[at..at + n]);
             n as i64
         }
+        Kind::Memfd { shm, .. } => shm.read_at(off, buf) as i64,
         _ => -err::ESPIPE,
     }
 }
@@ -502,6 +525,10 @@ pub fn sys_pwrite(fd: i32, ptr: u64, len: u64, off: u64) -> i64 {
                 Err(e) => -errno(user::fs_error(e)),
             }
         }
+        Kind::Memfd { shm, .. } => match shm.write_at(off, data) {
+            Ok(n) => n as i64,
+            Err(e) => e,
+        },
         _ => -err::ESPIPE,
     }
 }
@@ -511,6 +538,7 @@ pub fn sys_lseek(fd: i32, off: i64, whence: i32) -> i64 {
     let (pos, size) = match &d.kind {
         Kind::File { path, pos, .. } => (pos, fs::stat(path).map(|s| s.size).unwrap_or(0) as i64),
         Kind::Virtual { data, pos } => (pos, data.len() as i64),
+        Kind::Memfd { shm, pos } => (pos, shm.size() as i64),
         Kind::Dir { names, .. } => {
             if off == 0 && whence == 0 {
                 *names.lock() = None; // rewinddir
@@ -537,6 +565,14 @@ pub fn sys_lseek(fd: i32, off: i64, whence: i32) -> i64 {
 }
 
 pub fn sys_ftruncate(fd: i32, len: u64) -> i64 {
+    if let Some(d) = get(fd) {
+        if let Kind::Memfd { shm, .. } = &d.kind {
+            return match shm.truncate(len) {
+                Ok(()) => 0,
+                Err(e) => e,
+            };
+        }
+    }
     let Some(path) = file_path(fd) else { return -err::EINVAL };
     truncate_path(&path, len)
 }
@@ -600,11 +636,21 @@ fn stat_info(path: &Path, st: Result<fs::Stat, justfs::Error>) -> Result<StatInf
     Ok(StatInfo { mode, size: st.size, time: st.modified + super::UNIX_2000, ino })
 }
 
+/// The stat of a /dev/shm path: the shared memory there, or ENOENT.
+fn shm_stat(text: &str) -> Option<Result<StatInfo, i64>> {
+    let name = super::shm::named(text)?;
+    Some(match super::shm::named_size(name) {
+        Some(size) => Ok(StatInfo { mode: 0o100600, size, time: crate::time::unix_now(), ino: 5 }),
+        None => Err(-err::ENOENT),
+    })
+}
+
 pub fn stat_of_desc(d: &Desc) -> Result<StatInfo, i64> {
     let simple = |mode: u32| Ok(StatInfo { mode, size: 0, time: crate::time::unix_now(), ino: 2 });
     match &d.kind {
         Kind::File { path, .. } | Kind::Dir { path, .. } => stat_of_path(path),
         Kind::Virtual { data, .. } => Ok(StatInfo { mode: 0o100444, size: data.len() as u64, time: crate::time::unix_now(), ino: 3 }),
+        Kind::Memfd { shm, .. } => Ok(StatInfo { mode: 0o100777, size: shm.size(), time: crate::time::unix_now(), ino: Arc::as_ptr(shm) as u64 >> 4 }),
         Kind::Console => simple(0o020620),
         Kind::Null | Kind::Zero | Kind::Random => simple(0o020666),
         Kind::PipeRead(_) | Kind::PipeWrite(_) => simple(0o010600),
@@ -661,6 +707,12 @@ pub fn sys_newfstatat(dirfd: i32, path_ptr: u64, buf: u64, flags: u64) -> i64 {
             Err(e) => e,
         };
     }
+    if let Some(info) = shm_stat(&text) {
+        return match info {
+            Ok(s) => write_stat(buf, &s),
+            Err(e) => e,
+        };
+    }
     let (path, _) = match path_arg(dirfd, path_ptr) {
         Ok(p) => p,
         Err(e) => return e,
@@ -690,6 +742,8 @@ pub fn sys_statx(dirfd: i32, path_ptr: u64, flags: u64, buf: u64) -> i64 {
         }
     } else if let Some(kind) = virtual_file(&text) {
         stat_of_desc(&Desc::new(kind, 0))
+    } else if let Some(info) = shm_stat(&text) {
+        info
     } else {
         match path_arg(dirfd, path_ptr) {
             Ok((p, _)) if flags & AT_SYMLINK_NOFOLLOW != 0 => lstat_of_path(&p),
@@ -723,6 +777,9 @@ pub fn sys_faccessat(dirfd: i32, path_ptr: u64) -> i64 {
     let text = user::user_cstr(path_ptr, 4096).unwrap_or_default();
     if virtual_file(&text).is_some() {
         return 0;
+    }
+    if let Some(info) = shm_stat(&text) {
+        return info.map_or_else(|e| e, |_| 0);
     }
     match path_arg(dirfd, path_ptr) {
         Ok((p, _)) if fs::exists(&p) || super::unix::is_bound(&p) => 0,
@@ -785,6 +842,10 @@ pub fn sys_mkdirat(dirfd: i32, path_ptr: u64) -> i64 {
 }
 
 pub fn sys_unlinkat(dirfd: i32, path_ptr: u64) -> i64 {
+    let text = user::user_cstr(path_ptr, 4096).unwrap_or_default();
+    if let Some(name) = super::shm::named(&text) {
+        return super::shm::unlink_named(name);
+    }
     match path_arg(dirfd, path_ptr) {
         // A local socket's name.
         Ok((p, _)) if super::unix::unlink(&p) => 0,
@@ -818,6 +879,7 @@ pub fn sys_readlinkat(dirfd: i32, path_ptr: u64, buf: u64, cap: u64) -> i64 {
             let n: i32 = t[14..].parse().unwrap_or(-1);
             match get(n).map(|d| match &d.kind {
                 Kind::File { path, .. } | Kind::Dir { path, .. } => show_path(path),
+                Kind::Memfd { shm, .. } => shm.name.clone(),
                 _ => String::from("anon_inode:[justos]"),
             }) {
                 Some(s) => s,
@@ -871,6 +933,8 @@ pub fn sys_fcntl(fd: i32, cmd: u64, arg: u64) -> i64 {
     const F_SETLKW: u64 = 7;
     const F_GETLK: u64 = 5;
     const F_DUPFD_CLOEXEC: u64 = 1030;
+    const F_ADD_SEALS: u64 = 1033;
+    const F_GET_SEALS: u64 = 1034;
     let Some(d) = get(fd) else { return -err::EBADF };
     match cmd {
         F_DUPFD => install_from(d, false, arg as i32),
@@ -891,6 +955,14 @@ pub fn sys_fcntl(fd: i32, cmd: u64, arg: u64) -> i64 {
             0
         }
         F_GETLK | F_SETLK | F_SETLKW => 0, // one process: no locks to fight over
+        F_ADD_SEALS => match &d.kind {
+            Kind::Memfd { shm, .. } => shm.add_seals(arg as u32),
+            _ => -err::EINVAL,
+        },
+        F_GET_SEALS => match &d.kind {
+            Kind::Memfd { shm, .. } => shm.seals() as i64,
+            _ => -err::EINVAL,
+        },
         _ => -err::EINVAL,
     }
 }

@@ -10,7 +10,8 @@
 //! process's JustOS volume), the console as a terminal ([`tty`]), memory with
 //! demand paging ([`mm`]), threads and futexes ([`thread`]), pipes and
 //! eventfds ([`fd`]), TCP and UDP sockets ([`sock`]), local sockets that
-//! pass descriptors along ([`unix`]), poll, select and epoll
+//! pass descriptors along ([`unix`]), shared memory ([`shm`]), poll, select
+//! and epoll
 //! ([`poll`]), clocks and randomness. Dynamically linked programs start in
 //! the dynamic loader they name (glibc's ld-linux-x86-64.so.2, found on the
 //! volume like any file), which maps their shared libraries with `mmap`.
@@ -21,6 +22,7 @@
 pub mod fd;
 pub mod mm;
 mod poll;
+mod shm;
 pub mod signal;
 mod sock;
 mod thread;
@@ -65,6 +67,7 @@ pub mod err {
     pub const EINVAL: i64 = 22;
     pub const EMFILE: i64 = 24;
     pub const ENOTTY: i64 = 25;
+    pub const EFBIG: i64 = 27;
     pub const ENOSPC: i64 = 28;
     pub const ESPIPE: i64 = 29;
     pub const EPIPE: i64 = 32;
@@ -495,7 +498,7 @@ fn build_stack(info: &Loaded, interp_base: u64, argv: &[String], envp: &[String]
     user::map_fixed(bottom, PAGES * PAGE_SIZE)?;
     // The rest of an 8 MiB stack comes page by page as it is used.
     with_state(|st| {
-        st.vmas.insert(top - mm::STACK_RESERVE, mm::Vma { end: bottom, prot: mm::PROT_READ | mm::PROT_WRITE, file: None });
+        st.vmas.insert(top - mm::STACK_RESERVE, mm::Vma::anon(bottom, mm::PROT_READ | mm::PROT_WRITE));
     });
 
     // String area at the top; collect the addresses as we go.
@@ -630,6 +633,8 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         25 => mm::sys_mremap(a[0], a[1], a[2], a[3] as u32),
         26 | 27 => 0, // msync, mincore
         28 => mm::sys_madvise(a[0], a[1], a[2]),
+        285 => shm::sys_fallocate(fd0, a[1], a[2], a[3]),
+        319 => shm::sys_memfd_create(a[0], a[1] as u32),
         32 => fd::sys_dup(fd0),
         33 => fd::sys_dup3(fd0, a[1] as i32, u32::MAX),
         35 => sys_nanosleep(a[0]),

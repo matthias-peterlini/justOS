@@ -15,6 +15,10 @@ pub const USER: u64 = 1 << 2;
 pub const WRITE_COMBINE: u64 = 1 << 3;
 pub const NO_CACHE: u64 = (1 << 4) | (1 << 3);
 pub const HUGE: u64 = 1 << 7;
+/// A bit of our own (the processor ignores it): the page's frame belongs
+/// to shared memory, not to this address space, so fork maps the same
+/// frame instead of copying it and nothing here ever frees it.
+pub const SHARED: u64 = 1 << 9;
 pub const ADDR_MASK: u64 = 0x000F_FFFF_FFFF_F000;
 
 static KERNEL_PML4: AtomicU64 = AtomicU64::new(0);
@@ -128,6 +132,18 @@ pub fn unmap_in(pml4: u64, virt: u64) -> Option<u64> {
     Some(phys)
 }
 
+/// Unmaps a user page and returns its frame for freeing, unless the page
+/// is [`SHARED`] (then the frame belongs to someone else).
+pub fn unmap_owned_in(pml4: u64, virt: u64) -> Option<u64> {
+    let _guard = MAP_LOCK.lock();
+    let (e, size) = walk(pml4, virt)?;
+    assert_eq!(size, PAGE_SIZE, "unmapping part of a huge page");
+    let old = *e;
+    *e = 0;
+    cpu::invlpg(virt);
+    (old & SHARED == 0).then_some(old & ADDR_MASK)
+}
+
 pub fn unmap(virt: u64) -> Option<u64> {
     unmap_in(kernel_pml4(), virt)
 }
@@ -179,7 +195,8 @@ pub fn new_address_space() -> Option<u64> {
 }
 
 /// A new address space with a private copy of every user page of `src`
-/// (what `fork` gives the child). None when memory runs out.
+/// (what `fork` gives the child), except shared pages, which both map.
+/// None when memory runs out.
 pub fn copy_address_space(src: u64) -> Option<u64> {
     fn copy_level(src: u64, dst: u64, level: u32) -> bool {
         let count = if level == 3 { 256 } else { 512 };
@@ -187,6 +204,10 @@ pub fn copy_address_space(src: u64) -> Option<u64> {
             let e = table(src)[i];
             if e & PRESENT == 0 || (level > 0 && e & HUGE != 0) {
                 continue; // user memory is never mapped with huge pages
+            }
+            if level == 0 && e & SHARED != 0 {
+                table(dst)[i] = e;
+                continue;
             }
             let Some(phys) = frame::alloc() else { return false };
             table(dst)[i] = phys | (e & !ADDR_MASK);
@@ -213,7 +234,8 @@ pub fn copy_address_space(src: u64) -> Option<u64> {
     Some(dst)
 }
 
-/// Frees the user half of an address space: page tables and mapped frames.
+/// Frees the user half of an address space: page tables and mapped frames
+/// (not the frames of shared pages).
 pub fn free_address_space(pml4: u64) {
     fn free_level(t: u64, level: u32) {
         for &e in table(t).iter() {
@@ -223,7 +245,7 @@ pub fn free_address_space(pml4: u64) {
             let next = e & ADDR_MASK;
             if level > 0 && e & HUGE == 0 {
                 free_level(next, level - 1);
-            } else if level == 0 {
+            } else if level == 0 && e & SHARED == 0 {
                 frame::free(next);
             }
         }

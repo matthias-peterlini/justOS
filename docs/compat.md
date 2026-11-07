@@ -48,6 +48,7 @@ busybox ls -la             un programma installato (vedi "Installare programmi")
 | `stdin`, `stdout`, `stderr` | la console; `stdin` legge una riga per volta, con l'eco dei tasti |
 | file e cartelle | i volumi montati: il "/" di Linux è la radice del volume corrente, così `/home/x` è `<volume>:/home/x` |
 | memoria | `brk` e `mmap` anonimo (il programma alloca e libera normalmente) |
+| memoria condivisa | `memfd_create` (con i sigilli di `F_ADD_SEALS`), `shm_open` in `/dev/shm`, `MAP_SHARED` anonimo: chi la mappa vede le stesse pagine, anche tra processi diversi dopo `fork` o passandosi il descrittore su un socket; un `MAP_SHARED` di un file normale resta una copia privata |
 | orologio | `clock_gettime`, `gettimeofday`, `nanosleep` |
 | TLS | `arch_prctl(ARCH_SET_FS)` imposta la base del segmento FS del thread |
 | casualità | `getrandom` |
@@ -201,9 +202,9 @@ anche senza estensione) lo avvia nel Terminale.
   rete, i servizi di Google Play, il codice nativo (`.so`) e le lambda
   compilate con `invokedynamic` (quelle trasformate da `d8` vanno bene). I
   thread girano uno dopo l'altro.
-- **Linux**: `execve` da un programma con più thread, la memoria condivisa
-  (`MAP_SHARED` tra processi, `memfd`) e il controllo dei job (`SIGSTOP`,
-  `SIGTSTP`) non ci sono ancora.
+- **Linux**: `execve` da un programma con più thread e il controllo dei job
+  (`SIGSTOP`, `SIGTSTP`) non ci sono ancora; un `MAP_SHARED` di un file del
+  volume non scrive nel file.
 - **Windows a 32 bit**: non ancora.
 
 ## Provarlo

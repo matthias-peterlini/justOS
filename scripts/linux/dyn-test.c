@@ -2,11 +2,13 @@
  * loader, shared libraries, threads in libc, dlopen, new processes
  * (fork, vfork, posix_spawn, execve of a #! script, waitpid), signals
  * (handlers, masks, faults, EINTR and SA_RESTART, SIGCHLD, kill, SIGPIPE)
- * and local sockets (pairs, a named server, SCM_RIGHTS, datagrams).
+ * local sockets (pairs, a named server, SCM_RIGHTS, datagrams) and shared
+ * memory (memfd, MAP_SHARED across fork and over a socket, shm_open).
  * Built by scripts/test-linux.sh with the host's gcc. */
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <gnu/libc-version.h>
 #include <poll.h>
 #include <pthread.h>
@@ -16,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -65,6 +68,45 @@ static void *reader(void *arg) {
     long r = read(pipe_r, &c, 1);
     *(int *)arg = r < 0 ? -errno : (r == 1 ? c : 0);
     return NULL;
+}
+
+/* Sends descriptor `fd` over socket `s`, with one byte. */
+static int send_fd(int s, int fd) {
+    char c[CMSG_SPACE(sizeof(int))];
+    memset(c, 0, sizeof c);
+    struct iovec io = {(void *)"f", 1};
+    struct msghdr m;
+    memset(&m, 0, sizeof m);
+    m.msg_iov = &io;
+    m.msg_iovlen = 1;
+    m.msg_control = c;
+    m.msg_controllen = sizeof c;
+    struct cmsghdr *h = CMSG_FIRSTHDR(&m);
+    h->cmsg_level = SOL_SOCKET;
+    h->cmsg_type = SCM_RIGHTS;
+    h->cmsg_len = CMSG_LEN(sizeof(int));
+    memcpy(CMSG_DATA(h), &fd, sizeof fd);
+    return (int)sendmsg(s, &m, 0);
+}
+
+/* The descriptor that came over socket `s`, or -1. */
+static int recv_fd(int s) {
+    char b, c[CMSG_SPACE(sizeof(int))];
+    struct iovec io = {&b, 1};
+    struct msghdr m;
+    memset(&m, 0, sizeof m);
+    m.msg_iov = &io;
+    m.msg_iovlen = 1;
+    m.msg_control = c;
+    m.msg_controllen = sizeof c;
+    if (recvmsg(s, &m, 0) != 1)
+        return -1;
+    struct cmsghdr *h = CMSG_FIRSTHDR(&m);
+    if (!h || h->cmsg_type != SCM_RIGHTS)
+        return -1;
+    int fd;
+    memcpy(&fd, CMSG_DATA(h), sizeof fd);
+    return fd;
 }
 
 /* Waits for a child and returns its exit code (-1 if it did not exit). */
@@ -506,5 +548,94 @@ int main(int argc, char **argv) {
     poll(&pf, 1, 0);
     printf("dt: unix eagain %d eof %d epipe %d hup %d\n", ea, eof, ep, (pf.revents & POLLHUP) != 0);
     close(sv[0]);
+
+    /* Shared memory: a memfd, mapped, written by a child, sealed. */
+    int mf = memfd_create("dt", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    if (mf < 0 || ftruncate(mf, 8192) != 0)
+        return 1;
+    char *sm = mmap(NULL, 8192, PROT_READ | PROT_WRITE, MAP_SHARED, mf, 0);
+    if (sm == MAP_FAILED)
+        return 1;
+    strcpy(sm, "shared");
+    char prd[8] = {0};
+    if (pread(mf, prd, 6, 0) != 6)
+        return 1;
+    fflush(stdout);
+    pid_t c9 = fork();
+    if (c9 == 0) {
+        strcpy(sm + 4096, "child was here");
+        _exit(0);
+    }
+    reap(c9);
+    fcntl(mf, F_ADD_SEALS, F_SEAL_SHRINK);
+    int sealed = ftruncate(mf, 4096) != 0 && errno == EPERM;
+    char lk[64] = {0}, lp[32];
+    snprintf(lp, sizeof lp, "/proc/self/fd/%d", mf);
+    if (readlink(lp, lk, sizeof lk - 1) < 0)
+        strcpy(lk, "?");
+    printf("dt: memfd %s pread=%s child=%s seal=%d link=%s\n", sm, prd, sm + 4096, sealed, lk);
+    munmap(sm, 8192);
+    close(mf);
+
+    /* MAP_SHARED | MAP_ANONYMOUS: a counter the child sets. */
+    int *cnt = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (cnt == MAP_FAILED)
+        return 1;
+    *cnt = 1;
+    fflush(stdout);
+    pid_t c10 = fork();
+    if (c10 == 0) {
+        *cnt = 42;
+        _exit(0);
+    }
+    reap(c10);
+    printf("dt: shared anon %d\n", *cnt);
+    munmap(cnt, 4096);
+
+    /* The Wayland way: a memfd made after the fork goes to the child over a
+       socket; the child maps it and draws into it. */
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0)
+        return 1;
+    fflush(stdout);
+    pid_t c11 = fork();
+    if (c11 == 0) {
+        close(sv[0]);
+        int got = recv_fd(sv[1]);
+        if (got < 0)
+            _exit(1);
+        char *p = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, got, 0);
+        if (p == MAP_FAILED)
+            _exit(2);
+        strcpy(p, "from the child");
+        if (write(sv[1], "d", 1) != 1)
+            _exit(3);
+        _exit(0);
+    }
+    close(sv[1]);
+    int mf2 = memfd_create("dt-pool", 0);
+    if (mf2 < 0 || ftruncate(mf2, 4096) != 0)
+        return 1;
+    char *pool = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, mf2, 0);
+    if (pool == MAP_FAILED || send_fd(sv[0], mf2) != 1)
+        return 1;
+    char dn;
+    if (read(sv[0], &dn, 1) != 1)
+        return 1;
+    printf("dt: memfd passed %s exit=%d\n", pool, reap(c11));
+    munmap(pool, 4096);
+    close(mf2);
+    close(sv[0]);
+
+    /* shm_open: named shared memory in /dev/shm, until shm_unlink. */
+    int so = shm_open("/dt-shm", O_CREAT | O_RDWR, 0600);
+    int ok1 = so >= 0 && ftruncate(so, 4096) == 0 && write(so, "hello", 5) == 5;
+    close(so);
+    so = shm_open("/dt-shm", O_RDWR, 0);
+    char sb[8] = {0};
+    int ok2 = so >= 0 && pread(so, sb, 5, 0) == 5;
+    close(so);
+    shm_unlink("/dt-shm");
+    int gone = shm_open("/dt-shm", O_RDWR, 0) < 0 ? errno : 0;
+    printf("dt: shm_open %s %d%d again %d\n", sb, ok1, ok2, gone);
     return 0;
 }
