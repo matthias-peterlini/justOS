@@ -1,5 +1,6 @@
 //! File descriptors of Linux processes: files and folders of the JustOS
-//! volume, the console, pipes, eventfds, sockets ([`super::sock`]) and epoll
+//! volume, the console, pipes, eventfds, sockets ([`super::sock`],
+//! [`super::unix`]) and epoll
 //! sets ([`super::poll`]), plus the few virtual files programs expect
 //! (`/dev/null`, `/dev/urandom`, `/etc/resolv.conf`, `/proc/self/...`).
 //!
@@ -56,6 +57,7 @@ pub enum Kind {
     PipeWrite(Arc<Pipe>),
     Event(Arc<EventFd>),
     Socket(super::sock::Socket),
+    Unix(super::unix::Unix),
     Epoll(super::poll::Epoll),
 }
 
@@ -96,6 +98,7 @@ impl Drop for Desc {
                 EVENTS.notify_all();
             }
             Kind::Socket(s) => s.close(),
+            Kind::Unix(u) => u.close(),
             _ => {}
         }
     }
@@ -379,6 +382,7 @@ pub fn read_desc(d: &Desc, buf: &mut [u8]) -> i64 {
             8
         }
         Kind::Socket(s) => s.recv(d, buf, 0).0,
+        Kind::Unix(u) => u.read(d, buf),
         Kind::PipeWrite(_) | Kind::Epoll(_) => -err::EBADF,
     }
 }
@@ -405,7 +409,11 @@ pub fn write_desc(d: &Desc, data: &[u8]) -> i64 {
             let mut done = 0;
             while done < data.len() {
                 if p.readers.load(Ordering::Relaxed) == 0 {
-                    return if done > 0 { done as i64 } else { -err::EPIPE };
+                    if done > 0 {
+                        return done as i64;
+                    }
+                    super::signal::broken_pipe();
+                    return -err::EPIPE;
                 }
                 let r = wait_until(d, || p.buf.lock().len() < PIPE_SIZE || p.readers.load(Ordering::Relaxed) == 0);
                 if let Err(e) = r {
@@ -430,6 +438,7 @@ pub fn write_desc(d: &Desc, data: &[u8]) -> i64 {
             8
         }
         Kind::Socket(s) => s.send(d, data, 0),
+        Kind::Unix(u) => u.write(d, data),
         _ => -err::EBADF,
     }
 }
@@ -566,6 +575,9 @@ pub fn lstat_of_path(path: &Path) -> Result<StatInfo, i64> {
 }
 
 fn stat_info(path: &Path, st: Result<fs::Stat, justfs::Error>) -> Result<StatInfo, i64> {
+    if matches!(st, Err(justfs::Error::NotFound)) && super::unix::is_bound(path) {
+        return Ok(StatInfo { mode: 0o140777, size: 0, time: crate::time::unix_now(), ino: 4 });
+    }
     let st = st.map_err(|e| -errno(user::fs_error(e)))?;
     // Names without an extension are programs (Linux ones are); the
     // shared libraries' names (libc.so.6) look like programs too.
@@ -596,7 +608,7 @@ pub fn stat_of_desc(d: &Desc) -> Result<StatInfo, i64> {
         Kind::Console => simple(0o020620),
         Kind::Null | Kind::Zero | Kind::Random => simple(0o020666),
         Kind::PipeRead(_) | Kind::PipeWrite(_) => simple(0o010600),
-        Kind::Socket(_) => simple(0o140777),
+        Kind::Socket(_) | Kind::Unix(_) => simple(0o140777),
         Kind::Event(_) | Kind::Epoll(_) => simple(0o100600),
     }
 }
@@ -713,7 +725,7 @@ pub fn sys_faccessat(dirfd: i32, path_ptr: u64) -> i64 {
         return 0;
     }
     match path_arg(dirfd, path_ptr) {
-        Ok((p, _)) if fs::exists(&p) => 0,
+        Ok((p, _)) if fs::exists(&p) || super::unix::is_bound(&p) => 0,
         Ok(_) => -err::ENOENT,
         Err(e) => e,
     }
@@ -774,6 +786,8 @@ pub fn sys_mkdirat(dirfd: i32, path_ptr: u64) -> i64 {
 
 pub fn sys_unlinkat(dirfd: i32, path_ptr: u64) -> i64 {
     match path_arg(dirfd, path_ptr) {
+        // A local socket's name.
+        Ok((p, _)) if super::unix::unlink(&p) => 0,
         Ok((p, _)) => match fs::remove(&p) {
             Ok(()) => 0,
             Err(e) => -errno(user::fs_error(e)),
@@ -901,6 +915,7 @@ pub fn sys_ioctl(fd: i32, req: u64, arg: u64) -> i64 {
             let n = match &d.kind {
                 Kind::PipeRead(p) => p.buf.lock().len() as u32,
                 Kind::Socket(s) => s.pending() as u32,
+                Kind::Unix(u) => u.pending() as u32,
                 Kind::Console => super::tty::pending() as u32,
                 _ => 0,
             };
@@ -935,6 +950,7 @@ pub fn readiness(d: &Desc) -> (bool, bool, bool) {
         }
         Kind::Event(e) => (e.count.load(Ordering::Relaxed) > 0, true, false),
         Kind::Socket(s) => s.readiness(),
+        Kind::Unix(u) => u.readiness(),
         Kind::Console => (super::tty::pending() > 0, true, false),
         Kind::Epoll(e) => (e.any_ready(), false, false),
         _ => (true, true, false),

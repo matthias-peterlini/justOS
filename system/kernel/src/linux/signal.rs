@@ -11,8 +11,8 @@
 //! the call fails with EINTR, or starts again after the handler if the
 //! handler asked for SA_RESTART. Faults (bad memory, invalid instructions,
 //! division by zero) become SIGSEGV, SIGBUS, SIGILL, SIGFPE or SIGTRAP for
-//! a program that handles them, and a child's end sends SIGCHLD to its
-//! parent. Signals that nobody handles do what Linux does by default: end
+//! a program that handles them, a child's end sends SIGCHLD to its
+//! parent, and a write to a pipe nobody reads sends SIGPIPE. Signals that nobody handles do what Linux does by default: end
 //! the process, or nothing. There is no job control: SIGSTOP and SIGTSTP
 //! do nothing.
 
@@ -33,6 +33,7 @@ const SIGBUS: u32 = 7;
 const SIGFPE: u32 = 8;
 const SIGKILL: u32 = 9;
 const SIGSEGV: u32 = 11;
+const SIGPIPE: u32 = 13;
 const SIGTERM: u32 = 15;
 const SIGCHLD: u32 = 17;
 const SIGCONT: u32 = 18;
@@ -256,6 +257,15 @@ pub fn child_ended(parent: u32, child: u32, code: i64) -> bool {
         a.handler == SIG_IGN || a.flags & SA_NOCLDWAIT != 0
     })
     .unwrap_or(false)
+}
+
+/// A write to a pipe or socket that nobody reads any more: SIGPIPE for
+/// the writing thread (by default it ends the process; the write fails
+/// with EPIPE).
+pub fn broken_pipe() {
+    let me = task::current_tid();
+    let pid = task::current_pid();
+    try_state(|st| queue(st, SIGPIPE, Some(me), info(SIGPIPE, SI_USER, pid)));
 }
 
 // ----------------------------------------------------------------------------

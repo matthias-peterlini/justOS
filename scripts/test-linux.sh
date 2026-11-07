@@ -73,7 +73,11 @@ fi
         'dt: shebang ./dt-script' 'dt: script err=0 exit=4' 'dt: no children -1 errno=10' \
         'dt: signal usr1=1' 'dt: siginfo pid=1' 'dt: blocked 0 pending 1 after 1' 'dt: sigtimedwait 12 handler 1' \
         'dt: segv caught 1 addr=0x10' 'dt: signal in a loop 1' 'dt: read interrupted 1' 'dt: read restarted R' \
-        'dt: sigchld 1 suspend 1 exit=5' 'dt: killed by 15, abort 6'
+        'dt: sigchld 1 suspend 1 exit=5' 'dt: killed by 15, abort 6' 'dt: sigpipe 13' \
+        'dt: socketpair pong 4 exit=0' 'dt: fd passed 1 12 hello via fd exit=0' \
+        'dt: unix server 0 0 peerlen=2 cred=1 got hi exit=7 sock=1' 'dt: unix bind busy 98 unlink 0 again 0' \
+        'dt: unix refused 111 missing 2' 'dt: seqpacket 2 3 dgram 2 trunc 1' 'dt: dgram 4 from @dt-b len=7' \
+        'dt: unix eagain 11 eof 0 epipe 32 hup 1'
 } > expect.txt
 
 STEP_WAIT=${STEP_WAIT:-2} "$HERE/test.sh" justos.img session.txt > out.txt 2>&1

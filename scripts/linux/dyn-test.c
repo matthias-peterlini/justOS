@@ -1,11 +1,14 @@
 /* A dynamically linked glibc program for the Linux layer: the dynamic
  * loader, shared libraries, threads in libc, dlopen, new processes
- * (fork, vfork, posix_spawn, execve of a #! script, waitpid) and signals
- * (handlers, masks, faults, EINTR and SA_RESTART, SIGCHLD, kill).
+ * (fork, vfork, posix_spawn, execve of a #! script, waitpid), signals
+ * (handlers, masks, faults, EINTR and SA_RESTART, SIGCHLD, kill, SIGPIPE)
+ * and local sockets (pairs, a named server, SCM_RIGHTS, datagrams).
  * Built by scripts/test-linux.sh with the host's gcc. */
+#define _GNU_SOURCE
 #include <dlfcn.h>
 #include <errno.h>
 #include <gnu/libc-version.h>
+#include <poll.h>
 #include <pthread.h>
 #include <setjmp.h>
 #include <signal.h>
@@ -13,7 +16,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -292,5 +297,214 @@ int main(int argc, char **argv) {
     int st4 = 0;
     waitpid(c4, &st4, 0);
     printf("dt: killed by %d, abort %d\n", WIFSIGNALED(st3) ? WTERMSIG(st3) : -1, WIFSIGNALED(st4) ? WTERMSIG(st4) : -1);
+
+    /* Writing to a pipe nobody reads: SIGPIPE ends the writer. */
+    fflush(stdout);
+    pid_t c8 = fork();
+    if (c8 == 0) {
+        int sp[2];
+        if (pipe(sp) != 0)
+            _exit(1);
+        close(sp[0]);
+        if (write(sp[1], "x", 1) < 0)
+            _exit(2);
+        _exit(3);
+    }
+    int st8 = 0;
+    waitpid(c8, &st8, 0);
+    printf("dt: sigpipe %d\n", WIFSIGNALED(st8) ? WTERMSIG(st8) : -WEXITSTATUS(st8));
+
+    /* Local sockets: a pair across fork, both ways. */
+    int sv[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0)
+        return 1;
+    fflush(stdout);
+    pid_t c5 = fork();
+    if (c5 == 0) {
+        close(sv[0]);
+        char b[8] = {0};
+        if (read(sv[1], b, 4) != 4)
+            _exit(1);
+        if (write(sv[1], strcmp(b, "ping") == 0 ? "pong" : "bad!", 4) != 4)
+            _exit(2);
+        _exit(0);
+    }
+    close(sv[1]);
+    if (write(sv[0], "ping", 4) != 4)
+        return 1;
+    char pb[8] = {0};
+    int pn = (int)read(sv[0], pb, sizeof pb - 1);
+    printf("dt: socketpair %s %d exit=%d\n", pb, pn, reap(c5));
+    close(sv[0]);
+
+    /* A descriptor passed along (SCM_RIGHTS): the child writes into a pipe
+       the parent made after the fork. */
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0)
+        return 1;
+    fflush(stdout);
+    pid_t c6 = fork();
+    if (c6 == 0) {
+        close(sv[0]);
+        char b[4];
+        char cbuf[CMSG_SPACE(sizeof(int))];
+        struct iovec io = {b, sizeof b};
+        struct msghdr mh;
+        memset(&mh, 0, sizeof mh);
+        mh.msg_iov = &io;
+        mh.msg_iovlen = 1;
+        mh.msg_control = cbuf;
+        mh.msg_controllen = sizeof cbuf;
+        if (recvmsg(sv[1], &mh, 0) != 1)
+            _exit(1);
+        struct cmsghdr *cm = CMSG_FIRSTHDR(&mh);
+        if (!cm || cm->cmsg_level != SOL_SOCKET || cm->cmsg_type != SCM_RIGHTS)
+            _exit(2);
+        int got;
+        memcpy(&got, CMSG_DATA(cm), sizeof got);
+        if (write(got, "hello via fd", 12) != 12)
+            _exit(3);
+        _exit(0);
+    }
+    close(sv[1]);
+    int fp[2];
+    if (pipe(fp) != 0)
+        return 1;
+    char cb2[CMSG_SPACE(sizeof(int))];
+    memset(cb2, 0, sizeof cb2);
+    struct iovec io2 = {(void *)"x", 1};
+    struct msghdr m2;
+    memset(&m2, 0, sizeof m2);
+    m2.msg_iov = &io2;
+    m2.msg_iovlen = 1;
+    m2.msg_control = cb2;
+    m2.msg_controllen = sizeof cb2;
+    struct cmsghdr *cm2 = CMSG_FIRSTHDR(&m2);
+    cm2->cmsg_level = SOL_SOCKET;
+    cm2->cmsg_type = SCM_RIGHTS;
+    cm2->cmsg_len = CMSG_LEN(sizeof(int));
+    memcpy(CMSG_DATA(cm2), &fp[1], sizeof(int));
+    long sent = (long)sendmsg(sv[0], &m2, 0);
+    close(fp[1]);
+    char fbuf[32] = {0};
+    long fr = (long)read(fp[0], fbuf, sizeof fbuf - 1);
+    printf("dt: fd passed %ld %ld %s exit=%d\n", sent, fr, fbuf, reap(c6));
+    close(fp[0]);
+    close(sv[0]);
+
+    /* A named server: bind, listen, a child connects, accept. */
+    unlink("dt.sock");
+    struct sockaddr_un ua;
+    memset(&ua, 0, sizeof ua);
+    ua.sun_family = AF_UNIX;
+    strcpy(ua.sun_path, "dt.sock");
+    int srv = socket(AF_UNIX, SOCK_STREAM, 0);
+    int b1 = bind(srv, (struct sockaddr *)&ua, sizeof ua);
+    int l1 = listen(srv, 4);
+    fflush(stdout);
+    pid_t c7 = fork();
+    if (c7 == 0) {
+        int cs = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (connect(cs, (struct sockaddr *)&ua, sizeof ua) != 0)
+            _exit(1);
+        if (write(cs, "hi", 2) != 2)
+            _exit(2);
+        char r[4] = {0};
+        if (read(cs, r, 2) != 2)
+            _exit(3);
+        _exit(strcmp(r, "ok") == 0 ? 7 : 4);
+    }
+    struct sockaddr_un pa;
+    socklen_t pl = sizeof pa;
+    int acc = accept(srv, (struct sockaddr *)&pa, &pl);
+    struct ucred cr;
+    memset(&cr, 0, sizeof cr);
+    socklen_t crl = sizeof cr;
+    getsockopt(acc, SOL_SOCKET, SO_PEERCRED, &cr, &crl);
+    char hb[4] = {0};
+    if (read(acc, hb, 2) != 2)
+        return 1;
+    if (write(acc, "ok", 2) != 2)
+        return 1;
+    struct stat sst;
+    int issock = stat("dt.sock", &sst) == 0 && S_ISSOCK(sst.st_mode);
+    int e7 = reap(c7);
+    printf("dt: unix server %d %d peerlen=%d cred=%d got %s exit=%d sock=%d\n", b1, l1, (int)pl, cr.pid == c7, hb, e7, issock);
+
+    /* The name is taken until it is unlinked. */
+    int s2 = socket(AF_UNIX, SOCK_STREAM, 0);
+    int busy = bind(s2, (struct sockaddr *)&ua, sizeof ua) == 0 ? 0 : errno;
+    int ul = unlink("dt.sock");
+    int again = bind(s2, (struct sockaddr *)&ua, sizeof ua);
+    printf("dt: unix bind busy %d unlink %d again %d\n", busy, ul, again);
+    close(s2);
+    close(acc);
+    close(srv);
+
+    /* Nobody there: refused (abstract name), or no such file (path). */
+    struct sockaddr_un na;
+    memset(&na, 0, sizeof na);
+    na.sun_family = AF_UNIX;
+    memcpy(na.sun_path, "\0dt-nobody", 10);
+    int s3 = socket(AF_UNIX, SOCK_STREAM, 0);
+    int r1 = connect(s3, (struct sockaddr *)&na, sizeof(sa_family_t) + 10) == 0 ? 0 : errno;
+    strcpy(ua.sun_path, "dt-missing.sock");
+    int r2 = connect(s3, (struct sockaddr *)&ua, sizeof ua) == 0 ? 0 : errno;
+    close(s3);
+    printf("dt: unix refused %d missing %d\n", r1, r2);
+
+    /* Message boundaries: seqpacket keeps them, a short buffer cuts a datagram. */
+    if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sv) != 0)
+        return 1;
+    send(sv[0], "ab", 2, 0);
+    send(sv[0], "cde", 3, 0);
+    char mb[16];
+    int q1 = (int)recv(sv[1], mb, sizeof mb, 0);
+    int q2 = (int)recv(sv[1], mb, sizeof mb, 0);
+    close(sv[0]);
+    close(sv[1]);
+    if (socketpair(AF_UNIX, SOCK_DGRAM, 0, sv) != 0)
+        return 1;
+    send(sv[0], "hello", 5, 0);
+    struct iovec io3 = {mb, 2};
+    struct msghdr m3;
+    memset(&m3, 0, sizeof m3);
+    m3.msg_iov = &io3;
+    m3.msg_iovlen = 1;
+    int q3 = (int)recvmsg(sv[1], &m3, 0);
+    printf("dt: seqpacket %d %d dgram %d trunc %d\n", q1, q2, q3, (m3.msg_flags & MSG_TRUNC) != 0);
+    close(sv[0]);
+    close(sv[1]);
+
+    /* Datagrams between two named sockets, in the abstract namespace. */
+    struct sockaddr_un da, db, from;
+    socklen_t dl = sizeof(sa_family_t) + 5;
+    memset(&da, 0, sizeof da);
+    memset(&db, 0, sizeof db);
+    da.sun_family = db.sun_family = AF_UNIX;
+    memcpy(da.sun_path, "\0dt-a", 5);
+    memcpy(db.sun_path, "\0dt-b", 5);
+    int ga = socket(AF_UNIX, SOCK_DGRAM, 0);
+    int gb = socket(AF_UNIX, SOCK_DGRAM, 0);
+    bind(ga, (struct sockaddr *)&da, dl);
+    bind(gb, (struct sockaddr *)&db, dl);
+    sendto(gb, "to a", 4, 0, (struct sockaddr *)&da, dl);
+    socklen_t froml = sizeof from;
+    memset(&from, 0, sizeof from);
+    int gn = (int)recvfrom(ga, mb, sizeof mb, 0, (struct sockaddr *)&from, &froml);
+    printf("dt: dgram %d from @%s len=%d\n", gn, from.sun_path + 1, (int)froml);
+    close(ga);
+    close(gb);
+
+    /* The other end: EAGAIN while it is there, then the end, EPIPE, POLLHUP. */
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, sv) != 0)
+        return 1;
+    int ea = read(sv[0], mb, sizeof mb) < 0 ? errno : 0;
+    close(sv[1]);
+    int eof = (int)read(sv[0], mb, sizeof mb);
+    int ep = send(sv[0], "x", 1, MSG_NOSIGNAL) < 0 ? errno : 0;
+    struct pollfd pf = {sv[0], POLLIN, 0};
+    poll(&pf, 1, 0);
+    printf("dt: unix eagain %d eof %d epipe %d hup %d\n", ea, eof, ep, (pf.revents & POLLHUP) != 0);
+    close(sv[0]);
     return 0;
 }

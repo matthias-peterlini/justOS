@@ -1,9 +1,11 @@
 //! BSD sockets for Linux programs: TCP and UDP over IPv4, on the kernel's
 //! network stack. Blocking and non-blocking (connect returns EINPROGRESS,
 //! then the socket turns writable), so event loops built on epoll work.
+//! Local sockets (AF_UNIX) are in [`super::unix`]; the calls here pass
+//! them on.
 
 use super::fd::{self, Desc, Kind, O_NONBLOCK, O_RDWR};
-use super::{err, user_bytes};
+use super::{err, unix, user_bytes};
 use crate::net::tcp::{self, Conn, Read};
 use crate::net::{self, Ip};
 use crate::sync::IrqLock;
@@ -87,8 +89,16 @@ fn write_addr(ptr: u64, lenp: u64, ip: Ip, port: u16) -> i64 {
 fn socket_of(fd: i32) -> Result<alloc::sync::Arc<Desc>, i64> {
     let d = fd::get(fd).ok_or(-err::EBADF)?;
     match d.kind {
-        Kind::Socket(_) => Ok(d),
+        Kind::Socket(_) | Kind::Unix(_) => Ok(d),
         _ => Err(-err::ENOTSOCK),
+    }
+}
+
+/// The local socket behind `d`, if it is one.
+fn local(d: &Desc) -> Option<&unix::Unix> {
+    match &d.kind {
+        Kind::Unix(u) => Some(u),
+        _ => None,
     }
 }
 
@@ -100,6 +110,9 @@ fn sock(d: &Desc) -> &Socket {
 }
 
 pub fn sys_socket(domain: u64, ty: u64, _proto: u64) -> i64 {
+    if domain == unix::AF_UNIX {
+        return unix::socket(ty);
+    }
     if domain != AF_INET {
         return -err::EAFNOSUPPORT;
     }
@@ -114,10 +127,11 @@ pub fn sys_socket(domain: u64, ty: u64, _proto: u64) -> i64 {
     fd::install(Desc::new(Kind::Socket(s), flags), ty & SOCK_CLOEXEC != 0)
 }
 
-pub fn sys_socketpair(ptr: u64) -> i64 {
-    // Two pipes would be needed for both directions; a single pipe pair
-    // covers the common use (waking an event loop).
-    fd::sys_pipe2(ptr, 0)
+pub fn sys_socketpair(domain: u64, ty: u64, ptr: u64) -> i64 {
+    if domain != unix::AF_UNIX {
+        return -err::EOPNOTSUPP;
+    }
+    unix::socketpair(ty, ptr)
 }
 
 pub fn sys_connect(fd: i32, addr: u64, len: u64) -> i64 {
@@ -125,6 +139,9 @@ pub fn sys_connect(fd: i32, addr: u64, len: u64) -> i64 {
         Ok(d) => d,
         Err(e) => return e,
     };
+    if let Some(u) = local(&d) {
+        return u.connect(&d, addr, len);
+    }
     let s = sock(&d);
     let (ip, port) = match read_addr(addr, len) {
         Ok(a) => a,
@@ -343,6 +360,9 @@ pub fn sys_bind(fd: i32, addr: u64, len: u64) -> i64 {
         Ok(d) => d,
         Err(e) => return e,
     };
+    if let Some(u) = local(&d) {
+        return u.bind(addr, len);
+    }
     let s = sock(&d);
     let (_, port) = match read_addr(addr, len) {
         Ok(a) => a,
@@ -361,11 +381,14 @@ pub fn sys_bind(fd: i32, addr: u64, len: u64) -> i64 {
     }
 }
 
-pub fn sys_listen(fd: i32) -> i64 {
+pub fn sys_listen(fd: i32, backlog: u64) -> i64 {
     let d = match socket_of(fd) {
         Ok(d) => d,
         Err(e) => return e,
     };
+    if let Some(u) = local(&d) {
+        return u.listen(backlog);
+    }
     let s = sock(&d);
     let port = match *s.state.lock() {
         State::Fresh { port } => port,
@@ -387,6 +410,9 @@ pub fn sys_accept4(fd: i32, addr: u64, lenp: u64, flags: u64) -> i64 {
         Ok(d) => d,
         Err(e) => return e,
     };
+    if let Some(u) = local(&d) {
+        return u.accept(&d, addr, lenp, flags);
+    }
     let s = sock(&d);
     let State::Listening(l, _) = *s.state.lock() else { return -err::EINVAL };
     let conn = loop {
@@ -414,6 +440,12 @@ pub fn sys_sendto(fd: i32, ptr: u64, len: u64, flags: u64, addr: u64, alen: u64)
         Ok(d) => d,
         Err(e) => return e,
     };
+    if let Some(u) = local(&d) {
+        return match user_bytes(ptr, len) {
+            Ok(b) => unix::sendto(u, &d, b, flags, addr, alen),
+            Err(e) => e,
+        };
+    }
     let s = sock(&d);
     let data = match user_bytes(ptr, len) {
         Ok(b) => b.to_vec(),
@@ -458,6 +490,9 @@ pub fn sys_recvfrom(fd: i32, ptr: u64, len: u64, flags: u64, addr: u64, lenp: u6
         Ok(b) => b,
         Err(e) => return e,
     };
+    if let Some(u) = local(&d) {
+        return unix::recvfrom(u, &d, buf, flags, addr, lenp);
+    }
     let (n, from) = sock(&d).recv(&d, buf, flags);
     if let Some((ip, port)) = from {
         write_addr(addr, lenp, ip, port);
@@ -481,6 +516,9 @@ pub fn sys_sendmsg(fd: i32, msg: u64, flags: u64) -> i64 {
         Ok(d) => d,
         Err(e) => return e,
     };
+    if let Some(u) = local(&d) {
+        return unix::sendmsg(u, &d, msg, &data, flags);
+    }
     if name != 0 && !sock(&d).stream {
         let (ip, port) = match read_addr(name, namelen) {
             Ok(a) => a,
@@ -535,21 +573,33 @@ pub fn sys_recvmsg(fd: i32, msg: u64, flags: u64) -> i64 {
         Ok(v) => v.chunks(16).map(|c| u64::from_le_bytes(c[8..].try_into().unwrap())).sum(),
         Err(e) => return e,
     };
-    let mut tmp = alloc::vec![0u8; total.min(1 << 20) as usize];
-    let (n, from) = sock(&d).recv(&d, &mut tmp, flags);
-    if n <= 0 {
-        return n;
-    }
+    let cap = total.min(1 << 20) as usize;
+    let (n, tmp, from) = match local(&d) {
+        // It fills in the name, the descriptors and the flags itself.
+        Some(u) => match unix::recvmsg(u, &d, msg, cap, flags) {
+            Ok((n, data)) => (n, data, None),
+            Err(e) => return e,
+        },
+        None => {
+            let mut tmp = alloc::vec![0u8; cap];
+            let (n, from) = sock(&d).recv(&d, &mut tmp, flags);
+            if n <= 0 {
+                return n;
+            }
+            tmp.truncate(n as usize);
+            (n, tmp, from)
+        }
+    };
     // Scatter into the buffers.
     let mut off = 0usize;
     let v = user_bytes(iov, iovlen * 16).map(|b| b.to_vec()).unwrap_or_default();
     for c in v.chunks(16) {
-        if off >= n as usize {
+        if off >= tmp.len() {
             break;
         }
         let base = u64::from_le_bytes(c[..8].try_into().unwrap());
         let len = u64::from_le_bytes(c[8..].try_into().unwrap()) as usize;
-        let k = len.min(n as usize - off);
+        let k = len.min(tmp.len() - off);
         if let Ok(b) = user_bytes(base, k as u64) {
             b.copy_from_slice(&tmp[off..off + k]);
         }
@@ -559,10 +609,12 @@ pub fn sys_recvmsg(fd: i32, msg: u64, flags: u64) -> i64 {
         // msg_namelen is at offset 8 (a u32).
         write_addr(name, msg + 8, ip, port);
     }
-    // No control data, no flags.
-    if let Ok(b) = user_bytes(msg + 40, 16) {
-        b[0..8].copy_from_slice(&0u64.to_le_bytes()); // msg_controllen
-        b[8..12].copy_from_slice(&0u32.to_le_bytes()); // msg_flags
+    if local(&d).is_none() {
+        // No control data, no flags.
+        if let Ok(b) = user_bytes(msg + 40, 16) {
+            b[0..8].copy_from_slice(&0u64.to_le_bytes()); // msg_controllen
+            b[8..12].copy_from_slice(&0u32.to_le_bytes()); // msg_flags
+        }
     }
     n
 }
@@ -572,6 +624,9 @@ pub fn sys_shutdown(fd: i32, how: u64) -> i64 {
         Ok(d) => d,
         Err(e) => return e,
     };
+    if let Some(u) = local(&d) {
+        return u.shutdown(how);
+    }
     if how >= 1 {
         if let State::Connected(c) = *sock(&d).state.lock() {
             tcp::shutdown(c);
@@ -585,6 +640,9 @@ pub fn sys_getsockname(fd: i32, addr: u64, lenp: u64) -> i64 {
         Ok(d) => d,
         Err(e) => return e,
     };
+    if let Some(u) = local(&d) {
+        return u.sockname(addr, lenp);
+    }
     let me = net::local_ip().unwrap_or(Ip::ANY);
     let port = match *sock(&d).state.lock() {
         State::Connected(c) | State::Connecting(c) => tcp::endpoints(c).map(|e| e.0).unwrap_or(0),
@@ -599,6 +657,9 @@ pub fn sys_getpeername(fd: i32, addr: u64, lenp: u64) -> i64 {
         Ok(d) => d,
         Err(e) => return e,
     };
+    if let Some(u) = local(&d) {
+        return u.peername(addr, lenp);
+    }
     let peer = match *sock(&d).state.lock() {
         State::Connected(c) => tcp::endpoints(c).map(|e| (e.1, e.2)),
         State::Udp { peer, .. } => peer,
@@ -618,6 +679,21 @@ pub fn sys_getsockopt(fd: i32, level: u64, name: u64, val: u64, lenp: u64) -> i6
         Ok(d) => d,
         Err(e) => return e,
     };
+    if let Some(u) = local(&d) {
+        let v = if level == SOL_SOCKET { u.option(name) } else { None };
+        let v = v.unwrap_or_else(|| Vec::from(0u32.to_le_bytes()));
+        if val != 0 {
+            let cap = user_bytes(lenp, 4).map(|b| u32::from_le_bytes(b[..4].try_into().unwrap()) as usize).unwrap_or(0);
+            let k = cap.min(v.len());
+            if let Ok(b) = user_bytes(val, k as u64) {
+                b.copy_from_slice(&v[..k]);
+            }
+            if let Ok(b) = user_bytes(lenp, 4) {
+                b.copy_from_slice(&(k as u32).to_le_bytes());
+            }
+        }
+        return 0;
+    }
     let s = sock(&d);
     s.settle();
     let v: i32 = match (level, name) {

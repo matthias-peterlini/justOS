@@ -9,7 +9,8 @@
 //! What is there: files and folders (the Linux file tree is a view of the
 //! process's JustOS volume), the console as a terminal ([`tty`]), memory with
 //! demand paging ([`mm`]), threads and futexes ([`thread`]), pipes and
-//! eventfds ([`fd`]), TCP and UDP sockets ([`sock`]), poll, select and epoll
+//! eventfds ([`fd`]), TCP and UDP sockets ([`sock`]), local sockets that
+//! pass descriptors along ([`unix`]), poll, select and epoll
 //! ([`poll`]), clocks and randomness. Dynamically linked programs start in
 //! the dynamic loader they name (glibc's ld-linux-x86-64.so.2, found on the
 //! volume like any file), which maps their shared libraries with `mmap`.
@@ -24,6 +25,7 @@ pub mod signal;
 mod sock;
 mod thread;
 mod tty;
+mod unix;
 
 use crate::arch::idt::TrapFrame;
 use crate::fs::Path;
@@ -71,6 +73,7 @@ pub mod err {
     pub const ENOTEMPTY: i64 = 39;
     pub const ENOTSOCK: i64 = 88;
     pub const EDESTADDRREQ: i64 = 89;
+    pub const EMSGSIZE: i64 = 90;
     pub const EOPNOTSUPP: i64 = 95;
     pub const EAFNOSUPPORT: i64 = 97;
     pub const EADDRINUSE: i64 = 98;
@@ -640,10 +643,10 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         47 => sock::sys_recvmsg(fd0, a[1], a[2]),
         48 => sock::sys_shutdown(fd0, a[1]),
         49 => sock::sys_bind(fd0, a[1], a[2]),
-        50 => sock::sys_listen(fd0),
+        50 => sock::sys_listen(fd0, a[1]),
         51 => sock::sys_getsockname(fd0, a[1], a[2]),
         52 => sock::sys_getpeername(fd0, a[1], a[2]),
-        53 => sock::sys_socketpair(a[3]),
+        53 => sock::sys_socketpair(a[0], a[1], a[3]),
         54 => 0, // setsockopt
         55 => sock::sys_getsockopt(fd0, a[1], a[2], a[3], a[4]),
         59 => sys_execve(a[0], a[1], a[2]),
