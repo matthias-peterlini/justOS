@@ -125,7 +125,7 @@ for c in $CASES; do
     esac
     case $CMDS in
         net) EXPECT="3 of 3 replies" ;;
-        sd) EXPECT="sdhci 1.1.0 installed|$EXPECT_SD|written on the card|card: no problems found" ;;
+        sd) EXPECT="sdhci 1.1.1 installed|$EXPECT_SD|written on the card|card: no problems found" ;;
         usb) EXPECT="usbhid 1.0.0 installed|usbstorage 1.0.0 installed|Benvenuto in justOS|stick: no problems found" ;;
     esac
     [ "$c" = multi-nic ] && EXPECT="$EXPECT|^net2 "

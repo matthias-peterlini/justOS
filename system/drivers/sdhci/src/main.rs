@@ -26,7 +26,7 @@ use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 justdrv::driver! {
     name: "sdhci",
-    version: "1.1.0",
+    version: "1.1.1",
     probe: probe,
 }
 
@@ -84,9 +84,13 @@ const SECTOR: usize = 512;
 /// Sectors per DMA transfer: the bounce buffer's size.
 const DMA_SECTORS: u32 = 128;
 const DMA_SIZE: usize = DMA_SECTORS as usize * SECTOR;
-/// SDMA stops at every 4 KiB boundary (the default) to be given the next
-/// address.
-const SDMA_BOUNDARY: usize = 4096;
+/// SDMA stops at every boundary of this size to be given the next address:
+/// 512 KiB, the largest (value 7 in the block size register's top bits).
+/// Transfers end before the bounce buffer crosses one, as Linux's do: QEMU
+/// ignores the next address while a transfer is under way, so a transfer
+/// that stops at a boundary never goes on there.
+const SDMA_BOUNDARY: usize = 512 * 1024;
+const SDMA_BOUNDARY_ARG: u16 = 7 << 12;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -274,7 +278,8 @@ impl Slot {
         let mut cmd = (index as u16) << 8 | resp.flags();
         if let Some(d) = data {
             cmd |= 1 << 5;
-            self.regs.write16(BLOCK_SIZE, SECTOR as u16);
+            let boundary = if d.dma && self.mode == Mode::Sdma { SDMA_BOUNDARY_ARG } else { 0 };
+            self.regs.write16(BLOCK_SIZE, SECTOR as u16 | boundary);
             self.regs.write16(BLOCK_COUNT, d.blocks);
             let mut mode = TM_BLOCK_COUNT;
             if d.dma {
@@ -587,7 +592,14 @@ fn transfer(card: &Card, lba: u64, count: u32, buf: *mut u8, write: bool) -> Sta
     let s = card.slot;
     let io = s.io.lock();
     let bufs = io.as_ref().filter(|_| s.mode != Mode::Pio);
-    let per_command = if bufs.is_some() { DMA_SECTORS } else { 0xFFFF };
+    let per_command = match bufs {
+        Some(b) if s.mode == Mode::Sdma => {
+            let to_boundary = SDMA_BOUNDARY - b.data.phys() as usize % SDMA_BOUNDARY;
+            DMA_SECTORS.min((to_boundary / SECTOR) as u32)
+        }
+        Some(_) => DMA_SECTORS,
+        None => 0xFFFF,
+    };
     let mut done = 0u32;
     while done < count {
         if card.gone.load(Ordering::Acquire) || !s.card_present() {

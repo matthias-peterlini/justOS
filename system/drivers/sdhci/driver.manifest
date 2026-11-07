@@ -4,7 +4,7 @@
 # usbstorage; Realtek and Genesys PCIe readers have their own interface and
 # are not supported yet.
 name        = sdhci
-version     = 1.1.0
+version     = 1.1.1
 class       = storage
 description = SD card reader (SD host controller)
 author      = justOS

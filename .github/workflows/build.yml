@@ -38,8 +38,11 @@ jobs:
           make test-justscript
 
       # The rest of the suite: every test runs, and the step fails at the end
-      # naming the ones that failed.
+      # naming the ones that failed. VERBOSE=1 prints the session of every
+      # failed case.
       - name: More tests in QEMU
+        env:
+          VERBOSE: "1"
         run: |
           failed=""
           for t in test-uefi test-iso test-drivers test-display test-acpi test-update test-linux test-wayland test-gtk; do
