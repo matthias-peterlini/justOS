@@ -400,9 +400,13 @@ pub(crate) fn parent_pid() -> u32 {
 /// or any), removed from the table with its exit code. Ok(None) with
 /// `nohang` when children are still running; Err(NotFound) if there are
 /// none; Err(Cancelled) if the caller is being stopped.
-pub(crate) fn wait_child(want: Option<u32>, nohang: bool) -> Result<Option<(u32, i64)>, Error> {
+pub(crate) fn wait_child(want: Option<u32>, nohang: bool, stop: impl Fn() -> bool) -> Result<Option<(u32, i64)>, Error> {
     let me = task::current_pid();
     EXITED.wait_for(|| {
+        // A signal for the caller (it was woken by `wake_waiters`).
+        if stop() {
+            return Some(Err(Error::Cancelled));
+        }
         let mut procs = PROCS.lock();
         if procs.get(&me).is_some_and(|p| p.kill) {
             return Some(Err(Error::Cancelled));
@@ -433,8 +437,8 @@ pub(crate) fn wait_child(want: Option<u32>, nohang: bool) -> Result<Option<(u32,
 
 /// A process ended: its ended children go (no one will wait for them now),
 /// its running ones become orphans, and it goes too if its own parent is
-/// no longer there to wait for it.
-fn settle(pid: u32) {
+/// no longer there to wait for it, or will not (`reap`).
+fn settle(pid: u32, reap: bool) {
     let mut procs = PROCS.lock();
     let children: Vec<u32> = procs.iter().filter(|(_, p)| p.parent == Some(pid)).map(|(&id, _)| id).collect();
     for id in children {
@@ -445,7 +449,7 @@ fn settle(pid: u32) {
             p.orphan = true;
         }
     }
-    let gone = procs.get(&pid).is_some_and(|p| {
+    let gone = reap || procs.get(&pid).is_some_and(|p| {
         // Nobody waits for an orphan: it goes as soon as it ends.
         p.orphan || p.parent.is_some_and(|parent| !procs.get(&parent).is_some_and(|q| q.state == State::Running))
     });
@@ -619,7 +623,13 @@ fn teardown(pid: u32, cr3: u64) -> ! {
         paging::free_address_space(cr3);
     }
     crate::gui::window::process_ended(pid);
-    settle(pid);
+    // A Linux parent hears of it (SIGCHLD), and may have said not to wait.
+    let ended = PROCS.lock().get(&pid).and_then(|p| match p.state {
+        State::Exited(code) => p.parent.map(|parent| (parent, code)),
+        State::Running => None,
+    });
+    let reap = ended.is_some_and(|(parent, code)| crate::linux::signal::child_ended(parent, pid, code));
+    settle(pid, reap);
     EXITED.notify_all();
     task::exit();
 }
@@ -742,10 +752,37 @@ pub fn run_applet_foreground(path: &Path, argv0: &str, args: &str, cwd: Path) ->
     Ok(code.unwrap_or(-1))
 }
 
-/// Ctrl+C: asks the foreground program to stop. Returns whether there was one.
+/// Ctrl+C: the foreground program and the processes it made stop, except
+/// Linux programs that handle SIGINT (they get it) or ignore it. Returns
+/// whether there was a foreground program.
 pub fn interrupt_foreground() -> bool {
     let Some(pid) = *FOREGROUND.lock() else { return false };
-    kill(pid)
+    let tree = {
+        let procs = PROCS.lock();
+        let mut tree = Vec::new();
+        let mut todo = alloc::vec![pid];
+        while let Some(id) = todo.pop() {
+            if procs.get(&id).is_some_and(|p| p.state == State::Running) {
+                tree.push(id);
+            }
+            todo.extend(procs.iter().filter(|(_, c)| c.parent == Some(id)).map(|(&c, _)| c));
+        }
+        tree
+    };
+    if tree.is_empty() {
+        return false;
+    }
+    let stop: Vec<u32> = tree.into_iter().filter(|&id| !crate::linux::signal::interrupt(id)).collect();
+    {
+        let mut procs = PROCS.lock();
+        for id in stop {
+            if let Some(p) = procs.get_mut(&id) {
+                p.kill = true;
+            }
+        }
+    }
+    EXITED.notify_all();
+    true
 }
 
 /// Asks a process to stop, with the processes it made (fork) and theirs.
@@ -774,12 +811,42 @@ pub(crate) fn kill_requested() -> bool {
     PROCS.lock().get(&pid).is_some_and(|p| p.kill)
 }
 
-/// Called on timer interrupts that hit user mode.
-pub fn check_kill(frame: &TrapFrame) {
-    if frame.is_user() && kill_requested() {
+/// Is `pid` a running process?
+pub(crate) fn is_running(pid: u32) -> bool {
+    PROCS.lock().get(&pid).is_some_and(|p| p.state == State::Running)
+}
+
+/// Stops one process (SIGKILL), not the ones it made.
+pub(crate) fn kill_one(pid: u32) {
+    if let Some(p) = PROCS.lock().get_mut(&pid) {
+        if p.state == State::Running {
+            p.kill = true;
+        }
+    }
+    EXITED.notify_all();
+}
+
+/// Wakes the threads waiting for a child, to look at their signals.
+pub(crate) fn wake_waiters() {
+    EXITED.notify_all();
+}
+
+/// The first thread of a running process.
+pub(crate) fn main_thread_of(pid: u32) -> Option<Tid> {
+    PROCS.lock().get(&pid).filter(|p| p.state == State::Running).map(|p| p.tid)
+}
+
+/// Called on timer interrupts: a program in user mode that is being
+/// stopped stops, and a Linux program gets the signal waiting for it.
+pub fn check_kill(frame: &mut TrapFrame) {
+    if !frame.is_user() {
+        return;
+    }
+    if kill_requested() {
         cpu::enable_irq();
         terminate(-130);
     }
+    crate::linux::signal::at_interrupt(frame);
 }
 
 pub fn count() -> usize {
@@ -1395,7 +1462,13 @@ pub fn fault(frame: &mut TrapFrame, what: &str) {
     if frame.vector == 14 && crate::linux::mm::fault(cpu::read_cr2(), frame.error & 2 != 0) {
         return;
     }
+    let cr2 = cpu::read_cr2();
     cpu::enable_irq();
+    // A Linux program may handle it (SIGSEGV and the like).
+    if crate::linux::signal::fault(frame, cr2) {
+        cpu::disable_irq();
+        return;
+    }
     let extra = if frame.vector == 14 { alloc::format!(" (address {:#x})", cpu::read_cr2()) } else { String::new() };
     crate::println!("\x1b[91m{} stopped: {what} at {:#x}{extra}\x1b[0m", current_name(), frame.rip);
     if let Some(title) = crate::gui::window::title_of(task::current_pid()) {

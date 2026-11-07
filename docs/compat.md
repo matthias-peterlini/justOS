@@ -57,7 +57,7 @@ busybox ls -la             un programma installato (vedi "Installare programmi")
 | collegamenti simbolici | `symlink`, `readlink`, `lstat` |
 | utenti | tutto gira come `root` |
 | processi nuovi | `fork` (il figlio ha una copia della memoria), `vfork` e `posix_spawn` (il figlio usa la memoria del padre finché non chiama `execve`), `execve` (anche degli script che iniziano con `#!`), `wait4`, `waitid`, `getppid`; i descrittori aperti passano al figlio, quelli con `O_CLOEXEC` si chiudono con `execve` |
-| segnali | per ora solo verso sé stessi: un segnale mandato a un altro processo non arriva |
+| segnali | gestori con `sigaction` (`SA_SIGINFO`, `SA_RESTART`, `SA_ONSTACK`, `SA_RESETHAND`, `SA_NODEFER`) e `sigaltstack`, maschere per thread, `kill`, `tgkill`, `sigpending`, `sigtimedwait`, `sigsuspend`, `pause`, `SIGCHLD` quando un figlio finisce; un'attesa interrotta da un gestore risponde `EINTR` o riparte da sola con `SA_RESTART`; un accesso non valido diventa `SIGSEGV` (e `SIGBUS`, `SIGILL`, `SIGFPE`) per chi ha un gestore; Ctrl+C manda `SIGINT` ai programmi che lo gestiscono; niente controllo dei job (`SIGSTOP`, `SIGTSTP`) |
 
 Le chiamate implementate bastano ai programmi da riga di comando: lettura e
 scrittura di file, elenco di cartelle (`getdents64`), `stat`, `ioctl` per sapere
@@ -200,9 +200,9 @@ anche senza estensione) lo avvia nel Terminale.
   rete, i servizi di Google Play, il codice nativo (`.so`) e le lambda
   compilate con `invokedynamic` (quelle trasformate da `d8` vanno bene). I
   thread girano uno dopo l'altro.
-- **Linux**: i segnali tra processi (`kill`, `SIGCHLD`), `execve` da un
-  programma con più thread, la memoria condivisa (`MAP_SHARED` tra processi,
-  `memfd`) e i socket `AF_UNIX` non ci sono ancora.
+- **Linux**: `execve` da un programma con più thread, la memoria condivisa
+  (`MAP_SHARED` tra processi, `memfd`), i socket `AF_UNIX` e il controllo dei
+  job (`SIGSTOP`, `SIGTSTP`) non ci sono ancora.
 - **Windows a 32 bit**: non ancora.
 
 ## Provarlo

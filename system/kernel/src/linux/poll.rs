@@ -10,7 +10,6 @@ use super::fd::{self, Desc, Kind};
 use super::{err, user_bytes};
 use crate::net::EVENTS;
 use crate::sync::IrqLock;
-use crate::user;
 use alloc::collections::BTreeMap;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
@@ -32,18 +31,20 @@ const EPOLLONESHOT: u32 = 1 << 30;
 
 /// Waits until `check` returns something, or the timeout (ms; negative:
 /// forever) runs out.
-fn wait<T>(timeout_ms: i64, mut check: impl FnMut() -> Option<T>) -> Option<T> {
+fn wait<T>(timeout_ms: i64, mut check: impl FnMut() -> Option<T>) -> Result<Option<T>, i64> {
     let start = crate::time::uptime_ms();
     loop {
         if let Some(v) = check() {
-            return Some(v);
+            return Ok(Some(v));
         }
         let elapsed = (crate::time::uptime_ms() - start) as i64;
         if timeout_ms >= 0 && elapsed >= timeout_ms {
-            return None;
+            return Ok(None);
         }
-        if user::kill_requested() {
-            user::terminate(-130);
+        // A signal handler to run: poll, select and epoll_wait fail with
+        // EINTR, whatever SA_RESTART says.
+        if super::signal::interrupted().is_some() {
+            return Err(-err::EINTR);
         }
         let slice = if timeout_ms < 0 { 10 } else { (timeout_ms - elapsed).clamp(1, 10) as u64 };
         EVENTS.wait_for_timeout(slice, || None::<()>);
@@ -97,6 +98,10 @@ pub fn sys_poll(ptr: u64, n: u64, timeout_ms: i64) -> i64 {
         }
         (count > 0).then_some((count, out))
     });
+    let r = match r {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
     let (count, bits) = r.unwrap_or((0, alloc::vec![0; entries.len()]));
     for (i, c) in fds.chunks_mut(8).enumerate() {
         c[6..8].copy_from_slice(&bits[i].to_le_bytes());
@@ -159,6 +164,10 @@ pub fn sys_select(n: u64, rd: u64, wr: u64, ex: u64, timeout_ms: i64) -> i64 {
         }
         (count > 0).then_some((count, r1, w1))
     });
+    let r = match r {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
     let (count, r1, w1) = r.unwrap_or((0, alloc::vec![0; bytes], alloc::vec![0; bytes]));
     for (p, v) in [(rd, &r1), (wr, &w1), (ex, &alloc::vec![0u8; bytes])] {
         if p != 0 {
@@ -305,11 +314,13 @@ pub fn sys_epoll_wait(epfd: i32, out: u64, max: i32, timeout_ms: i64) -> i64 {
     let Some(ep) = fd::get(epfd) else { return -err::EBADF };
     let Kind::Epoll(e) = &ep.kind else { return -err::EINVAL };
     let max = (max as usize).min(1024);
-    let got = wait(timeout_ms, || {
+    let got = match wait(timeout_ms, || {
         let v = e.collect(max);
         (!v.is_empty()).then_some(v)
-    })
-    .unwrap_or_default();
+    }) {
+        Ok(v) => v.unwrap_or_default(),
+        Err(x) => return x,
+    };
     let buf = match user_bytes(out, (got.len() * 12) as u64) {
         Ok(b) => b,
         Err(e) => return e,

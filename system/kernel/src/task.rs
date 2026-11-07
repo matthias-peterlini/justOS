@@ -570,6 +570,11 @@ pub fn current_pid() -> u32 {
     s.threads.get(&s.current()).map(|t| t.pid).unwrap_or(0)
 }
 
+/// The process a thread belongs to.
+pub fn pid_of(tid: Tid) -> Option<u32> {
+    SCHED.lock().threads.get(&tid).map(|t| t.pid)
+}
+
 /// Name of the running thread, without allocating (panic path).
 pub fn current_name_lossy() -> &'static str {
     match SCHED.try_lock() {

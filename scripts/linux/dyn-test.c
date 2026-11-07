@@ -1,11 +1,14 @@
 /* A dynamically linked glibc program for the Linux layer: the dynamic
- * loader, shared libraries, threads in libc, dlopen, and new processes
- * (fork, vfork, posix_spawn, execve of a #! script, waitpid).
+ * loader, shared libraries, threads in libc, dlopen, new processes
+ * (fork, vfork, posix_spawn, execve of a #! script, waitpid) and signals
+ * (handlers, masks, faults, EINTR and SA_RESTART, SIGCHLD, kill).
  * Built by scripts/test-linux.sh with the host's gcc. */
 #include <dlfcn.h>
 #include <errno.h>
 #include <gnu/libc-version.h>
 #include <pthread.h>
+#include <setjmp.h>
+#include <signal.h>
 #include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +19,48 @@
 
 extern char **environ;
 static int global = 1;
+
+static volatile sig_atomic_t got_usr1, got_usr2, got_chld, spin_stop, segv_hits;
+static volatile pid_t info_pid;
+static void *volatile segv_addr;
+static sigjmp_buf segv_jump;
+static int pipe_r;
+
+static void on_usr1(int s) { (void)s; got_usr1++; }
+static void on_usr2(int s) { (void)s; got_usr2++; }
+static void on_chld(int s) { (void)s; got_chld++; }
+static void on_spin(int s) { (void)s; spin_stop = 1; }
+
+static void on_info(int s, siginfo_t *si, void *uc) {
+    (void)s;
+    (void)uc;
+    info_pid = si->si_pid;
+}
+
+static void on_segv(int s, siginfo_t *si, void *uc) {
+    (void)s;
+    (void)uc;
+    segv_addr = si->si_addr;
+    segv_hits++;
+    siglongjmp(segv_jump, 1);
+}
+
+/* Busy, without system calls, until a signal stops it. */
+static void *spinner(void *arg) {
+    (void)arg;
+    volatile unsigned long n = 0;
+    while (!spin_stop)
+        n++;
+    return NULL;
+}
+
+/* One byte from the pipe, or -errno. */
+static void *reader(void *arg) {
+    char c;
+    long r = read(pipe_r, &c, 1);
+    *(int *)arg = r < 0 ? -errno : (r == 1 ? c : 0);
+    return NULL;
+}
 
 /* Waits for a child and returns its exit code (-1 if it did not exit). */
 static int reap(pid_t pid) {
@@ -120,5 +165,132 @@ int main(int argc, char **argv) {
     errno = 0;
     pid_t none = waitpid(-1, NULL, WNOHANG);
     printf("dt: no children %d errno=%d\n", (int)none, errno);
+
+    /* Signals: a handler, run when the signal is raised. */
+    signal(SIGUSR1, on_usr1);
+    raise(SIGUSR1);
+    printf("dt: signal usr1=%d\n", (int)got_usr1);
+
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_sigaction = on_info;
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGUSR2, &sa, NULL);
+    kill(getpid(), SIGUSR2);
+    printf("dt: siginfo pid=%d\n", info_pid == getpid());
+
+    /* Blocked, it waits; unblocked, it arrives. */
+    signal(SIGUSR2, on_usr2);
+    sigset_t block, old, pend;
+    sigemptyset(&block);
+    sigaddset(&block, SIGUSR2);
+    sigprocmask(SIG_BLOCK, &block, &old);
+    raise(SIGUSR2);
+    int before = got_usr2;
+    sigpending(&pend);
+    int pending = sigismember(&pend, SIGUSR2);
+    sigprocmask(SIG_SETMASK, &old, NULL);
+    printf("dt: blocked %d pending %d after %d\n", before, pending, (int)got_usr2);
+
+    /* sigtimedwait takes a blocked signal without the handler. */
+    sigprocmask(SIG_BLOCK, &block, &old);
+    raise(SIGUSR2);
+    struct timespec zero = {0, 0};
+    siginfo_t si;
+    int taken = sigtimedwait(&block, &si, &zero);
+    sigprocmask(SIG_SETMASK, &old, NULL);
+    printf("dt: sigtimedwait %d handler %d\n", taken, (int)got_usr2);
+
+    /* A fault, caught by a SIGSEGV handler that jumps back. */
+    memset(&sa, 0, sizeof sa);
+    sa.sa_sigaction = on_segv;
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGSEGV, &sa, NULL);
+    if (sigsetjmp(segv_jump, 1) == 0)
+        *(volatile int *)16 = 1;
+    printf("dt: segv caught %d addr=%p\n", (int)segv_hits, segv_addr);
+    signal(SIGSEGV, SIG_DFL);
+
+    /* A thread busy in a loop gets a signal too. */
+    signal(SIGUSR1, on_spin);
+    pthread_t spin;
+    pthread_create(&spin, NULL, spinner, NULL);
+    usleep(50000);
+    pthread_kill(spin, SIGUSR1);
+    pthread_join(spin, NULL);
+    printf("dt: signal in a loop %d\n", (int)spin_stop);
+
+    /* A blocking read: EINTR without SA_RESTART, started again with it. */
+    int q[2];
+    int res = 0;
+    pthread_t rd;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = on_usr2;
+    sigaction(SIGUSR2, &sa, NULL);
+    if (pipe(q) != 0)
+        return 1;
+    pipe_r = q[0];
+    pthread_create(&rd, NULL, reader, &res);
+    usleep(50000);
+    pthread_kill(rd, SIGUSR2);
+    usleep(100000);
+    if (write(q[1], "X", 1) < 0) /* so that a missed signal cannot hang */
+        return 1;
+    pthread_join(rd, NULL);
+    printf("dt: read interrupted %d\n", res == -EINTR);
+    close(q[0]);
+    close(q[1]);
+    sa.sa_flags = SA_RESTART;
+    sigaction(SIGUSR2, &sa, NULL);
+    if (pipe(q) != 0)
+        return 1;
+    pipe_r = q[0];
+    res = 0;
+    pthread_create(&rd, NULL, reader, &res);
+    usleep(50000);
+    pthread_kill(rd, SIGUSR2);
+    usleep(50000);
+    if (write(q[1], "R", 1) < 0)
+        return 1;
+    pthread_join(rd, NULL);
+    printf("dt: read restarted %c\n", res > 0 ? res : '-');
+    close(q[0]);
+    close(q[1]);
+
+    /* SIGCHLD when a child ends, waited for with sigsuspend. */
+    signal(SIGCHLD, on_chld);
+    sigset_t chld, empty;
+    sigemptyset(&chld);
+    sigaddset(&chld, SIGCHLD);
+    sigprocmask(SIG_BLOCK, &chld, &old);
+    fflush(stdout);
+    pid_t c2 = fork();
+    if (c2 == 0)
+        _exit(5);
+    sigemptyset(&empty);
+    int sus = sigsuspend(&empty);
+    int sus_eintr = sus == -1 && errno == EINTR;
+    sigprocmask(SIG_SETMASK, &old, NULL);
+    printf("dt: sigchld %d suspend %d exit=%d\n", (int)got_chld, sus_eintr, reap(c2));
+    signal(SIGCHLD, SIG_DFL);
+
+    /* Children ended by a signal: kill from the parent, and abort. */
+    fflush(stdout);
+    pid_t c3 = fork();
+    if (c3 == 0) {
+        for (;;)
+            pause();
+    }
+    usleep(50000);
+    kill(c3, SIGTERM);
+    int st3 = 0;
+    waitpid(c3, &st3, 0);
+    fflush(stdout);
+    pid_t c4 = fork();
+    if (c4 == 0)
+        abort();
+    int st4 = 0;
+    waitpid(c4, &st4, 0);
+    printf("dt: killed by %d, abort %d\n", WIFSIGNALED(st3) ? WTERMSIG(st3) : -1, WIFSIGNALED(st4) ? WTERMSIG(st4) : -1);
     return 0;
 }

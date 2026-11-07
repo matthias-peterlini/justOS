@@ -6,7 +6,6 @@ use super::{err, user_bytes};
 use crate::dev::input::{self, Key, KeyEvent};
 use crate::sync::IrqLock;
 use crate::task;
-use crate::user;
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 
@@ -175,8 +174,8 @@ pub fn read(d: &super::fd::Desc, buf: &mut [u8]) -> i64 {
         if deadline.is_some_and(|t| crate::time::uptime_ms() >= t) {
             return 0;
         }
-        if user::kill_requested() {
-            user::terminate(-130);
+        if let Some(e) = super::signal::interrupted() {
+            return e;
         }
         task::sleep_ms(5);
     }
@@ -198,8 +197,8 @@ fn read_line(buf: &mut [u8]) -> i64 {
     }
     let mut line: Vec<u8> = Vec::new();
     loop {
-        if user::kill_requested() {
-            user::terminate(-130);
+        if let Some(e) = super::signal::interrupted() {
+            return e;
         }
         let Some(ev) = next_key() else {
             task::sleep_ms(5);

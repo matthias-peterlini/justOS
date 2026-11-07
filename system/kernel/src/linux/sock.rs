@@ -7,7 +7,6 @@ use super::{err, user_bytes};
 use crate::net::tcp::{self, Conn, Read};
 use crate::net::{self, Ip};
 use crate::sync::IrqLock;
-use crate::user;
 use alloc::vec::Vec;
 
 const AF_INET: u64 = 2;
@@ -194,8 +193,9 @@ pub fn sys_connect(fd: i32, addr: u64, len: u64) -> i64 {
                 return tcp_err(e);
             }
             None => {
-                if user::kill_requested() {
-                    user::terminate(-130);
+                // The connection goes on; connect says EINTR.
+                if super::signal::interrupted().is_some() {
+                    return -err::EINTR;
                 }
                 net::EVENTS.wait_for_timeout(50, || tcp::status(conn).map(|_| ()));
             }
@@ -268,8 +268,8 @@ impl Socket {
                     if nb {
                         return if done > 0 { done as i64 } else { -err::EAGAIN };
                     }
-                    if user::kill_requested() {
-                        user::terminate(-130);
+                    if let Some(e) = super::signal::interrupted() {
+                        return if done > 0 { done as i64 } else { e };
                     }
                     net::EVENTS.wait_for_timeout(50, || tcp::ready(c).1.then_some(()));
                 }
@@ -309,8 +309,8 @@ impl Socket {
                     if nb {
                         return (-err::EAGAIN, None);
                     }
-                    if user::kill_requested() {
-                        user::terminate(-130);
+                    if let Some(e) = super::signal::interrupted() {
+                        return (e, None);
                     }
                     net::EVENTS.wait_for_timeout(50, || tcp::ready(c).0.then_some(()));
                 }
@@ -326,8 +326,8 @@ impl Socket {
                     if nb {
                         return (-err::EAGAIN, None);
                     }
-                    if user::kill_requested() {
-                        user::terminate(-130);
+                    if let Some(e) = super::signal::interrupted() {
+                        return (e, None);
                     }
                     net::EVENTS.wait_for_timeout(50, || net::udp_peek(port).map(|_| ()));
                 }
@@ -396,8 +396,8 @@ pub fn sys_accept4(fd: i32, addr: u64, lenp: u64, flags: u64) -> i64 {
         if d.nonblocking() {
             return -err::EAGAIN;
         }
-        if user::kill_requested() {
-            user::terminate(-130);
+        if let Some(e) = super::signal::interrupted() {
+            return e;
         }
         net::EVENTS.wait_for_timeout(50, || tcp::ready(l).0.then_some(()));
     };

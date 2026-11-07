@@ -15,11 +15,12 @@
 //! volume like any file), which maps their shared libraries with `mmap`.
 //! New processes come from fork, vfork and posix_spawn, and execve
 //! replaces a program (scripts with `#!` too); parents wait for children
-//! with wait4. What is not: asynchronous signal delivery.
+//! with wait4. Signals ([`signal`]) run the program's handlers, as on Linux.
 
 pub mod fd;
 pub mod mm;
 mod poll;
+pub mod signal;
 mod sock;
 mod thread;
 mod tty;
@@ -122,8 +123,10 @@ pub struct LinuxState {
     /// Per thread: where to write 0 and wake when it ends.
     pub clear_tid: BTreeMap<task::Tid, u64>,
     pub sigactions: [[u8; 32]; 65],
-    pub sigmask: u64,
-    pub altstack: [u8; 24],
+    /// Per thread: the signal mask and alternate stack.
+    pub sigthreads: BTreeMap<task::Tid, signal::ThreadSig>,
+    /// Signals sent and not yet taken.
+    pub pending: Vec<signal::Pending>,
     /// The program, as a Linux path.
     pub exe: String,
 }
@@ -145,8 +148,8 @@ impl LinuxState {
             vmas: mm::new_map(),
             clear_tid: BTreeMap::new(),
             sigactions: [[0; 32]; 65],
-            sigmask: 0,
-            altstack: [0; 24],
+            sigthreads: BTreeMap::new(),
+            pending: Vec::new(),
             exe: String::new(),
         }
     }
@@ -158,6 +161,9 @@ static STATES: IrqLock<BTreeMap<u32, LinuxState>> = IrqLock::new(BTreeMap::new()
 /// descriptors outside the lock).
 pub fn forget(pid: u32) {
     let st = STATES.lock().remove(&pid);
+    if let Some(s) = &st {
+        signal::forgotten(s);
+    }
     drop(st);
 }
 
@@ -183,8 +189,9 @@ pub fn with_state_of<T>(pid: u32, f: impl FnOnce(&mut LinuxState) -> T) -> Optio
 /// The Linux state of a child made by fork or vfork: a copy of the
 /// caller's, with the same open descriptions (as Linux shares them), memory
 /// areas and signal setup.
-pub fn fork_state(child: u32) {
+pub fn fork_state(child: u32, tid: task::Tid) {
     let pid = task::current_pid();
+    let me = task::current_tid();
     let mut states = STATES.lock();
     let copy = states.get(&pid).map(|st| LinuxState {
         fds: st.fds.clone(),
@@ -194,8 +201,8 @@ pub fn fork_state(child: u32) {
         vmas: st.vmas.clone(),
         clear_tid: BTreeMap::new(),
         sigactions: st.sigactions,
-        sigmask: st.sigmask,
-        altstack: st.altstack,
+        sigthreads: signal::forked(st, me, tid),
+        pending: Vec::new(),
         exe: st.exe.clone(),
     });
     if let Some(c) = copy {
@@ -559,6 +566,13 @@ fn build_stack(info: &Loaded, interp_base: u64, argv: &[String], envp: &[String]
 pub fn syscall(frame: &mut TrapFrame) {
     crate::arch::cpu::enable_irq();
     let n = frame.rax;
+    if n == 15 {
+        // rt_sigreturn: the registers come back from the signal frame.
+        signal::sys_rt_sigreturn(frame);
+        signal::deliver(frame, None);
+        crate::arch::cpu::disable_irq();
+        return;
+    }
     let a = [frame.rdi, frame.rsi, frame.rdx, frame.r10, frame.r8, frame.r9];
     // clone, fork and vfork need the caller's registers for the child.
     let ret = match n {
@@ -575,6 +589,7 @@ pub fn syscall(frame: &mut TrapFrame) {
     if user::kill_requested() {
         user::terminate(-130);
     }
+    signal::deliver(frame, Some(n));
     crate::arch::cpu::disable_irq();
 }
 
@@ -594,9 +609,9 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         10 => mm::sys_mprotect(a[0], a[1], a[2] as u32),
         11 => mm::sys_munmap(a[0], a[1]),
         12 => sys_brk(a[0]),
-        13 => thread::sys_rt_sigaction(a[0], a[1], a[2], a[3]),
-        14 => thread::sys_rt_sigprocmask(a[0], a[1], a[2]),
-        15 => -err::ENOSYS, // rt_sigreturn: signals are never delivered
+        13 => signal::sys_rt_sigaction(a[0], a[1], a[2], a[3]),
+        14 => signal::sys_rt_sigprocmask(a[0], a[1], a[2]),
+        34 => signal::sys_pause(),
         16 => fd::sys_ioctl(fd0, a[1], a[2]),
         17 => fd::sys_pread(fd0, a[1], a[2], a[3]),
         18 => fd::sys_pwrite(fd0, a[1], a[2], a[3]),
@@ -634,7 +649,7 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         59 => sys_execve(a[0], a[1], a[2]),
         60 => thread::sys_exit(a[0] as i64),
         61 => sys_wait4(a[0] as i64, a[1], a[2]),
-        62 => thread::sys_kill(a[0] as i64, a[1]),
+        62 => signal::sys_kill(a[0] as i64, a[1]),
         63 => sys_uname(a[0]),
         72 => fd::sys_fcntl(fd0, a[1], a[2]),
         73 | 74 | 75 => 0, // flock, fsync, fdatasync
@@ -666,13 +681,16 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         111 | 121 | 124 => task::current_pid() as i64,             // getpgrp, getpgid, getsid
         115 => 0,                                                 // getgroups: none
         118 | 120 => sys_getresid(a[0], a[1], a[2]),
-        131 => thread::sys_sigaltstack(a[0], a[1]),
+        127 => signal::sys_rt_sigpending(a[0]),
+        128 => signal::sys_rt_sigtimedwait(a[0], a[1], a[2]),
+        130 => signal::sys_rt_sigsuspend(a[0]),
+        131 => signal::sys_sigaltstack(a[0], a[1]),
         137 | 138 => sys_statfs(a[1]),
         157 => 0, // prctl
         158 => sys_arch_prctl(a[0], a[1]),
         160 => 0, // setrlimit
         186 => thread::sys_gettid(),
-        200 => thread::sys_tgkill(0, a[0] as i64, a[1]),
+        200 => signal::sys_tgkill(0, a[0] as i64, a[1]),
         201 => sys_time(a[0]),
         202 => thread::sys_futex(a[0], a[1], a[2], a[3], a[4], a[5]),
         203 => 0, // sched_setaffinity
@@ -686,7 +704,7 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         247 => sys_waitid(a[0], a[1], a[2], a[3]),
         232 => poll::sys_epoll_wait(fd0, a[1], a[2] as i32, a[3] as i32 as i64),
         233 => poll::sys_epoll_ctl(fd0, a[1] as u32, a[2] as i32, a[3]),
-        234 => thread::sys_tgkill(a[0] as i64, a[1] as i64, a[2]),
+        234 => signal::sys_tgkill(a[0] as i64, a[1] as i64, a[2]),
         257 => fd::sys_openat(fd0, a[1], a[2] as u32),
         258 => fd::sys_mkdirat(fd0, a[1]),
         262 => fd::sys_newfstatat(fd0, a[1], a[2], a[3]),
@@ -834,6 +852,7 @@ fn sys_execve(path_ptr: u64, argv_ptr: u64, envp_ptr: u64) -> i64 {
 /// What execve keeps of the Linux state: descriptors without close-on-exec,
 /// the signal mask and ignored signals. The rest starts afresh.
 fn reset_for_exec() {
+    let me = task::current_tid();
     let closed: Vec<(Arc<fd::Desc>, bool)> = with_state(|st| {
         let gone: Vec<i32> = st.fds.iter().filter(|(_, (_, cloexec))| *cloexec).map(|(&fd, _)| fd).collect();
         let closed = gone.iter().filter_map(|fd| st.fds.remove(fd)).collect();
@@ -846,7 +865,7 @@ fn reset_for_exec() {
                 *act = [0; 32];
             }
         }
-        st.altstack = [0; 24];
+        signal::exec(st, me);
         closed
     });
     // Closed outside the state lock: closing a socket talks to the network.
@@ -866,7 +885,7 @@ fn wait_status(code: i64) -> u32 {
 fn sys_wait4(pid: i64, status: u64, options: u64) -> i64 {
     const WNOHANG: u64 = 1;
     let want = (pid > 0).then_some(pid as u32);
-    match user::wait_child(want, options & WNOHANG != 0) {
+    match user::wait_child(want, options & WNOHANG != 0, signal::pending_here) {
         Ok(Some((child, code))) => {
             if status != 0 {
                 if let Ok(b) = user_bytes(status, 4) {
@@ -876,7 +895,7 @@ fn sys_wait4(pid: i64, status: u64, options: u64) -> i64 {
             child as i64
         }
         Ok(None) => 0,
-        Err(JustError::Cancelled) => -err::EINTR,
+        Err(JustError::Cancelled) => signal::interrupted().unwrap_or(-err::EINTR),
         Err(_) => -err::ECHILD,
     }
 }
@@ -886,9 +905,9 @@ fn sys_waitid(idtype: u64, id: u64, info: u64, options: u64) -> i64 {
     const WNOHANG: u64 = 1;
     const P_PID: u64 = 1;
     let want = (idtype == P_PID).then_some(id as u32);
-    let got = match user::wait_child(want, options & WNOHANG != 0) {
+    let got = match user::wait_child(want, options & WNOHANG != 0, signal::pending_here) {
         Ok(g) => g,
-        Err(JustError::Cancelled) => return -err::EINTR,
+        Err(JustError::Cancelled) => return signal::interrupted().unwrap_or(-err::EINTR),
         Err(_) => return -err::ECHILD,
     };
     if info != 0 {
@@ -1045,15 +1064,18 @@ fn sys_fchdir(fd: i32) -> i64 {
 // ----------------------------------------------------------------------------
 // Time
 
-fn sleep_interruptible(mut ms: u64) {
+/// Sleeps; false if a signal handler is to run first (the call fails
+/// with EINTR).
+fn sleep_interruptible(mut ms: u64) -> bool {
     while ms > 0 {
-        if user::kill_requested() {
-            user::terminate(-130);
+        if signal::interrupted().is_some() {
+            return false;
         }
         let step = ms.min(50);
         task::sleep_ms(step);
         ms -= step;
     }
+    true
 }
 
 fn read_timespec(ptr: u64) -> Result<(u64, u64), i64> {
@@ -1067,8 +1089,11 @@ fn read_timespec(ptr: u64) -> Result<(u64, u64), i64> {
 fn sys_nanosleep(req: u64) -> i64 {
     match read_timespec(req) {
         Ok((s, ns)) => {
-            sleep_interruptible(s.saturating_mul(1000).saturating_add(ns.div_ceil(1_000_000)).min(86_400_000));
-            0
+            if sleep_interruptible(s.saturating_mul(1000).saturating_add(ns.div_ceil(1_000_000)).min(86_400_000)) {
+                0
+            } else {
+                -err::EINTR
+            }
         }
         Err(e) => e,
     }
@@ -1125,8 +1150,11 @@ fn sys_clock_nanosleep(id: u64, flags: u64, req: u64) -> i64 {
     } else {
         want
     };
-    sleep_interruptible(ms.min(86_400_000));
-    0
+    if sleep_interruptible(ms.min(86_400_000)) {
+        0
+    } else {
+        -err::EINTR
+    }
 }
 
 fn sys_gettimeofday(tv: u64) -> i64 {

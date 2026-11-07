@@ -304,8 +304,8 @@ pub fn wait_until(d: &Desc, mut ready: impl FnMut() -> bool) -> Result<(), i64> 
         if d.nonblocking() {
             return Err(-err::EAGAIN);
         }
-        if user::kill_requested() {
-            user::terminate(-130);
+        if let Some(e) = super::signal::interrupted() {
+            return Err(e);
         }
         EVENTS.wait_for_timeout(20, || ready().then_some(()));
     }

@@ -54,7 +54,7 @@ fi
     [ $C = 1 ] && { echo "./ct 10.0.2.2 $PORT"; echo '@sleep 3'; }
     [ $R = 1 ] && { echo "./rtest 10.0.2.2:$PORT"; echo '@sleep 4'; }
     [ $G = 1 ] && { echo "./gtest http://10.0.2.2:$PORT/hello.txt"; echo '@sleep 8'; }
-    [ $D = 1 ] && { echo "./dt"; echo '@sleep 3'; }
+    [ $D = 1 ] && { echo "./dt"; echo '@sleep 6'; }
     if [ -n "${EXTRA:-}" ]; then
         for f in "$EXTRA"/*; do
             n=$(basename "$f"); put "$f" "$n"; echo "./$n --version"; echo '@sleep 3'
@@ -70,7 +70,10 @@ fi
     [ $D = 1 ] && printf '%s\n' 'dt: glibc 2.' 'dt: threads 400000' 'dt: dlopen cos(0)=1.0' 'dt: argv0 dt' \
         'dt: fork pipe=hello exit=7 global=1' 'dt: child says vforked home=/home' 'dt: vfork exit=3' \
         'dt: child says spawned home=/home' 'dt: spawn err=0 exit=3' 'dt: spawn missing=2' \
-        'dt: shebang ./dt-script' 'dt: script err=0 exit=4' 'dt: no children -1 errno=10'
+        'dt: shebang ./dt-script' 'dt: script err=0 exit=4' 'dt: no children -1 errno=10' \
+        'dt: signal usr1=1' 'dt: siginfo pid=1' 'dt: blocked 0 pending 1 after 1' 'dt: sigtimedwait 12 handler 1' \
+        'dt: segv caught 1 addr=0x10' 'dt: signal in a loop 1' 'dt: read interrupted 1' 'dt: read restarted R' \
+        'dt: sigchld 1 suspend 1 exit=5' 'dt: killed by 15, abort 6'
 } > expect.txt
 
 STEP_WAIT=${STEP_WAIT:-2} "$HERE/test.sh" justos.img session.txt > out.txt 2>&1

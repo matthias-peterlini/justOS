@@ -1,10 +1,7 @@
 //! Threads and processes of Linux programs: `clone` for threads sharing the
 //! address space (as pthreads and the Go and Rust runtimes create them) and
-//! for new processes (fork, vfork, posix_spawn), futexes,
-//! thread exit with its `clear_child_tid` wake-up, and signals as far as a
-//! program without asynchronous signal delivery needs them: handlers are
-//! recorded, fatal signals sent to oneself end the process, others are
-//! dropped (Go's preemption signal, for one).
+//! for new processes (fork, vfork, posix_spawn), futexes, and thread exit
+//! with its `clear_child_tid` wake-up. Signals are in [`super::signal`].
 
 use super::{err, user_bytes, with_state};
 use crate::arch::cpu;
@@ -54,6 +51,7 @@ pub fn sys_clone(frame: &TrapFrame, flags: u64, stack: u64, ptid: u64, ctid: u64
         Err(e) => return -super::errno(e),
     };
     let lt = tid + 100_000;
+    super::signal::thread_started(tid);
     if flags & CLONE_PARENT_SETTID != 0 {
         super::mm::populate(ptid, 4);
         if let Ok(b) = user_bytes(ptid, 4) {
@@ -102,7 +100,7 @@ fn clone_process(frame: &TrapFrame, flags: u64, stack: u64, ptid: u64, ctid: u64
         Ok(v) => v,
         Err(e) => return -super::errno(e),
     };
-    super::fork_state(pid);
+    super::fork_state(pid, tid);
     // The child's main thread has the process's id as its thread id.
     let id = pid.to_le_bytes();
     if flags & CLONE_PARENT_SETTID != 0 {
@@ -145,7 +143,11 @@ pub fn sys_set_tid_address(ptr: u64) -> i64 {
 /// last one.
 pub fn sys_exit(code: i64) -> ! {
     let me = task::current_tid();
-    if let Some(ctid) = with_state(|st| st.clear_tid.remove(&me)) {
+    let ctid = with_state(|st| {
+        super::signal::thread_ended(st, me);
+        st.clear_tid.remove(&me)
+    });
+    if let Some(ctid) = ctid {
         if ctid != 0 {
             if let Ok(b) = user_bytes(ctid, 4) {
                 b.copy_from_slice(&0u32.to_le_bytes());
@@ -238,9 +240,8 @@ fn futex_wait(addr: u64, val: u32, deadline: Option<u64>, bitset: u32) -> i64 {
         if deadline.is_some_and(|d| now >= d) {
             break -err::ETIMEDOUT;
         }
-        if user::kill_requested() {
-            WAITERS.lock().retain(|x| x.tid != me);
-            user::terminate(-130);
+        if let Some(e) = super::signal::interrupted_then(|| WAITERS.lock().retain(|x| x.tid != me)) {
+            break e;
         }
         let slice = deadline.map_or(100, |d| (d - now).clamp(1, 100));
         FUTEX_QUEUE.wait_for_timeout(slice, || woken(me).then_some(()));
@@ -342,114 +343,4 @@ pub fn sys_futex(addr: u64, op: u64, val: u64, ts: u64, addr2: u64, val3: u64) -
         }
         _ => -err::ENOSYS,
     }
-}
-
-// ----------------------------------------------------------------------------
-// Signals
-
-const SIGINT: u64 = 2;
-const SIGABRT: u64 = 6;
-const SIGKILL: u64 = 9;
-const SIGSEGV: u64 = 11;
-const SIGTERM: u64 = 15;
-
-pub fn sys_rt_sigaction(sig: u64, act: u64, old: u64, size: u64) -> i64 {
-    if sig == 0 || sig > 64 || sig == SIGKILL || size != 8 {
-        return -err::EINVAL;
-    }
-    let prev = with_state(|st| st.sigactions[sig as usize]);
-    if old != 0 {
-        match user_bytes(old, 32) {
-            Ok(b) => b.copy_from_slice(&prev),
-            Err(e) => return e,
-        }
-    }
-    if act != 0 {
-        let new: [u8; 32] = match user_bytes(act, 32) {
-            Ok(b) => b[..32].try_into().unwrap(),
-            Err(e) => return e,
-        };
-        with_state(|st| st.sigactions[sig as usize] = new);
-    }
-    0
-}
-
-pub fn sys_rt_sigprocmask(how: u64, set: u64, old: u64) -> i64 {
-    let prev = with_state(|st| st.sigmask);
-    if old != 0 {
-        match user_bytes(old, 8) {
-            Ok(b) => b.copy_from_slice(&prev.to_le_bytes()),
-            Err(e) => return e,
-        }
-    }
-    if set != 0 {
-        let v = match user_bytes(set, 8) {
-            Ok(b) => u64::from_le_bytes(b[..8].try_into().unwrap()),
-            Err(e) => return e,
-        };
-        with_state(|st| {
-            st.sigmask = match how {
-                0 => st.sigmask | v,
-                1 => st.sigmask & !v,
-                _ => v,
-            }
-        });
-    }
-    0
-}
-
-pub fn sys_sigaltstack(ss: u64, old: u64) -> i64 {
-    let prev = with_state(|st| st.altstack);
-    if old != 0 {
-        match user_bytes(old, 24) {
-            Ok(b) => {
-                b.copy_from_slice(&prev);
-                if prev.iter().all(|&x| x == 0) {
-                    b[8..12].copy_from_slice(&2u32.to_le_bytes()); // SS_DISABLE
-                }
-            }
-            Err(e) => return e,
-        }
-    }
-    if ss != 0 {
-        let v: [u8; 24] = match user_bytes(ss, 24) {
-            Ok(b) => b[..24].try_into().unwrap(),
-            Err(e) => return e,
-        };
-        with_state(|st| st.altstack = v);
-    }
-    0
-}
-
-/// A signal for this process: fatal ones end it, the rest are dropped.
-pub fn sys_kill(pid: i64, sig: u64) -> i64 {
-    if sig == 0 {
-        return 0;
-    }
-    let me = task::current_pid() as i64;
-    if pid != me && pid != 0 && pid != -1 {
-        // Another process: only termination is understood.
-        if matches!(sig, SIGKILL | SIGTERM | SIGINT) && user::kill(pid as u32) {
-            return 0;
-        }
-        return -err::ESRCH;
-    }
-    deliver_self(sig)
-}
-
-pub fn sys_tgkill(_tgid: i64, _tid: i64, sig: u64) -> i64 {
-    deliver_self(sig)
-}
-
-fn deliver_self(sig: u64) -> i64 {
-    let handled = sig < 65 && with_state(|st| u64::from_le_bytes(st.sigactions[sig as usize][..8].try_into().unwrap())) > 1;
-    let fatal = matches!(sig, SIGKILL | SIGABRT | SIGSEGV | SIGTERM | SIGINT);
-    if sig == SIGKILL || (fatal && !handled) {
-        if sig == SIGABRT {
-            crate::println!("\x1b[91m{}: aborted\x1b[0m", user::current_name());
-        }
-        // A negative code: a parent's wait4 sees the signal that ended it.
-        user::terminate(-(128 + sig as i64));
-    }
-    0
 }
