@@ -35,7 +35,7 @@ mod splash;
 mod textarea;
 mod ui;
 pub mod window;
-mod wm;
+pub mod wm;
 
 use crate::console::FbInfo;
 use crate::sync::IrqLock;
@@ -463,6 +463,7 @@ pub fn start() {
         return;
     }
     crate::task::spawn("gui", run);
+    crate::linux::wayland::start();
 }
 
 /// The firmware left a text screen (an old VESA BIOS without 32-bit modes),

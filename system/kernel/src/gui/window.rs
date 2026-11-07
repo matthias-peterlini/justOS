@@ -213,7 +213,12 @@ pub fn take_new() -> Vec<alloc::boxed::Box<dyn App>> {
 /// each).
 static KINDS: IrqLock<Vec<&'static str>> = IrqLock::new(Vec::new());
 
-fn intern(name: &str) -> &'static str {
+/// The icon of a program's windows (`program` as the process is named).
+pub fn icon_for(program: &str) -> String {
+    super::apps::package_icon(program)
+}
+
+pub fn intern(name: &str) -> &'static str {
     let mut k = KINDS.lock();
     if let Some(s) = k.iter().find(|s| **s == name) {
         return s;

@@ -32,7 +32,8 @@ sistema con la disposizione di Debian: tutto in `/usr`, con `/bin`, `/sbin`,
 `/lib` e `/lib64` come collegamenti simbolici dentro `/usr` (JustFS ha i
 collegamenti simbolici). L'app File non mostra queste cartelle. Quali
 pacchetti, lo dice `LINUX_PKGS` nel `Makefile` (per ora `libc6`, la glibc
-2.41 di Debian 13); `make linux-root` rifà l'albero.
+2.41 di Debian 13, e `libwayland-client0` con `libxkbcommon0` per i
+programmi con finestre); `make linux-root` rifà l'albero.
 
 Un programma Linux si avvia come gli altri, per percorso o per nome:
 
@@ -57,6 +58,7 @@ busybox ls -la             un programma installato (vedi "Installare programmi")
 | rete | socket TCP e UDP, `poll`, `select`, `epoll` |
 | socket locali | `AF_UNIX` di tipo stream, datagram e seqpacket: `socketpair`, `bind`, `listen`, `connect`, `accept`, nomi su un percorso o astratti, descrittori passati con `SCM_RIGHTS`, `SO_PEERCRED`; il nome su un percorso non è un file del volume, ma `stat`, `access` e `unlink` lo vedono |
 | collegamenti simbolici | `symlink`, `readlink`, `lstat` |
+| finestre | Wayland: `WAYLAND_DISPLAY=wayland-0` in `XDG_RUNTIME_DIR=/home/tmp`, servito dal kernel (vedi sotto) |
 | utenti | tutto gira come `root` |
 | processi nuovi | `fork` (il figlio ha una copia della memoria), `vfork` e `posix_spawn` (il figlio usa la memoria del padre finché non chiama `execve`), `execve` (anche degli script che iniziano con `#!`), `wait4`, `waitid`, `getppid`; i descrittori aperti passano al figlio, quelli con `O_CLOEXEC` si chiudono con `execve` |
 | segnali | gestori con `sigaction` (`SA_SIGINFO`, `SA_RESTART`, `SA_ONSTACK`, `SA_RESETHAND`, `SA_NODEFER`) e `sigaltstack`, maschere per thread, `kill`, `tgkill`, `sigpending`, `sigtimedwait`, `sigsuspend`, `pause`, `SIGCHLD` quando un figlio finisce; un'attesa interrotta da un gestore risponde `EINTR` o riparte da sola con `SA_RESTART`; un accesso non valido diventa `SIGSEGV` (e `SIGBUS`, `SIGILL`, `SIGFPE`) per chi ha un gestore; Ctrl+C manda `SIGINT` ai programmi che lo gestiscono; scrivere su una pipe o un socket che nessuno legge manda `SIGPIPE`; niente controllo dei job (`SIGSTOP`, `SIGTSTP`) |
@@ -70,6 +72,33 @@ nel giornale di sistema come `unimplemented syscall N` (con `verbose on`), così
 Com'è fatto: `system/kernel/src/linux/` (il caricamento e le chiamate) e
 `system/kernel/src/arch/syscall.rs` (l'istruzione `syscall` e le basi FS/GS di
 ogni thread).
+
+### Programmi con finestre (Wayland)
+
+I programmi Linux con un'interfaccia grafica (GTK, Qt, SDL, i browser)
+parlano con un **compositor Wayland**. Su JustOS il compositor è nel kernel
+(`system/kernel/src/linux/wayland/`): ascolta su `/home/tmp/wayland-0`, lo
+stesso posto da ogni volume, e serve ogni programma con un thread suo. Il
+programma usa la sua `libwayland-client` di Debian, senza modifiche.
+
+Ogni finestra del programma diventa una **finestra di JustOS**, con la
+cornice, i pulsanti, il vetro e le scorciatoie di tutte le altre (Ctrl+Q la
+chiude, F11 la mette a schermo intero): le decorazioni sono del server
+(`xdg-decoration`, e il protocollo di KDE, che GTK guarda), così i programmi
+non disegnano la loro barra del titolo. Il contenuto è quello che il
+programma disegna.
+
+| Protocollo | Cosa c'è |
+|---|---|
+| `wl_compositor`, `wl_subcompositor` | superfici, regioni, sottosuperfici (con il loro ordine), callback di frame legati al disegno della scrivania |
+| `wl_shm` | buffer in memoria condivisa (`memfd`), ARGB8888 e XRGB8888; il compositor copia solo la parte cambiata e libera subito il buffer |
+| `wl_output` | lo schermo, con la sua scala: su uno schermo ad alta densità il programma disegna al doppio dei pixel |
+| `xdg_wm_base` | finestre (`xdg_toplevel`: titolo, dimensioni minime e massime, ridimensionamento dalla cornice, stato attivo, chiusura) e popup (`xdg_popup`, posizionati con le regole del loro `xdg_positioner` dentro la finestra; un clic fuori chiude un menu) |
+| `wl_seat` | puntatore (movimento, pulsanti, rotellina) e tastiera, con una mappa XKB di JustOS: i tasti arrivano già tradotti dal layout scelto, anche le lettere accentate |
+| `wl_data_device_manager` | presente, ma gli appunti non passano ancora tra i programmi Linux e JustOS |
+
+`make test-wayland` lo prova con un piccolo client (`scripts/linux/wl-test.c`)
+compilato al volo contro la `libwayland-client` e la `libxkbcommon` di Debian.
 
 ## Programmi Windows
 
@@ -204,7 +233,9 @@ anche senza estensione) lo avvia nel Terminale.
   thread girano uno dopo l'altro.
 - **Linux**: `execve` da un programma con più thread e il controllo dei job
   (`SIGSTOP`, `SIGTSTP`) non ci sono ancora; un `MAP_SHARED` di un file del
-  volume non scrive nel file.
+  volume non scrive nel file. Le finestre si disegnano con il processore
+  (niente OpenGL o Vulkan, niente `linux-dmabuf`) e non c'è un server X11:
+  servono programmi che parlano Wayland.
 - **Windows a 32 bit**: non ancora.
 
 ## Provarlo

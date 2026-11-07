@@ -3058,6 +3058,10 @@ impl Desktop {
                 for app in super::window::take_new() {
                     self.open(l, app, false);
                 }
+                // Windows of Linux programs (Wayland).
+                for app in crate::linux::wayland::take_new() {
+                    self.open(l, app, false);
+                }
                 // Questions of the sandbox, and file pickers for programs.
                 for app in super::apps::prompt::take_new() {
                     self.open(l, app, false);

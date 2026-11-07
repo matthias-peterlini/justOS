@@ -116,8 +116,10 @@ fn read_name(addr: u64, len: u64) -> Result<Option<Name>, i64> {
     Ok(Some(Name { key: path_key(&p), raw: path[..end].to_vec() }))
 }
 
+/// A path's key: the Linux path alone, so that a socket of the system's
+/// (the Wayland display) is the same place for programs on every volume.
 fn path_key(p: &crate::fs::Path) -> Key {
-    Key::Path(alloc::format!("{}:{}", p.volume.to_ascii_lowercase(), p.inner))
+    Key::Path(p.inner.clone())
 }
 
 /// Writes a `struct sockaddr_un` where the program asked, with its length.
@@ -319,6 +321,80 @@ impl Listener {
         let gone = core::mem::take(&mut *self.backlog.lock());
         drop(gone);
         EVENTS.notify_all();
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Sockets of the kernel's own (the Wayland compositor's)
+
+/// A socket the kernel listens on, at a Linux path ("/home/tmp/wayland-0").
+pub struct KernelListener(Arc<Listener>);
+
+pub fn kernel_listen(path: &str) -> Result<KernelListener, i64> {
+    let name = Name { key: Key::Path(String::from(path)), raw: path.as_bytes().to_vec() };
+    let l = Arc::new(Listener { backlog: IrqLock::new(VecDeque::new()), max: AtomicUsize::new(128), pid: 0, name, closed: AtomicBool::new(false) });
+    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    register(&l.name.key, id, Bound::Listener(Arc::downgrade(&l)))?;
+    // The listener lives as long as the kernel.
+    core::mem::forget(l.clone());
+    Ok(KernelListener(l))
+}
+
+impl KernelListener {
+    /// The next connection, waiting up to `ms` milliseconds for one.
+    pub fn accept(&self, ms: u64) -> Option<Conn> {
+        let end = EVENTS.wait_for_timeout(ms, || self.0.backlog.lock().pop_front())?;
+        EVENTS.notify_all();
+        Some(Conn { end })
+    }
+}
+
+/// A connection the kernel serves.
+pub struct Conn {
+    end: End,
+}
+
+impl Conn {
+    /// The process that connected.
+    pub fn peer_pid(&self) -> u32 {
+        self.end.peer_pid
+    }
+
+    /// Something to read, or the other end closed.
+    pub fn ready(&self) -> bool {
+        !self.end.rx.is_empty() || self.end.rx.shut_write.load(Ordering::Relaxed)
+    }
+
+    /// Moves what arrived to `buf` and its descriptors to `fds`. False once
+    /// the other end closed and everything was read.
+    pub fn take(&self, buf: &mut Vec<u8>, fds: &mut VecDeque<Arc<Desc>>) -> bool {
+        let msgs = core::mem::take(&mut *self.end.rx.msgs.lock());
+        let mut n = 0;
+        for m in msgs {
+            n += m.data.len();
+            buf.extend_from_slice(&m.data[m.off.min(m.data.len())..]);
+            fds.extend(m.fds);
+        }
+        if n != 0 {
+            self.end.rx.bytes.fetch_sub(n.min(self.end.rx.waiting()), Ordering::Relaxed);
+            EVENTS.notify_all();
+        }
+        !(self.end.rx.shut_write.load(Ordering::Relaxed) && self.end.rx.is_empty())
+    }
+
+    /// Sends bytes and descriptors (these with the first byte). False if
+    /// the other end is gone.
+    pub fn send(&self, data: Vec<u8>, fds: Vec<Arc<Desc>>) -> bool {
+        if self.end.tx.shut_read.load(Ordering::Relaxed) {
+            return false;
+        }
+        self.end.tx.push(Msg { data, off: 0, fds, from: None });
+        true
+    }
+
+    /// Bytes sent and not read yet.
+    pub fn unread(&self) -> usize {
+        self.end.tx.waiting()
     }
 }
 

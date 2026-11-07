@@ -20,6 +20,11 @@ A script is a list of steps, one per line:
     hold <name> / unhold <name> keep a key down (ctrl, shift, alt) and let go
     serial <text>               a command line typed on the serial console
                                 (the shell there), e.g. "serial suspend 3"
+    find <rrggbb>               look for the first pixel of that colour on the
+                                screen (top to bottom, left to right); after
+                                it, "@n" in a position is n pixels from there
+                                ("click @20 @40"). Stops the script if the
+                                colour is nowhere.
 
 Usage: scripts/gui-shots.py <image> <script> <out folder> [qemu options...]
 Environment: QEMU (default qemu-system-x86_64), UEFI=1 for OVMF, CDROM=1 to
@@ -87,8 +92,8 @@ class Qmp:
         self.cmd("input-send-event", events=[{"type": "key", "data": {"down": down, "key": {"type": "qcode", "data": name}}}])
 
 
-def ppm_to_png(src, dst):
-    """Converts QEMU's binary PPM screendump to PNG with the standard library."""
+def read_ppm(src):
+    """QEMU's binary PPM screendump: (width, height, RGB bytes)."""
     with open(src, "rb") as f:
         data = f.read()
     # Header: "P6", width, height, maxval, each followed by white space.
@@ -108,8 +113,13 @@ def ppm_to_png(src, dst):
     if fields[0] != b"P6":
         raise SystemExit(f"{src}: not a binary PPM")
     w, h = int(fields[1]), int(fields[2])
+    return w, h, data[pos:pos + w * 3 * h]
+
+
+def ppm_to_png(src, dst):
+    """Converts QEMU's binary PPM screendump to PNG with the standard library."""
+    w, h, pixels = read_ppm(src)
     stride = w * 3
-    pixels = data[pos:pos + stride * h]
     raw = b"".join(b"\0" + pixels[y * stride:(y + 1) * stride] for y in range(h))
 
     def chunk(kind, body):
@@ -162,12 +172,16 @@ def main():
         q = Qmp(sock)
         at = (W // 2, H // 2)
         console = None
+        origin = (0, 0)
         for line in open(script):
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
             op, _, rest = line.partition(" ")
             a = rest.split()
+            if op in ("click", "double", "right", "move", "drag", "press", "glide", "release"):
+                # "@n": from where "find" found its colour.
+                a = [str(origin[i % 2] + int(v[1:])) if v.startswith("@") else v for i, v in enumerate(a)]
             if op == "wait":
                 time.sleep(float(a[0]))
             elif op == "shot":
@@ -226,6 +240,20 @@ def main():
                     time.sleep(0.08)
             elif op == "key":
                 q.key(a[0])
+            elif op == "find":
+                want = bytes.fromhex(a[0])
+                ppm = os.path.join(work, "shot.ppm")
+                q.cmd("screendump", filename=ppm)
+                time.sleep(0.3)
+                sw, _, pixels = read_ppm(ppm)
+                i = pixels.find(want)
+                while i > 0 and i % 3:
+                    i = pixels.find(want, i + 1)
+                if i < 0:
+                    print("find", a[0], "nowhere", flush=True)
+                    break
+                origin = ((i // 3) % sw, (i // 3) // sw)
+                print("find", a[0], "at", *origin, flush=True)
             elif op == "serial":
                 if console is None:
                     console = socket.socket(socket.AF_UNIX)

@@ -28,6 +28,7 @@ mod sock;
 mod thread;
 mod tty;
 mod unix;
+pub mod wayland;
 
 use crate::arch::idt::TrapFrame;
 use crate::fs::Path;
@@ -286,6 +287,7 @@ fn default_env() -> Vec<String> {
         .iter()
         .map(|s| s.to_string())
         .chain([alloc::format!("COLUMNS={cols}"), alloc::format!("LINES={rows}")])
+        .chain([alloc::format!("XDG_RUNTIME_DIR={}", wayland::RUNTIME_DIR), alloc::format!("WAYLAND_DISPLAY={}", wayland::DISPLAY)])
         .collect()
 }
 

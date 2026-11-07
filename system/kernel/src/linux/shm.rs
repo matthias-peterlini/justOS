@@ -41,6 +41,15 @@ impl Shm {
         Arc::new(Shm { pages: IrqLock::new(BTreeMap::new()), size: AtomicU64::new(size), name, seals: AtomicU32::new(seals) })
     }
 
+    /// Read-only memory holding `data` (sealed: it can never change), as a
+    /// keymap is handed to a Wayland client.
+    pub fn sealed(name: String, data: &[u8]) -> Arc<Shm> {
+        let s = Shm::new(name, data.len() as u64, 0);
+        let _ = s.write_at(0, data);
+        s.seals.store(F_SEAL_SEAL | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE, Ordering::Relaxed);
+        s
+    }
+
     pub fn size(&self) -> u64 {
         self.size.load(Ordering::Relaxed)
     }

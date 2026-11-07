@@ -552,6 +552,11 @@ pub(crate) unsafe fn enter_user(entry: u64, rsp: u64, rdi: u64, rsi: u64) -> ! {
     }
 }
 
+/// The name of process `pid` ("" when there is none).
+pub(crate) fn name_of(pid: u32) -> String {
+    PROCS.lock().get(&pid).map(|p| p.name.clone()).unwrap_or_default()
+}
+
 pub(crate) fn current_name() -> String {
     let pid = task::current_pid();
     PROCS.lock().get(&pid).map(|p| p.name.clone()).unwrap_or_default()
