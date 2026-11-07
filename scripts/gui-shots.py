@@ -6,6 +6,8 @@ positions, keys are sent as key codes, and `screendump` saves the screen.
 A script is a list of steps, one per line:
 
     wait <seconds>
+    until <seconds> <text>      wait until the serial log has that text (colours
+                                left out), at most that long
     shot <name>                 save <out>/<name>.png
     click <x> <y>               left click at a screen position
     double <x> <y>              double click
@@ -33,6 +35,7 @@ SCREEN=<w>x<h> when the screen is not 1024x768.
 """
 import json
 import os
+import re
 import shutil
 import socket
 import struct
@@ -184,6 +187,21 @@ def main():
                 a = [str(origin[i % 2] + int(v[1:])) if v.startswith("@") else v for i, v in enumerate(a)]
             if op == "wait":
                 time.sleep(float(a[0]))
+            elif op == "until":
+                text = rest.partition(" ")[2]
+                start = time.time()
+                while True:
+                    try:
+                        log = open(os.path.join(out, "serial.log"), "rb").read().decode("utf-8", "replace")
+                    except OSError:
+                        log = ""
+                    if text in re.sub(r"\x1b\[[0-9;]*m", "", log):
+                        print("until", text, "after", round(time.time() - start, 1), flush=True)
+                        break
+                    if time.time() - start > float(a[0]):
+                        print("until", text, "not seen", flush=True)
+                        break
+                    time.sleep(0.5)
             elif op == "shot":
                 ppm = os.path.join(work, "shot.ppm")
                 q.cmd("screendump", filename=ppm)

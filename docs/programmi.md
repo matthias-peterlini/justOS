@@ -21,7 +21,14 @@ edit sys:/home/nota.txt
 run sys:/apps/info.app
 ps                       programmi e thread in esecuzione
 kill <pid>
+gtk3-demo &              con & la shell non aspetta il programma
 ```
+
+Per capire dove si ferma un programma Linux ci sono due comandi:
+`strace on` (e `strace off`) scrive nel registro ogni sua chiamata di
+sistema con il risultato, e i percorsi che passa; `where <tid> [campioni]`
+guarda più volte dove si trova un thread (la libreria e lo scostamento, e la
+chiamata di sistema in cui aspetta) e dice i punti più frequenti.
 
 I programmi si possono scrivere anche in JustScript: la shell avvia i
 sorgenti `.jt` e i pacchetti `.jpk` attraverso il runner `just`, e cerca anche

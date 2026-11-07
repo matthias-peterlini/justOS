@@ -324,15 +324,77 @@ fn scan_gpt(disk: &Arc<Disk>) -> Vec<Arc<Disk>> {
     out
 }
 
-/// JustFS on top of a disk or partition: 4 KiB blocks over its sectors.
+/// JustFS on top of a disk or partition: 4 KiB blocks over its sectors,
+/// with the blocks used last kept in memory.
 pub struct DiskBlocks {
     pub disk: Arc<Disk>,
+    cache: BlockCache,
+}
+
+impl DiskBlocks {
+    pub fn new(disk: Arc<Disk>) -> DiskBlocks {
+        DiskBlocks { disk, cache: BlockCache::new() }
+    }
+}
+
+/// Blocks read or written last, so that walking a path or reading a file
+/// again does not go to the disk each time: JustFS reads a folder's node and
+/// all its entries for every name on a path. Writes go to the disk at once
+/// and update their copy (nothing is held back). Sets of [`WAYS`] blocks,
+/// the newest first; a block can only be in the set its number picks.
+struct BlockCache {
+    sets: Vec<Vec<(u64, alloc::boxed::Box<justfs::Block>)>>,
+}
+
+const WAYS: usize = 4;
+
+impl BlockCache {
+    /// A thirty-second of the memory, between 1 and 64 MiB.
+    fn new() -> BlockCache {
+        let (_, total) = crate::mem::frame::stats();
+        let blocks = (total / 32 / justfs::BLOCK_SIZE as u64).clamp(256, 16384) as usize;
+        BlockCache { sets: (0..blocks / WAYS).map(|_| Vec::new()).collect() }
+    }
+
+    fn set(&mut self, block: u64) -> &mut Vec<(u64, alloc::boxed::Box<justfs::Block>)> {
+        let n = self.sets.len() as u64;
+        &mut self.sets[(block % n) as usize]
+    }
+
+    fn get(&mut self, block: u64, buf: &mut justfs::Block) -> bool {
+        let set = self.set(block);
+        let Some(i) = set.iter().position(|(b, _)| *b == block) else { return false };
+        let hit = set.remove(i);
+        buf.copy_from_slice(&hit.1[..]);
+        set.insert(0, hit);
+        true
+    }
+
+    fn put(&mut self, block: u64, data: &justfs::Block) {
+        let set = self.set(block);
+        let mut entry = match set.iter().position(|(b, _)| *b == block) {
+            Some(i) => set.remove(i),
+            None if set.len() == WAYS => set.pop().unwrap(),
+            None => (block, alloc::boxed::Box::new([0u8; justfs::BLOCK_SIZE])),
+        };
+        entry.0 = block;
+        entry.1.copy_from_slice(data);
+        set.insert(0, entry);
+    }
+
+    fn forget(&mut self, block: u64) {
+        self.set(block).retain(|(b, _)| *b != block);
+    }
 }
 
 impl justfs::BlockDevice for DiskBlocks {
     fn read_block(&mut self, block: u64, buf: &mut justfs::Block) -> justfs::Result<()> {
+        if self.cache.get(block, buf) {
+            return Ok(());
+        }
         let per = justfs::BLOCK_SIZE as u64 / self.disk.sector_size as u64;
         if self.disk.read(block * per, buf) == OK {
+            self.cache.put(block, buf);
             Ok(())
         } else {
             Err(justfs::Error::Io)
@@ -342,8 +404,11 @@ impl justfs::BlockDevice for DiskBlocks {
     fn write_block(&mut self, block: u64, buf: &justfs::Block) -> justfs::Result<()> {
         let per = justfs::BLOCK_SIZE as u64 / self.disk.sector_size as u64;
         if self.disk.write(block * per, buf) == OK {
+            self.cache.put(block, buf);
             Ok(())
         } else {
+            // What the disk holds now is not known.
+            self.cache.forget(block);
             Err(justfs::Error::Io)
         }
     }

@@ -24,6 +24,7 @@
 #   make test-linux    Linux programs with threads, sockets, poll (C, Rust, Go)
 #   make test-wayland  a Wayland client's window on the desktop: drawing,
 #                   pointer, keyboard, a popup
+#   make test-gtk   a GTK 3 program's window, with the justOS theme
 #   make shots      boot headless, drive the GUI and save screenshots (build/shots)
 #   make assets     regenerate fonts, icons, wallpapers and sounds (Python, Pillow, numpy)
 #   make photos     download the photo wallpapers from Unsplash
@@ -58,12 +59,15 @@ APPS     := $(notdir $(wildcard system/apps/*))
 # Programs of the store (sys:/store), installed with the Negozio app.
 STORE    := $(notdir $(wildcard system/store/*))
 # What dynamically linked Linux programs need, from Debian's packages
-# (tools/linux/debroot.py): the dynamic loader and glibc, and what programs
-# with windows link to talk to the Wayland compositor.
-LINUX_PKGS ?= libc6 libwayland-client0 libxkbcommon0
+# (tools/linux/debroot.py): the dynamic loader and glibc (with its C.UTF-8
+# locale, in libc-bin), what programs with windows link to talk to the
+# Wayland compositor, and GTK 3 (with the SVG loader for its icons, and
+# its demo programs gtk3-widget-factory and gtk3-demo).
+LINUX_PKGS ?= libc6 libc-bin libwayland-client0 libxkbcommon0 libgtk-3-0t64 librsvg2-common gtk-3-examples
 LINUX_DIST ?= trixie
 LINUX    := $(BUILD)/linux
 ROOT     := $(BUILD)/root
+LIVE_ROOT := $(BUILD)/liveroot
 IMAGE    := $(BUILD)/justos.img
 ISO      := $(BUILD)/justos.iso
 # Size of the live CD's system volume (it lives in memory).
@@ -78,7 +82,7 @@ ifeq ($(PROFILE),release)
 CARGO_PROFILE := --release
 endif
 
-.PHONY: photos all uefi system tools root linux-root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-justscript test-compat test-audio test-display test-acpi test-net test-linux test-wayland test-update shots assets check updates clean $(PACKAGES)
+.PHONY: photos all uefi system tools root linux-root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-justscript test-compat test-audio test-display test-acpi test-net test-linux test-wayland test-gtk test-update shots assets check updates clean $(PACKAGES)
 
 all: image
 
@@ -115,11 +119,12 @@ linux-root:
 	$(MAKE) $(LINUX)/usr/PACKAGES
 
 # The files of the system volume: rootfs/ plus the programs and the Linux
-# libraries.
+# libraries. The live CD's volume ($(LIVE_ROOT)) has justOS's own files
+# without the Linux libraries: it is read into memory at boot, and
+# Debian's tree (GTK) is several times the rest.
 root: system tools $(LINUX)/usr/PACKAGES
-	rm -rf $(ROOT)
+	rm -rf $(ROOT) $(LIVE_ROOT)
 	mkdir -p $(ROOT)/apps
-	cp -a $(LINUX)/. $(ROOT)/
 	cp -r rootfs/. $(ROOT)/
 	for app in $(APPS); do cp $(TARGET)/$$app $(ROOT)/apps/$$app.app; done
 	# The JustScript runner, a second program of justc.
@@ -129,7 +134,13 @@ root: system tools $(LINUX)/usr/PACKAGES
 	for p in $(STORE); do mkdir -p $(ROOT)/store/$$p && cp $(TARGET)/$$p $(ROOT)/store/$$p/app \
 		&& cp system/store/$$p/info system/store/$$p/icon.qoi $(ROOT)/store/$$p/; done
 	cp system/kernel/assets/fonts.bin $(ROOT)/system/fonts.bin
+	mkdir -p $(ROOT)/usr/share/fonts/truetype/justos
+	cp tools/assets/fonts/GoogleSansFlex.ttf tools/assets/fonts/OFL.txt $(ROOT)/usr/share/fonts/truetype/justos/
 	gzip -dc system/kernel/assets/fonts@2x.bin.gz > $(ROOT)/system/fonts@2x.bin
+	cp -a $(ROOT) $(LIVE_ROOT)
+	# Debian's files, under justOS's: rootfs/ wins where both have one.
+	cp -a $(LINUX)/. $(ROOT)/
+	cp -r rootfs/. $(ROOT)/
 
 image: $(BUILD)/stage1.bin $(BUILD)/stage2.bin uefi system tools $(PACKAGES) root
 	$(JUSTTOOL) image $(IMAGE) --size $(SIZE) --slot-size $(SLOT_SIZE) --version $(VERSION) \
@@ -143,7 +154,7 @@ $(BUILD)/justos-$(VERSION).slot: system tools $(PACKAGES)
 iso: $(BUILD)/stage1.bin $(BUILD)/stage2.bin uefi system tools $(PACKAGES) root
 	$(JUSTTOOL) iso $(ISO) --size $(LIVE_SIZE) --version $(VERSION) \
 		--stage1 $(BUILD)/stage1.bin --stage2 $(BUILD)/stage2.bin --efi $(EFI_APP) \
-		--kernel $(TARGET)/just-kernel --drivers $(BUILD)/drivers --files $(ROOT)
+		--kernel $(TARGET)/just-kernel --drivers $(BUILD)/drivers --files $(LIVE_ROOT)
 
 QEMU_COMMON := -m $(MEMORY) -serial stdio -no-reboot -rtc base=localtime
 
@@ -201,6 +212,9 @@ test-linux: image
 
 test-wayland: image
 	scripts/test-wayland.sh $(IMAGE)
+
+test-gtk: image
+	scripts/test-gtk.sh $(IMAGE)
 
 test-update: image
 	OVMF_CODE=$(OVMF_CODE) OVMF_VARS=$(OVMF_VARS) scripts/test-update.sh $(IMAGE)

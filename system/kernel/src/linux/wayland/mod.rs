@@ -49,6 +49,11 @@ const MAX_UNREAD: usize = 8 << 20;
 
 /// Starts the compositor (once the desktop runs).
 pub fn start() {
+    // The runtime folder (also TMPDIR), on the system volume.
+    let tmp = crate::fs::Path::root("sys").join("home").join("tmp");
+    if !crate::fs::exists(&tmp) {
+        let _ = crate::fs::make_dir(&tmp);
+    }
     crate::task::spawn("wayland", serve);
 }
 

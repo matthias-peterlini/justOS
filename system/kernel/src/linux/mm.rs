@@ -384,6 +384,30 @@ pub fn populate(ptr: u64, len: u64) {
     }
 }
 
+/// What is at `addr` in a Linux process: the file mapped there and the
+/// offset in it (`libgtk-3.so.0+0x1234`), or the kind of memory.
+pub fn describe(pid: u32, addr: u64) -> String {
+    let found = super::with_state_of(pid, |st| {
+        let (&start, v) = st.vmas.range(..=addr).next_back()?;
+        (addr < v.end).then(|| match &v.backing {
+            Backing::File(data) => (Some(Arc::as_ptr(data)), addr - start + v.off),
+            _ => (None, addr - start),
+        })
+    })
+    .flatten();
+    match found {
+        Some((Some(data), off)) => {
+            let cache = MAPPED.lock();
+            match cache.iter().find(|m| m.data.as_ptr() == data) {
+                Some(m) => alloc::format!("{}+{off:#x}", m.key.rsplit('/').next().unwrap_or(&m.key)),
+                None => alloc::format!("{addr:#x} (a file)"),
+            }
+        }
+        Some((None, off)) => alloc::format!("{addr:#x} (memory, +{off:#x})"),
+        None => alloc::format!("{addr:#x} (not mapped)"),
+    }
+}
+
 /// The areas, for /proc/self/maps.
 pub fn areas() -> Vec<(u64, u64, u32)> {
     with_state(|st| st.vmas.iter().map(|(&s, v)| (s, v.end, v.prot)).collect())

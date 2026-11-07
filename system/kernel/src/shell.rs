@@ -62,6 +62,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("mem", "", "memory usage"),
     ("ps", "", "running programs and threads"),
     ("kill", "<pid>", "stop a program"),
+    ("where", "<tid> [samples]", "where a thread of a Linux program is (library+offset), sampled"),
     ("ports", "", "named message ports and who owns them"),
     ("perms", "[allow|deny|ask <app> <perm>]", "what apps may use outside their sandbox"),
     ("updates", "[check|install <app>|all|auto on|off]", "updates of the installed apps"),
@@ -80,6 +81,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("uptime", "", "time since start"),
     ("log", "[lines]", "the system journal"),
     ("verbose", "[on|off]", "show debug messages on screen"),
+    ("strace", "[on|off]", "log every system call of Linux programs (in the journal)"),
     ("echo", "<text>", "print text"),
     ("clear", "", "clear the screen (also: cls)"),
     ("restart", "", "restart the computer (also: reboot)"),
@@ -377,6 +379,11 @@ impl Shell {
     }
 
     fn execute(&mut self, line: &str) {
+        // `program &`: the program starts and the shell does not wait for it.
+        if let Some(job) = line.trim_end().strip_suffix('&') {
+            self.start_background(job);
+            return;
+        }
         let args = split(line);
         let Some(cmd) = args.first() else { return };
         let cmd = cmd.to_ascii_lowercase();
@@ -565,6 +572,11 @@ impl Shell {
                 for t in task::list() {
                     let pid = if t.pid == 0 { String::from("-") } else { t.pid.to_string() };
                     println!("{:>5} {:>4}  {:<9}  {:>5}ms  {}", t.tid, pid, t.state.name(), t.cpu_ms, t.name);
+                }
+            }
+            "where" => {
+                if need(1, "<tid> [samples]") {
+                    self.where_thread(rest[0], rest.get(1).and_then(|n| n.parse().ok()).unwrap_or(1));
                 }
             }
             "kill" => {
@@ -944,6 +956,11 @@ impl Shell {
                 crate::console::set_verbose(on);
                 println!("debug messages {}", if on { "on" } else { "off" });
             }
+            "strace" => {
+                let on = !matches!(rest.first(), Some(&"off"));
+                crate::linux::TRACE.store(on, core::sync::atomic::Ordering::Relaxed);
+                println!("system call tracing {}", if on { "on" } else { "off" });
+            }
             "echo" => println!("{}", rest.join(" ")),
             "clear" | "cls" => crate::console::clear(),
             "restart" | "reboot" => {
@@ -1046,6 +1063,61 @@ impl Shell {
             return;
         };
         self.report(name, crate::user::run_foreground(&path, args, self.cwd.clone()));
+    }
+
+    /// `where <tid> [samples]`: where a thread of a Linux program is, as a
+    /// library and an offset in it; with samples, the places it was most
+    /// often, 10 ms apart (to find what a busy program is doing).
+    fn where_thread(&self, tid: &str, samples: usize) {
+        let Ok(tid) = tid.parse::<task::Tid>() else {
+            println!("{ERR}usage: where <tid> [samples]{RESET}");
+            return;
+        };
+        let mut seen: Vec<(String, usize)> = Vec::new();
+        let mut tries = 0;
+        let mut taken = 0;
+        while taken < samples.clamp(1, 2000) && tries < samples * 4 + 20 {
+            tries += 1;
+            if let Some((pid, rip, call)) = task::user_frame(tid) {
+                let mut place = crate::linux::mm::describe(pid, rip);
+                if let Some(n) = call {
+                    place.push_str(&alloc::format!("  in system call {n}"));
+                }
+                match seen.iter_mut().find(|(p, _)| *p == place) {
+                    Some((_, n)) => *n += 1,
+                    None => seen.push((place, 1)),
+                }
+                taken += 1;
+            }
+            task::sleep_ms(10);
+        }
+        if taken == 0 {
+            println!("{ERR}thread {tid} is not a program's thread, or never stopped{RESET}");
+            return;
+        }
+        seen.sort_by(|a, b| b.1.cmp(&a.1));
+        for (place, n) in seen.iter().take(20) {
+            println!("  {n:>5}  {place}");
+        }
+    }
+
+    /// `program [arguments] &`: started, not waited for; `ps` shows it and
+    /// `kill` stops it.
+    fn start_background(&self, line: &str) {
+        let args = split(line);
+        let Some(name) = args.first() else {
+            println!("{ERR}usage: <program> [arguments] &{RESET}");
+            return;
+        };
+        let Some(path) = crate::user::find_program(name, &self.cwd) else {
+            println!("{ERR}{name}: no such program{RESET}");
+            return;
+        };
+        let prog_args = line.trim_start()[name.len()..].trim();
+        match crate::user::spawn(&path, prog_args, self.cwd.clone()) {
+            Ok(pid) => println!("{DIM}[{pid}]{RESET} {name}"),
+            Err(e) => println!("{ERR}{name}: {}{RESET}", e.as_str()),
+        }
     }
 
     /// Runs a BusyBox applet (`ls`, `cat`, …) out of the installed `busybox`.
@@ -1252,6 +1324,7 @@ impl Shell {
             println!("  {BOLD}{name:<10}{RESET}{DIM}{args:<22}{RESET} {text}");
         }
         println!("\nPaths name a volume first: {BOLD}sys:/system/drivers{RESET}. Tab completes commands and paths.");
+        println!("A program followed by {BOLD}&{RESET} runs without the shell waiting for it.");
         if let Ok(apps) = fs::abs("sys:/apps").and_then(|p| fs::list_dir(&p)) {
             let names: Vec<String> = apps
                 .iter()

@@ -1,6 +1,8 @@
 //! Waiting on many descriptors: `poll`, `select` and `epoll` (level
 //! triggered; edge-triggered sets are served the same way, which programs
-//! written for edge triggering handle since they read until EAGAIN).
+//! written for edge triggering handle since they read until EAGAIN, except
+//! on descriptors that are always ready, like files: there the one edge is
+//! when the watch is set, as on Linux, and they are reported once).
 //!
 //! Every source of readiness (network, pipes, eventfds) signals the one
 //! queue [`crate::net::EVENTS`]; the console is looked at every few
@@ -28,6 +30,7 @@ const EPOLLERR: u32 = 0x008;
 const EPOLLHUP: u32 = 0x010;
 const EPOLLRDHUP: u32 = 0x2000;
 const EPOLLONESHOT: u32 = 1 << 30;
+const EPOLLET: u32 = 1 << 31;
 
 /// Waits until `check` returns something, or the timeout (ms; negative:
 /// forever) runs out.
@@ -209,7 +212,8 @@ struct Watch {
     desc: Weak<Desc>,
     events: u32,
     data: u64,
-    /// One-shot entries go quiet after reporting once.
+    /// One-shot entries go quiet after reporting once, and so do
+    /// edge-triggered ones on descriptors that are always ready.
     armed: bool,
 }
 
@@ -218,11 +222,15 @@ pub struct Epoll {
 }
 
 impl Epoll {
+    /// Whether a wait would report something; it reports nothing itself,
+    /// so one-shot entries stay armed for the wait that follows.
     pub fn any_ready(&self) -> bool {
-        !self.collect(1).is_empty()
+        !self.collect(1, false).is_empty()
     }
 
-    fn collect(&self, max: usize) -> Vec<(u32, u64)> {
+    /// The events to report (at most `max`); `report` disarms the entries
+    /// that go quiet once reported.
+    fn collect(&self, max: usize, report: bool) -> Vec<(u32, u64)> {
         let list: Vec<(i32, Arc<Desc>, u32, u64)> = self
             .watches
             .lock()
@@ -247,7 +255,7 @@ impl Epoll {
                 ev |= EPOLLHUP | if want & EPOLLRDHUP != 0 { EPOLLRDHUP } else { 0 };
             }
             if ev != 0 {
-                if want & EPOLLONESHOT != 0 {
+                if report && (want & EPOLLONESHOT != 0 || (want & EPOLLET != 0 && fd::always_ready(&d))) {
                     if let Some(w) = self.watches.lock().get_mut(&fd) {
                         w.armed = false;
                     }
@@ -315,7 +323,7 @@ pub fn sys_epoll_wait(epfd: i32, out: u64, max: i32, timeout_ms: i64) -> i64 {
     let Kind::Epoll(e) = &ep.kind else { return -err::EINVAL };
     let max = (max as usize).min(1024);
     let got = match wait(timeout_ms, || {
-        let v = e.collect(max);
+        let v = e.collect(max, true);
         (!v.is_empty()).then_some(v)
     }) {
         Ok(v) => v.unwrap_or_default(),

@@ -777,6 +777,26 @@ pub fn list() -> Vec<ThreadInfo> {
         .collect()
 }
 
+/// Where a thread of a program that is not on a processor stopped in its
+/// program: the process, the instruction pointer, and the Linux system call
+/// it is in, if any, from the frame its last entry into the kernel left at
+/// the top of its kernel stack (in a system call, where the program made
+/// it).
+pub fn user_frame(tid: Tid) -> Option<(u32, u64, Option<u64>)> {
+    let s = SCHED.lock();
+    let t = s.threads.get(&tid)?;
+    if t.pid == 0 || t.stack == 0 || t.on_cpu {
+        return None;
+    }
+    let at = t.stack_top() - core::mem::size_of::<crate::arch::idt::TrapFrame>() as u64;
+    // SAFETY: the thread's kernel stack stays mapped while it exists (the
+    // scheduler's lock keeps it), and entries from user mode put their
+    // frame at its top.
+    let f = unsafe { &*(at as *const crate::arch::idt::TrapFrame) };
+    let call = (f.vector == crate::arch::syscall::VEC_LINUX).then_some(f.rax);
+    f.is_user().then_some((t.pid, f.rip, call))
+}
+
 // ----------------------------------------------------------------------------
 // User mode hooks (see `crate::user`).
 

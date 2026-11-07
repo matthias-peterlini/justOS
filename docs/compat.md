@@ -32,8 +32,11 @@ sistema con la disposizione di Debian: tutto in `/usr`, con `/bin`, `/sbin`,
 `/lib` e `/lib64` come collegamenti simbolici dentro `/usr` (JustFS ha i
 collegamenti simbolici). L'app File non mostra queste cartelle. Quali
 pacchetti, lo dice `LINUX_PKGS` nel `Makefile` (per ora `libc6`, la glibc
-2.41 di Debian 13, e `libwayland-client0` con `libxkbcommon0` per i
-programmi con finestre); `make linux-root` rifà l'albero.
+2.41 di Debian 13 con la sua localizzazione C.UTF-8, `libwayland-client0`
+con `libxkbcommon0` per i programmi con finestre, e GTK 3); `make
+linux-root` rifà l'albero. Il CD live non le porta: il suo volume di
+sistema viene letto in memoria all'avvio, e l'albero di Debian è più
+grande di tutto il resto.
 
 Un programma Linux si avvia come gli altri, per percorso o per nome:
 
@@ -99,6 +102,27 @@ programma disegna.
 
 `make test-wayland` lo prova con un piccolo client (`scripts/linux/wl-test.c`)
 compilato al volo contro la `libwayland-client` e la `libxkbcommon` di Debian.
+
+### GTK 3
+
+L'immagine porta **GTK 3** di Debian (`libgtk-3-0t64`, con il caricatore SVG
+delle icone e i programmi di prova `gtk3-widget-factory` e `gtk3-demo` in
+`sys:/usr/bin`). I programmi GTK hanno l'aspetto di justOS: il tema
+**justOS** (`rootfs/usr/share/themes/justOS/gtk-3.0/gtk.css`, scelto da
+`rootfs/etc/gtk-3.0/settings.ini`) lascia trasparente lo sfondo, così dietro
+si vede il vetro della finestra, e usa testo bianco, pulsanti a pillola,
+l'arancione di justOS per spunte, interruttori e barre, e il carattere Google
+Sans Flex. Parte da Adwaita scuro (che GTK ha dentro di sé) e copre anche lo
+stato delle finestre che non sono davanti: una finestra GTK resta uguale
+davanti e dietro, come quelle di justOS.
+
+Non ci sono ancora inotify (GIO ripiega su controlli periodici), D-Bus e
+l'accessibilità; le impostazioni (GSettings) restano in memoria. L'avvio di
+un programma GTK prende qualche secondo.
+
+`make test-gtk` avvia `gtk3-widget-factory` dalla console seriale e
+controlla la sua finestra sullo schermo: c'è, ha i colori del tema e non il
+blu di Adwaita.
 
 ## Programmi Windows
 

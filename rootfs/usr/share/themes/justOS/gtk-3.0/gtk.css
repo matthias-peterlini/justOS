@@ -1,0 +1,270 @@
+/* justOS for GTK 3: Linux programs look like justOS's own apps. The
+ * window's background is clear, so the desktop's frosted glass shows
+ * through; text is white, buttons are pills, the accent is justOS's
+ * orange and the typeface Google Sans Flex (see settings.ini). Built on
+ * Adwaita's dark variant, which GTK carries inside itself.
+ *
+ * Adwaita paints most fills with background-image and has a rule of its
+ * own for every state, also for windows that are not in front
+ * (:backdrop), so each rule here names those states too and clears the
+ * image: justOS windows look the same in front and behind. */
+@import url("resource:///org/gtk/libgtk/theme/Adwaita/gtk-contained-dark.css");
+
+@define-color just_accent #ff5a1f;
+@define-color just_ink #1b1a1f;
+@define-color just_menu rgba(44, 43, 49, 0.97);
+
+window, window.background, .background, .background:backdrop, dialog .dialog-vbox, stack, viewport,
+notebook > stack, notebook > stack:not(:only-child):backdrop, notebook > header, notebook > header:backdrop,
+scrolledwindow, box, grid {
+    background-color: transparent;
+    background-image: none;
+    color: #ffffff;
+    text-shadow: none;
+}
+
+decoration, decoration:backdrop, window.csd decoration, window.csd decoration:backdrop,
+window.solid-csd decoration {
+    box-shadow: none;
+    border-radius: 0;
+    border: none;
+    margin: 0;
+}
+
+/* Menus, popovers and tooltips are surfaces of their own over the
+ * content: they need a background of their own. */
+menu, menu:backdrop, .menu, .menu:backdrop, .context-menu, .context-menu:backdrop,
+menubar > menuitem menu, popover, popover.background, popover.background:backdrop,
+.popup, combobox window, window.popup {
+    background-color: @just_menu;
+    color: #ffffff;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+}
+menu menuitem, menu menuitem:backdrop, .menu menuitem:backdrop, .context-menu menuitem:backdrop { color: #ffffff; }
+menuitem:hover, menu menuitem:hover, menu menuitem:backdrop:hover, modelbutton.flat:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+}
+menu menuitem:disabled, menu menuitem:disabled:backdrop { color: #94919a; }
+tooltip, tooltip.background {
+    background-color: rgba(27, 26, 31, 0.94);
+    color: #ffffff;
+    border-radius: 10px;
+}
+
+headerbar, headerbar:backdrop, .titlebar, .titlebar:backdrop:not(headerbar), toolbar, actionbar,
+searchbar, menubar, menubar:backdrop, .menubar:backdrop, .inline-toolbar {
+    background-color: rgba(255, 255, 255, 0.05);
+    background-image: none;
+    border: none;
+    box-shadow: none;
+}
+
+label, label:backdrop { color: inherit; }
+label:disabled, label:disabled:backdrop, .dim-label { color: #c9c6ce; }
+
+/* Buttons: a translucent pill; white when pressed or on. */
+button, button:backdrop, menubutton > button, combobox > box > button, spinbutton > button,
+button.toggle, button.toggle:backdrop, modelbutton {
+    border-radius: 999px;
+    background-color: rgba(255, 255, 255, 0.10);
+    background-image: none;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    box-shadow: none;
+    text-shadow: none;
+    -gtk-icon-shadow: none;
+    -gtk-icon-effect: none;
+    color: #ffffff;
+}
+button { padding: 4px 14px; min-height: 22px; }
+button:hover, button:hover:backdrop {
+    background-color: rgba(255, 255, 255, 0.18);
+    background-image: none;
+    color: #ffffff;
+}
+/* Adwaita styles the pressed buttons of linked groups (stack switchers,
+ * segmented buttons) and header bars more specifically: they need the
+ * same rule, or the dark text ends up on Adwaita's dark background. */
+button:active, button:checked, button:backdrop:active, button:backdrop:checked,
+.linked > button:active, .linked > button:checked,
+.linked:not(.vertical) > button:checked, .linked.vertical > button:checked,
+stackswitcher > button:checked, .stack-switcher > button:checked,
+headerbar button.toggle:checked, headerbar stackswitcher button:checked,
+headerbar button.toggle:checked:backdrop, headerbar stackswitcher button:checked:backdrop {
+    background-color: #ffffff;
+    background-image: none;
+    color: @just_ink;
+    border-color: #ffffff;
+    box-shadow: none;
+}
+button:checked label, button:active label, button:checked:backdrop label { color: @just_ink; }
+button:disabled, button:backdrop:disabled {
+    background-color: rgba(255, 255, 255, 0.05);
+    background-image: none;
+    border-color: rgba(255, 255, 255, 0.08);
+    color: #94919a;
+}
+button:disabled label, button:backdrop:disabled label { color: #94919a; }
+button:checked:disabled, button:backdrop:disabled:checked, button:backdrop:disabled:active,
+.linked > button:checked:disabled {
+    background-color: rgba(255, 255, 255, 0.32);
+    background-image: none;
+    border-color: transparent;
+    color: rgba(27, 26, 31, 0.62);
+}
+button:checked:disabled label, button:backdrop:disabled:checked label { color: rgba(27, 26, 31, 0.62); }
+button.flat, button.flat:backdrop, button.flat:disabled, button.flat:backdrop:disabled,
+button.image-button.flat, headerbar button.flat, button.titlebutton:backdrop, button.sidebar-button:backdrop {
+    background-color: transparent;
+    background-image: none;
+    border-color: transparent;
+}
+button.flat:hover, button.flat:hover:backdrop { background-color: rgba(255, 255, 255, 0.12); }
+button.suggested-action, button.suggested-action:backdrop, button.suggested-action:hover {
+    background-color: @just_accent;
+    background-image: none;
+    border-color: @just_accent;
+    color: #ffffff;
+}
+button.destructive-action, button.destructive-action:backdrop, button.destructive-action:hover {
+    background-color: #ff5a4e;
+    background-image: none;
+    border-color: #ff5a4e;
+    color: #ffffff;
+}
+modelbutton, modelbutton:backdrop { border: none; background-color: transparent; border-radius: 8px; }
+
+entry, entry:backdrop, spinbutton:not(.vertical), spinbutton:backdrop:not(.vertical), searchentry {
+    background-color: rgba(14, 10, 10, 0.72);
+    background-image: none;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow: none;
+    color: #ffffff;
+    caret-color: @just_accent;
+}
+entry:disabled, entry:backdrop:disabled, spinbutton:disabled:not(.vertical), spinbutton:backdrop:disabled:not(.vertical) {
+    background-color: rgba(14, 10, 10, 0.36);
+    color: #94919a;
+}
+entry image, entry image:backdrop { color: #c9c6ce; }
+spinbutton:not(.vertical) entry, spinbutton:not(.vertical) entry:backdrop { background-color: transparent; border: none; }
+spinbutton:not(.vertical) button, spinbutton:not(.vertical) button:backdrop {
+    background-color: transparent;
+    border-radius: 0;
+    border-style: none none none solid;
+    border-color: rgba(255, 255, 255, 0.10);
+    color: #ffffff;
+}
+spinbutton:not(.vertical) button:hover { background-color: rgba(255, 255, 255, 0.10); }
+spinbutton:not(.vertical) button:disabled, spinbutton:not(.vertical) button:backdrop:disabled { color: #6d6a73; }
+entry:focus, spinbutton:focus { border-color: @just_accent; box-shadow: none; }
+entry selection, label selection, textview text selection,
+*:selected, *:selected:backdrop, row:selected, row:selected:backdrop, treeview.view:selected,
+iconview:selected, flowboxchild:selected {
+    background-color: alpha(@just_accent, 0.85);
+    color: #ffffff;
+}
+
+textview, textview text, textview text:backdrop, list, list:backdrop, listview, treeview.view,
+iconview, iconview:backdrop, .view, .view:backdrop, .view text:backdrop, flowbox, placessidebar {
+    background-color: rgba(255, 255, 255, 0.04);
+    color: #ffffff;
+}
+treeview.view header button, treeview.view header button:backdrop {
+    border-radius: 0;
+    background-color: rgba(255, 255, 255, 0.06);
+    background-image: none;
+    border: none;
+    color: #c9c6ce;
+}
+row { border-radius: 8px; }
+row:hover { background-color: rgba(255, 255, 255, 0.08); }
+
+check, radio, check:backdrop, radio:backdrop, check:hover, radio:hover {
+    background-color: rgba(255, 255, 255, 0.10);
+    background-image: none;
+    border: 1px solid rgba(255, 255, 255, 0.30);
+    box-shadow: none;
+    color: #ffffff;
+}
+check:checked, radio:checked, check:indeterminate, radio:indeterminate,
+check:checked:hover, radio:checked:hover, check:indeterminate:hover, radio:indeterminate:hover,
+check:checked:backdrop, radio:checked:backdrop, check:indeterminate:backdrop, radio:indeterminate:backdrop {
+    background-color: @just_accent;
+    background-image: none;
+    border-color: @just_accent;
+    color: #ffffff;
+}
+check:disabled, radio:disabled, check:backdrop:disabled, radio:backdrop:disabled { background-color: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.14); }
+check:checked:disabled, radio:checked:disabled, check:checked:backdrop:disabled, radio:checked:backdrop:disabled,
+check:indeterminate:disabled, radio:indeterminate:disabled {
+    background-color: alpha(@just_accent, 0.40);
+    border-color: transparent;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+switch, switch:backdrop {
+    background-color: rgba(255, 255, 255, 0.14);
+    background-image: none;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+    box-shadow: none;
+    color: #ffffff;
+}
+switch:checked, switch:backdrop:checked { background-color: @just_accent; border-color: @just_accent; }
+switch:disabled, switch:backdrop:disabled { background-color: rgba(255, 255, 255, 0.05); }
+switch slider, switch:backdrop slider, switch:hover slider, switch:disabled slider, switch:backdrop:disabled slider {
+    background-color: #ffffff;
+    background-image: none;
+    border: none;
+    border-radius: 999px;
+    box-shadow: none;
+}
+switch:disabled slider, switch:backdrop:disabled slider { background-color: #8c8992; }
+
+progressbar trough, progressbar trough:backdrop, scale trough, scale trough:backdrop,
+levelbar trough, levelbar trough:backdrop {
+    background-color: rgba(255, 255, 255, 0.14);
+    background-image: none;
+    border: none;
+    border-radius: 999px;
+    box-shadow: none;
+}
+progressbar progress, progressbar progress:backdrop, scale highlight, scale highlight:backdrop,
+levelbar block.filled, levelbar block.high, levelbar block:not(.empty), levelbar block:not(.empty):backdrop {
+    background-color: @just_accent;
+    background-image: none;
+    border-color: @just_accent;
+    border-radius: 999px;
+}
+scale fill, scale fill:backdrop { background-color: rgba(255, 255, 255, 0.28); }
+scale slider, scale slider:backdrop, scale slider:hover {
+    background-color: #ffffff;
+    background-image: none;
+    border: none;
+    box-shadow: none;
+}
+scale slider:disabled, scale slider:backdrop:disabled { background-color: #8c8992; }
+
+scrollbar, scrollbar:backdrop, scrollbar trough { background-color: transparent; border: none; }
+scrollbar slider, scrollbar slider:backdrop {
+    background-color: rgba(255, 255, 255, 0.35);
+    border: none;
+    border-radius: 999px;
+}
+scrollbar slider:hover { background-color: rgba(255, 255, 255, 0.55); }
+
+notebook > header tab, notebook > header tab:backdrop { border-radius: 999px; color: #c9c6ce; }
+notebook > header tab:checked, notebook > header tab:backdrop:checked { background-color: rgba(255, 255, 255, 0.14); color: #ffffff; }
+notebook, frame > border, frame > border:backdrop, .frame, .frame:backdrop { border-color: rgba(255, 255, 255, 0.10); }
+
+separator, separator:backdrop { background-color: rgba(255, 255, 255, 0.09); }
+infobar, .app-notification {
+    background-color: rgba(255, 255, 255, 0.08);
+    background-image: none;
+    border-radius: 12px;
+}
+link, *:link, *:link:backdrop, *:visited, button:link, button:visited, button:link > label,
+button:visited > label, button:link > label:backdrop, button:visited > label:backdrop { color: #ff8a5c; }

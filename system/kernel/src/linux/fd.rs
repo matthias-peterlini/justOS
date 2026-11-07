@@ -222,6 +222,10 @@ fn virtual_file(text: &str) -> Option<Kind> {
             }
             data(s)
         }
+        // One file system: GIO (through libmount) reads these to know the
+        // mounts it shows and watches.
+        "/proc/mounts" | "/proc/self/mounts" | "/etc/mtab" => data(String::from("/dev/root / justfs rw,relatime 0 0\n")),
+        "/proc/self/mountinfo" => data(String::from("1 1 0:1 / / rw,relatime shared:1 - justfs /dev/root rw\n")),
         "/proc/self/cmdline" => data(alloc::format!("{}\0", user::current_name())),
         "/proc/cpuinfo" => data(String::from("processor\t: 0\nmodel name\t: justOS virtual CPU\ncpu cores\t: 1\n\n")),
         "/proc/meminfo" => {
@@ -1027,4 +1031,10 @@ pub fn readiness(d: &Desc) -> (bool, bool, bool) {
         Kind::Epoll(e) => (e.any_ready(), false, false),
         _ => (true, true, false),
     }
+}
+
+/// Descriptors whose readiness never changes (files, generated files,
+/// devices that never block): an edge-triggered watch sees one edge.
+pub fn always_ready(d: &Desc) -> bool {
+    matches!(d.kind, Kind::File { .. } | Kind::Dir { .. } | Kind::Virtual { .. } | Kind::Null | Kind::Zero | Kind::Random | Kind::Memfd { .. })
 }

@@ -288,6 +288,9 @@ fn default_env() -> Vec<String> {
         .map(|s| s.to_string())
         .chain([alloc::format!("COLUMNS={cols}"), alloc::format!("LINES={rows}")])
         .chain([alloc::format!("XDG_RUNTIME_DIR={}", wayland::RUNTIME_DIR), alloc::format!("WAYLAND_DISPLAY={}", wayland::DISPLAY)])
+        // GTK and GLib: settings kept in memory (there is no dconf service)
+        // and no accessibility bus to look for.
+        .chain(["GSETTINGS_BACKEND=memory", "NO_AT_BRIDGE=1"].iter().map(|s| s.to_string()))
         .collect()
 }
 
@@ -571,6 +574,26 @@ fn build_stack(info: &Loaded, interp_base: u64, argv: &[String], envp: &[String]
 // ----------------------------------------------------------------------------
 // System call dispatch
 
+/// Every Linux system call goes to the journal (the shell's `strace on`):
+/// the ones that may wait when they start, all of them with their result.
+pub static TRACE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Calls that may wait: traced when they start too, to see where a program
+/// stopped.
+fn may_wait(n: u64) -> bool {
+    matches!(n, 0 | 7 | 19 | 23 | 34 | 35 | 43 | 45 | 47 | 61 | 130 | 202 | 230 | 232 | 247 | 270 | 271 | 281 | 288 | 299 | 441)
+}
+
+/// The file name a call is about, for the trace (` "/usr/lib/…"`).
+fn traced_path(n: u64, a: &[u64; 6]) -> String {
+    let ptr = match n {
+        2 | 4 | 6 | 21 | 59 | 80 | 83 | 87 | 89 => a[0],
+        257 | 262 | 263 | 267 | 269 | 332 | 439 => a[1],
+        _ => return String::new(),
+    };
+    user::user_cstr(ptr, 200).map(|s| alloc::format!(" \"{s}\"")).unwrap_or_default()
+}
+
 pub fn syscall(frame: &mut TrapFrame) {
     crate::arch::cpu::enable_irq();
     let n = frame.rax;
@@ -582,6 +605,11 @@ pub fn syscall(frame: &mut TrapFrame) {
         return;
     }
     let a = [frame.rdi, frame.rsi, frame.rdx, frame.r10, frame.r8, frame.r9];
+    let trace = TRACE.load(core::sync::atomic::Ordering::Relaxed);
+    let named = if trace { traced_path(n, &a) } else { String::new() };
+    if trace && may_wait(n) {
+        crate::debug!("strace", "{}[{}] {n}({:#x}, {:#x}, {:#x}, {:#x}){named} ...", user::current_name(), task::current_tid(), a[0], a[1], a[2], a[3]);
+    }
     // clone, fork and vfork need the caller's registers for the child.
     let ret = match n {
         56 => thread::sys_clone(frame, a[0], a[1], a[2], a[3], a[4]),
@@ -592,6 +620,9 @@ pub fn syscall(frame: &mut TrapFrame) {
     // clone3 is left to fail on purpose: callers fall back to clone.
     if ret == -err::ENOSYS && n != 435 {
         crate::debug!("linux", "{}: unimplemented syscall {n}", user::current_name());
+    }
+    if trace {
+        crate::debug!("strace", "{}[{}] {n}({:#x}, {:#x}, {:#x}, {:#x}){named} = {ret:#x}", user::current_name(), task::current_tid(), a[0], a[1], a[2], a[3]);
     }
     frame.rax = ret as u64;
     if user::kill_requested() {

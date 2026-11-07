@@ -143,7 +143,7 @@ pub fn offer(disk: &Arc<Disk>) {
         return;
     }
     let mut block0 = [0u8; justfs::BLOCK_SIZE];
-    let mut dev = DiskBlocks { disk: disk.clone() };
+    let mut dev = DiskBlocks::new(disk.clone());
     if dev.read_block(0, &mut block0).is_err() || !Fs::<MemDisk>::probe(&block0) {
         return;
     }
@@ -183,7 +183,7 @@ pub fn format(disk: &Arc<Disk>, label: &str) -> Result<String> {
     if is_mounted_on(&disk.name) {
         return Err(Error::Exists);
     }
-    let dev = DiskBlocks { disk: disk.clone() };
+    let dev = DiskBlocks::new(disk.clone());
     let fs = Fs::format(Box::new(dev) as Box<dyn BlockDevice + Send>, label, &CLOCK)?;
     let name = name_for(label, &disk.name);
     mount(&name, &disk.name, fs);
