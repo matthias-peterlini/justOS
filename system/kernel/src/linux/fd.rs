@@ -1,7 +1,7 @@
 //! File descriptors of Linux processes: files and folders of the justOS
 //! volume, the console, pipes, eventfds, sockets ([`super::sock`],
-//! [`super::unix`]) and epoll
-//! sets ([`super::poll`]), plus the few virtual files programs expect
+//! [`super::unix`]), epoll sets ([`super::poll`]) and inotify instances
+//! ([`super::inotify`]), plus the few virtual files programs expect
 //! (`/dev/null`, `/dev/urandom`, `/etc/resolv.conf`, `/proc/self/...`).
 //!
 //! A descriptor is an `Arc<Desc>`: `dup` shares it, with its position and
@@ -65,6 +65,7 @@ pub enum Kind {
     Socket(super::sock::Socket),
     Unix(super::unix::Unix),
     Epoll(super::poll::Epoll),
+    Inotify(Arc<super::inotify::Inotify>),
 }
 
 pub struct Desc {
@@ -105,6 +106,10 @@ impl Drop for Desc {
             }
             Kind::Socket(s) => s.close(),
             Kind::Unix(u) => u.close(),
+            // Watchers learn that a file written through it is complete.
+            Kind::File { path, .. } if self.flags.load(Ordering::Relaxed) & (O_WRONLY | O_RDWR) != 0 => {
+                fs::touched(path, fs::change::CLOSE_WRITE);
+            }
             _ => {}
         }
     }
@@ -414,6 +419,7 @@ impl Waits {
         match &d.kind {
             Kind::PipeRead(p) | Kind::PipeWrite(p) => self.queue(&p.wq),
             Kind::Event(e) => self.queue(&e.wq),
+            Kind::Inotify(i) => self.queue(&i.wq),
             Kind::Unix(u) => u.waits(self),
             Kind::Epoll(e) if depth < 4 => e.waits(self, depth + 1),
             Kind::Epoll(_) | Kind::Socket(_) => self.events = true,
@@ -516,6 +522,7 @@ pub fn read_desc(d: &Desc, buf: &mut [u8]) -> i64 {
         }
         Kind::Socket(s) => s.recv(d, buf, 0).0,
         Kind::Unix(u) => u.read(d, buf),
+        Kind::Inotify(i) => i.read(d, buf),
         Kind::PipeWrite(_) | Kind::Epoll(_) => -err::EBADF,
     }
 }
@@ -777,7 +784,7 @@ pub fn stat_of_desc(d: &Desc) -> Result<StatInfo, i64> {
         Kind::Null | Kind::Zero | Kind::Random => simple(0o020666),
         Kind::PipeRead(_) | Kind::PipeWrite(_) => simple(0o010600),
         Kind::Socket(_) | Kind::Unix(_) => simple(0o140777),
-        Kind::Event(_) | Kind::Epoll(_) => simple(0o100600),
+        Kind::Event(_) | Kind::Epoll(_) | Kind::Inotify(_) => simple(0o100600),
     }
 }
 
@@ -1118,6 +1125,7 @@ pub fn sys_ioctl(fd: i32, req: u64, arg: u64) -> i64 {
                 Kind::Socket(s) => s.pending() as u32,
                 Kind::Unix(u) => u.pending() as u32,
                 Kind::Console => super::tty::pending() as u32,
+                Kind::Inotify(i) => i.pending() as u32,
                 _ => 0,
             };
             match user_bytes(arg, 4) {
@@ -1154,6 +1162,7 @@ pub fn readiness(d: &Desc) -> (bool, bool, bool) {
         Kind::Unix(u) => u.readiness(),
         Kind::Console => (super::tty::pending() > 0, true, false),
         Kind::Epoll(e) => (e.any_ready(), false, false),
+        Kind::Inotify(i) => (i.ready(), false, false),
         _ => (true, true, false),
     }
 }

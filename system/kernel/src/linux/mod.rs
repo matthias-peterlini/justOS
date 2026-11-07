@@ -20,6 +20,7 @@
 //! with wait4. Signals ([`signal`]) run the program's handlers, as on Linux.
 
 pub mod fd;
+mod inotify;
 pub mod mm;
 mod poll;
 mod shm;
@@ -811,12 +812,16 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         271 => poll::sys_ppoll(a[0], a[1], a[2]),
         273 | 334 => 0, // set_robust_list, rseq... (glibc asks rseq; 0 = "fine")
         281 => poll::sys_epoll_wait(fd0, a[1], a[2] as i32, a[3] as i32 as i64),
+        253 => inotify::sys_inotify_init1(0),
+        254 => inotify::sys_inotify_add_watch(fd0, a[1], a[2] as u32),
+        255 => inotify::sys_inotify_rm_watch(fd0, a[1] as i32),
         284 => fd::sys_eventfd2(a[0] as u32, 0),
         288 => sock::sys_accept4(fd0, a[1], a[2], a[3]),
         290 => fd::sys_eventfd2(a[0] as u32, a[1] as u32),
         291 => poll::sys_epoll_create1(a[0] as u32),
         292 => fd::sys_dup3(fd0, a[1] as i32, a[2] as u32),
         293 => fd::sys_pipe2(a[0], a[1] as u32),
+        294 => inotify::sys_inotify_init1(a[0] as u32),
         302 => sys_prlimit(a[1], a[3]),
         309 => sys_getcpu(a[0], a[1]),
         318 => sys_getrandom(a[0], a[1]),

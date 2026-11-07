@@ -20,7 +20,7 @@ use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use justfs::{BlockDevice, DirEntry, Fs, Kind, MemDisk, NodeId};
 
 pub use justfs::Error;
@@ -147,6 +147,11 @@ impl Names {
 }
 
 impl Volume {
+    /// Tells volumes apart in a [`Change`].
+    fn key(&self) -> usize {
+        self as *const Volume as usize
+    }
+
     pub fn read_only(&self) -> bool {
         self.fs.lock().read_only()
     }
@@ -346,6 +351,97 @@ fn flush_volume(v: &Volume) {
     }
 }
 
+// ----------------------------------------------------------------------------
+// Watching
+
+/// What changed, in the bits of Linux's inotify (its only reader).
+pub mod change {
+    pub const MODIFY: u32 = 0x2;
+    pub const ATTRIB: u32 = 0x4;
+    pub const CLOSE_WRITE: u32 = 0x8;
+    pub const MOVED_FROM: u32 = 0x40;
+    pub const MOVED_TO: u32 = 0x80;
+    pub const CREATE: u32 = 0x100;
+    pub const DELETE: u32 = 0x200;
+    /// Set with the others when the entry is a folder.
+    pub const ISDIR: u32 = 0x4000_0000;
+}
+
+/// A change to the entry `name` (node `node`) of the folder `dir`.
+pub struct Change<'a> {
+    /// The volume ([`node_of`] gives the same number).
+    pub volume: usize,
+    pub dir: NodeId,
+    pub name: &'a str,
+    pub node: NodeId,
+    pub mask: u32,
+    /// Ties the two halves of a move together.
+    pub cookie: u32,
+}
+
+/// Told of every change while anything is watched.
+static WATCHER: IrqLock<Option<fn(&Change<'_>)>> = IrqLock::new(None);
+
+/// How many things are watched: changes are described only while some are.
+static WATCHED: AtomicUsize = AtomicUsize::new(0);
+
+/// Sets who is told of changes.
+pub fn set_watcher(f: fn(&Change<'_>)) {
+    *WATCHER.lock() = Some(f);
+}
+
+/// One more thing is watched (`true`), or one fewer.
+pub fn watching(more: bool) {
+    if more {
+        WATCHED.fetch_add(1, Ordering::Relaxed);
+    } else {
+        WATCHED.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+fn watched() -> bool {
+    WATCHED.load(Ordering::Relaxed) != 0
+}
+
+fn tell(v: &Volume, dir: NodeId, name: &str, node: NodeId, mask: u32, cookie: u32) {
+    let watcher = *WATCHER.lock();
+    if let Some(f) = watcher {
+        f(&Change { volume: v.key(), dir, name, node, mask, cookie });
+    }
+}
+
+/// Tells of a change to the entry at `path` (node `id`), if anything is
+/// watched.
+fn tell_path(v: &Volume, fs: &mut VolFs, path: &str, id: NodeId, mask: u32) {
+    if watched() {
+        if let Ok((dir, name)) = find_parent(v, fs, path) {
+            tell(v, dir, name, id, mask, 0);
+        }
+    }
+}
+
+/// The volume (as in [`Change`]), node and kind at `path`.
+pub fn node_of(path: &Path, follow: bool) -> Result<(usize, NodeId, Kind)> {
+    let v = vol(path)?;
+    let mut fs = v.fs.lock();
+    let id = find(&v, &mut fs, &path.inner, if follow { Follow::Yes } else { Follow::No })?;
+    let kind = fs.node(id)?.kind;
+    Ok((v.key(), id, kind))
+}
+
+/// Tells watchers of the file at `path` that `mask` happened to it (a
+/// program closed it after writing, say).
+pub fn touched(path: &Path, mask: u32) {
+    if !watched() {
+        return;
+    }
+    let Ok(v) = vol(path) else { return };
+    let mut fs = v.fs.lock();
+    if let Ok(id) = find(&v, &mut fs, &path.inner, Follow::Yes) {
+        tell_path(&v, &mut fs, &path.inner, id, mask);
+    }
+}
+
 /// Makes what was written to the volume of `path` reach the disk (fsync).
 pub fn flush(path: &Path) {
     if let Ok(v) = vol(path) {
@@ -477,8 +573,9 @@ pub fn lstat(path: &Path) -> Result<Stat> {
 pub fn symlink(path: &Path, target: &str) -> Result<()> {
     let v = vol(path)?;
     let mut fs = v.fs.lock();
-    fs.symlink(&path.inner, target)?;
+    let id = fs.symlink(&path.inner, target)?;
     v.names.lock().added();
+    tell_path(&v, &mut fs, &path.inner, id, change::CREATE);
     changed(&v)
 }
 
@@ -510,10 +607,17 @@ pub fn write_file(path: &Path, data: &[u8]) -> Result<()> {
     let mut fs = v.fs.lock();
     let known = find(&v, &mut fs, &path.inner, Follow::Yes);
     match known {
-        Ok(id) if !fs.node(id)?.is_dir() => fs.write_all(id, data)?,
+        Ok(id) if !fs.node(id)?.is_dir() => {
+            fs.write_all(id, data)?;
+            tell_path(&v, &mut fs, &path.inner, id, change::MODIFY);
+        }
         _ => {
-            fs.write_file(&path.inner, data)?;
+            let id = fs.write_file(&path.inner, data)?;
             v.names.lock().added();
+            tell_path(&v, &mut fs, &path.inner, id, change::CREATE);
+            if !data.is_empty() {
+                tell_path(&v, &mut fs, &path.inner, id, change::MODIFY);
+            }
         }
     }
     changed(&v)
@@ -538,11 +642,17 @@ pub fn write_at(path: &Path, offset: u64, data: &[u8]) -> Result<()> {
             let (dir, name) = find_parent(&v, &mut fs, &path.inner)?;
             let id = fs.create(dir, name, Kind::File)?;
             v.names.lock().added();
+            if watched() {
+                tell(&v, dir, name, id, change::CREATE, 0);
+            }
             id
         }
         Err(e) => return Err(e),
     };
     fs.write(id, offset, data)?;
+    if !data.is_empty() {
+        tell_path(&v, &mut fs, &path.inner, id, change::MODIFY);
+    }
     changed(&v)
 }
 
@@ -552,6 +662,7 @@ pub fn truncate(path: &Path, len: u64) -> Result<()> {
     let mut fs = v.fs.lock();
     let id = find(&v, &mut fs, &path.inner, Follow::Yes)?;
     fs.truncate(id, len)?;
+    tell_path(&v, &mut fs, &path.inner, id, change::MODIFY);
     changed(&v)
 }
 
@@ -566,12 +677,18 @@ pub fn append_file(path: &Path, data: &[u8]) -> Result<()> {
             let (dir, name) = find_parent(&v, &mut fs, &path.inner)?;
             let id = fs.create(dir, name, Kind::File)?;
             v.names.lock().added();
+            if watched() {
+                tell(&v, dir, name, id, change::CREATE, 0);
+            }
             id
         }
         Err(e) => return Err(e),
     };
     let size = fs.node(id)?.size;
     fs.write(id, size, data)?;
+    if !data.is_empty() {
+        tell_path(&v, &mut fs, &path.inner, id, change::MODIFY);
+    }
     changed(&v)
 }
 
@@ -603,8 +720,9 @@ pub fn make_dir(path: &Path) -> Result<()> {
     if known.is_ok_and(|id| fs.node(id).is_ok_and(|n| n.is_dir())) {
         return Ok(());
     }
-    fs.create_dirs(&path.inner)?;
+    let id = fs.create_dirs(&path.inner)?;
     v.names.lock().added();
+    tell_path(&v, &mut fs, &path.inner, id, change::CREATE | change::ISDIR);
     changed(&v)
 }
 
@@ -616,6 +734,9 @@ pub fn remove(path: &Path) -> Result<()> {
     let kind = fs.node(id)?.kind;
     fs.remove(dir, name)?;
     v.names.lock().removed(id, kind);
+    if watched() {
+        tell(&v, dir, name, id, change::DELETE | if kind == Kind::Dir { change::ISDIR } else { 0 }, 0);
+    }
     changed(&v)
 }
 
@@ -647,6 +768,13 @@ pub fn rename(from: &Path, to: &Path) -> Result<()> {
     names.removed(id, kind);
     names.added();
     drop(names);
+    if watched() {
+        static COOKIE: AtomicU32 = AtomicU32::new(1);
+        let cookie = COOKIE.fetch_add(1, Ordering::Relaxed);
+        let dir_bit = if kind == Kind::Dir { change::ISDIR } else { 0 };
+        tell(&v, dir, name, id, change::MOVED_FROM | dir_bit, cookie);
+        tell(&v, new_dir, new_name, id, change::MOVED_TO | dir_bit, cookie);
+    }
     changed(&v)
 }
 

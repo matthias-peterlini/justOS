@@ -82,6 +82,7 @@ fi
         'dt: memfd passed from the child exit=0' 'dt: shm_open hello 11 again 2' \
         'dt: nofile finite=1' 'dt: dup2 survives exec sock=1 cloexec=0' 'dt: dup2 exec got k exit=5' \
         'dt: proc fd 50=1 1=1 close_range 0 closed=1' 'dt: pshared semaphore exit=6' \
+        "dt: inotify CaMaWaFaTbm'Dbd'i' cookie=1 poll=1 again=1 rm=0 ignored=1" \
         'dt: prompt wake pipe=1 unix=1 futex=1'
 } > expect.txt
 

@@ -4,8 +4,8 @@
  * (handlers, masks, faults, EINTR and SA_RESTART, SIGCHLD, kill, SIGPIPE)
  * local sockets (pairs, a named server, SCM_RIGHTS, datagrams) and shared
  * memory (memfd, MAP_SHARED across fork and over a socket, shm_open),
- * starting a child the way browsers do (dup2 into place, close the rest)
- * and a process-shared semaphore.
+ * starting a child the way browsers do (dup2 into place, close the rest),
+ * a process-shared semaphore, inotify and prompt wake-ups.
  * Built by scripts/test-linux.sh with the host's gcc. */
 #define _GNU_SOURCE
 #include <dirent.h>
@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
+#include <sys/inotify.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
@@ -740,6 +741,52 @@ int main(int argc, char **argv) {
     usleep(300000);
     sem_post(sem);
     printf("dt: pshared semaphore exit=%d\n", reap(c13));
+
+    /* inotify: a watched folder reports a file created, written, closed,
+       renamed (both halves with one cookie) and deleted, in that order; then
+       nothing; the watch goes with IN_IGNORED. A watch on the file itself
+       follows it through the rename and reports its deletion. */
+    mkdir("ino", 0755);
+    int in = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+    int wdir = inotify_add_watch(in, "ino", IN_CREATE | IN_MODIFY | IN_CLOSE_WRITE | IN_MOVED_FROM | IN_MOVED_TO | IN_DELETE);
+    int wf = open("ino/a", O_CREAT | O_WRONLY, 0644);
+    int wfile = inotify_add_watch(in, "ino/a", IN_DELETE_SELF | IN_MOVE_SELF);
+    write(wf, "x", 1);
+    close(wf);
+    rename("ino/a", "ino/b");
+    struct pollfd ipf = {in, POLLIN, 0};
+    int ipoll = poll(&ipf, 1, 1000);
+    unlink("ino/b");
+    char ibuf[4096] __attribute__((aligned(8)));
+    char iseen[256] = "";
+    int igot = 0;
+    uint32_t c_from = 0, c_to = 1;
+    for (int tries = 0; tries < 2; tries++) {
+        ssize_t n = read(in, ibuf, sizeof ibuf);
+        for (ssize_t at = 0; n > 0 && at < n;) {
+            struct inotify_event *e = (struct inotify_event *)(ibuf + at);
+            const char *tag = e->mask & IN_CREATE ? "C" : e->mask & IN_MODIFY ? "M" : e->mask & IN_CLOSE_WRITE ? "W"
+                : e->mask & IN_MOVED_FROM ? "F" : e->mask & IN_MOVED_TO ? "T" : e->mask & IN_DELETE ? "D"
+                : e->mask & IN_MOVE_SELF ? "m" : e->mask & IN_DELETE_SELF ? "d" : e->mask & IN_IGNORED ? "i" : "?";
+            if (e->mask & IN_MOVED_FROM)
+                c_from = e->cookie;
+            if (e->mask & IN_MOVED_TO)
+                c_to = e->cookie;
+            strcat(iseen, tag);
+            if (e->len)
+                strcat(iseen, e->name);
+            strcat(iseen, e->wd == wdir ? "" : e->wd == wfile ? "'" : "?");
+            igot++;
+            at += sizeof *e + e->len;
+        }
+    }
+    int iagain = read(in, ibuf, sizeof ibuf) < 0 && errno == EAGAIN;
+    int irm = inotify_rm_watch(in, wdir);
+    ssize_t ilast = read(in, ibuf, sizeof ibuf);
+    int iignored = ilast >= (ssize_t)sizeof(struct inotify_event) && (((struct inotify_event *)ibuf)->mask & IN_IGNORED);
+    printf("dt: inotify %s cookie=%d poll=%d again=%d rm=%d ignored=%d\n", iseen, c_from == c_to && c_from != 0, ipoll, iagain, irm, iignored);
+    close(in);
+    rmdir("ino");
 
     /* Waking is prompt: a process waiting in poll on a pipe, a thread in
        epoll_wait on a local socket and one on a futex wake when the other
