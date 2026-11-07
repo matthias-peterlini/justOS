@@ -109,10 +109,18 @@ global_asm!(
 ap_trampoline_start:
     cli
     cld
+    // A processor starts here in real mode, and so should one waking from
+    // sleep; but some firmware (OVMF of 2024) comes here from its 16-bit
+    // protected mode, paging still on, with flat data segments: there a
+    // null SS faults, and the rest works as it is.
+    movl %cr0, %eax
+    testb $1, %al
+    jnz 2f
     xorw %ax, %ax
     movw %ax, %ds
     movw %ax, %es
     movw %ax, %ss
+2:
     lgdtl 0x8000 + (ap_gdtr - ap_trampoline_start)
     movl %cr4, %eax
     orl $0x20, %eax
