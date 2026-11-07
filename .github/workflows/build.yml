@@ -18,7 +18,8 @@ jobs:
           sudo apt-get update
           # musl and MinGW build the Linux and Windows programs of test-compat;
           # MinGW also links just-stub, the runtime of justc's .exe programs.
-          sudo apt-get install -y nasm qemu-system-x86 musl-tools gcc-mingw-w64-x86-64
+          # OVMF is the UEFI firmware of the UEFI, live CD and update tests.
+          sudo apt-get install -y nasm qemu-system-x86 musl-tools gcc-mingw-w64-x86-64 ovmf
           # rust-toolchain.toml picks the toolchain, targets and rust-src.
           rustup show
 
@@ -35,6 +36,21 @@ jobs:
           # JustScript: justc builds .jpk packages ("JPK\0"), and just, the
           # runner the system opens .jt and .jpk files with, runs them.
           make test-justscript
+
+      # The rest of the suite: every test runs, and the step fails at the end
+      # naming the ones that failed.
+      - name: More tests in QEMU
+        run: |
+          failed=""
+          for t in test-uefi test-iso test-drivers test-display test-acpi test-update test-linux test-wayland test-gtk; do
+            echo "::group::$t"
+            make $t || failed="$failed $t"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::failed:$failed"
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
