@@ -259,8 +259,13 @@ che tornano al thread che aspetta, oggetti e handle con i loro conteggi
 riceve, buffer con puntatori (scatter-gather), notifiche di morte, la
 richiesta di thread nuovi (`BR_SPAWN_LOOPER`) e `poll` sul dispositivo.
 `make test-linux` lo prova con due processi (`scripts/linux/binder-test.c`).
-È il primo pezzo per eseguire un'immagine di sistema Android sopra lo strato
-Linux, come fa Waydroid.
+
+Accanto c'è **`/dev/ashmem`**, la memoria condivisa di Android (libcutils la
+usa ancora al posto di `memfd`): una regione con nome e dimensione, mappata
+da chi riceve il descrittore, con la maschera dei permessi che li può solo
+togliere (`system/kernel/src/linux/ashmem.rs`, provata da
+`scripts/linux/ashmem-test.c`). Sono i primi pezzi per eseguire
+un'immagine di sistema Android sopra lo strato Linux, come fa Waydroid.
 
 ## Installare programmi
 

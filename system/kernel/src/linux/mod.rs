@@ -22,6 +22,7 @@
 //! namespaces ([`ns`]), capabilities and chroot give sandboxes a view of
 //! their own.
 
+mod ashmem;
 mod binder;
 pub mod fd;
 mod inotify;

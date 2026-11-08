@@ -292,6 +292,12 @@ pub fn sys_mmap(addr: u64, len: u64, prot: u32, flags: u32, fd: i32, off: u64) -
                 }
                 return at;
             }
+            super::fd::Kind::Ashmem(a) => match a.map(len, prot) {
+                Ok(shm) if shared => Some(shm),
+                // A private mapping of a region is zeroes of its own.
+                Ok(_) => return map(addr, len, prot, flags, Backing::Anon, 0),
+                Err(e) => return e,
+            },
             _ => None,
         };
         match memfd {

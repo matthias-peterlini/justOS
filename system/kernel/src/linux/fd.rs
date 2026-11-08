@@ -69,6 +69,8 @@ pub enum Kind {
     Inotify(Arc<super::inotify::Inotify>),
     /// /dev/binder and its siblings: a binder process (Android's IPC).
     Binder(Arc<super::binder::Open>),
+    /// /dev/ashmem: a region of Android's shared memory.
+    Ashmem(Arc<super::ashmem::Ashmem>),
 }
 
 pub struct Desc {
@@ -327,6 +329,11 @@ fn virtual_stat(text: &str, follow: bool) -> Option<Result<StatInfo, i64>> {
         // Without opening it (an open is a binder process).
         return Some(Ok(StatInfo { mode: 0o020666, size: 0, time: now, ino: 2 + BINDER_RDEV + ctx as u64, rdev: BINDER_RDEV + ctx as u64 }));
     }
+    if super::ashmem::device(text) {
+        // The same numbers as an open region's (libcutils compares them).
+        let rdev = super::ashmem::RDEV;
+        return Some(Ok(StatInfo { mode: 0o020666, size: 0, time: now, ino: 2 + rdev, rdev }));
+    }
     if let Some(kind) = virtual_file(text) {
         return Some(stat_of_desc(&Desc::new(kind, 0)));
     }
@@ -399,6 +406,7 @@ fn virtual_file(text: &str) -> Option<Kind> {
         "/dev/urandom" | "/dev/random" => Some(Kind::Random),
         "/dev/tty" | "/dev/console" | "/dev/stdin" | "/dev/stdout" | "/dev/stderr" => Some(Kind::Console),
         _ if super::binder::device(text).is_some() => super::binder::device(text).map(|ctx| Kind::Binder(super::binder::open(ctx))),
+        _ if super::ashmem::device(text) => Some(Kind::Ashmem(super::ashmem::open())),
         "/etc/resolv.conf" => {
             let dns = crate::net::dns_server().map(|ip| alloc::format!("{ip}")).unwrap_or_else(|| String::from("10.0.2.3"));
             data(alloc::format!("nameserver {dns}\n"))
@@ -655,6 +663,7 @@ pub fn read_desc(d: &Desc, buf: &mut [u8]) -> i64 {
         Kind::Inotify(i) => i.read(d, buf),
         // Binder is read and written through its ioctl.
         Kind::Binder(_) => -err::EINVAL,
+        Kind::Ashmem(a) => a.read(buf),
         Kind::PipeWrite(_) | Kind::Epoll(_) => -err::EBADF,
     }
 }
@@ -943,6 +952,7 @@ pub fn stat_of_desc(d: &Desc) -> Result<StatInfo, i64> {
         Kind::Socket(_) | Kind::Unix(_) => simple(0o140777),
         Kind::Event(_) | Kind::Epoll(_) | Kind::Inotify(_) => simple(0o100600),
         Kind::Binder(_) => device(0o020666, BINDER_RDEV),
+        Kind::Ashmem(_) => device(0o020666, super::ashmem::RDEV),
     }
 }
 
@@ -1234,6 +1244,7 @@ pub fn sys_readlinkat(dirfd: i32, path_ptr: u64, buf: u64, cap: u64) -> i64 {
             match get(n).map(|d| match &d.kind {
                 Kind::File { path, .. } | Kind::Dir { path, .. } => show_path(path),
                 Kind::Memfd { shm, .. } => shm.name.clone(),
+                Kind::Ashmem(_) => String::from("/dev/ashmem"),
                 _ => String::from("anon_inode:[justos]"),
             }) {
                 Some(s) => s,
@@ -1364,6 +1375,7 @@ pub fn sys_ioctl(fd: i32, req: u64, arg: u64) -> i64 {
         _ => match &d.kind {
             Kind::Console => super::tty::ioctl(req, arg),
             Kind::Binder(b) => super::binder::ioctl(b, req, arg, d.nonblocking()),
+            Kind::Ashmem(a) => super::ashmem::ioctl(a, req, arg),
             _ => -err::ENOTTY,
         },
     }
@@ -1397,5 +1409,5 @@ pub fn readiness(d: &Desc) -> (bool, bool, bool) {
 /// Descriptors whose readiness never changes (files, generated files,
 /// devices that never block): an edge-triggered watch sees one edge.
 pub fn always_ready(d: &Desc) -> bool {
-    matches!(d.kind, Kind::File { .. } | Kind::Dir { .. } | Kind::Virtual { .. } | Kind::Null | Kind::Zero | Kind::Random | Kind::Memfd { .. })
+    matches!(d.kind, Kind::File { .. } | Kind::Dir { .. } | Kind::Virtual { .. } | Kind::Null | Kind::Zero | Kind::Random | Kind::Memfd { .. } | Kind::Ashmem(_))
 }
