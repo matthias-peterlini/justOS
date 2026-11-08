@@ -141,6 +141,8 @@ root: system tools $(LINUX)/usr/PACKAGES
 	# Debian's files, under justOS's: rootfs/ wins where both have one.
 	cp -a $(LINUX)/. $(ROOT)/
 	cp -r rootfs/. $(ROOT)/
+	# Windows programs (Wine, when there) take justOS's look too.
+	tools/linux/winelook.py $(ROOT)
 
 image: $(BUILD)/stage1.bin $(BUILD)/stage2.bin uefi system tools $(PACKAGES) root
 	$(JUSTTOOL) image $(IMAGE) --size $(SIZE) --slot-size $(SLOT_SIZE) --version $(VERSION) \

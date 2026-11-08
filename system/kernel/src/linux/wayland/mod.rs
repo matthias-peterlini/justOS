@@ -16,7 +16,8 @@
 //! XRGB8888), `wl_output` (with the screen's scale, for sharp HiDPI
 //! drawing), `wl_seat` with pointer and keyboard, `xdg_wm_base` with
 //! toplevels and popups (placed with their positioner inside the window),
-//! and the data device (no clipboard yet).
+//! `wp_viewporter` (surfaces cropped and scaled: Wine's windows), and the
+//! data device (no clipboard yet).
 
 mod keymap;
 mod window;
@@ -108,6 +109,8 @@ enum Iface {
     Deco,
     KdeManager,
     KdeDeco,
+    Viewporter,
+    Viewport,
 }
 
 /// The globals, by name (index + 1), with the versions offered.
@@ -121,6 +124,7 @@ const GLOBALS: &[(&str, u32, Iface)] = &[
     ("xdg_wm_base", 5, Iface::WmBase),
     ("zxdg_decoration_manager_v1", 1, Iface::DecoManager),
     ("org_kde_kwin_server_decoration_manager", 1, Iface::KdeManager),
+    ("wp_viewporter", 1, Iface::Viewporter),
 ];
 
 /// A region: rectangles added and taken away, in order.
@@ -196,6 +200,9 @@ struct Pending {
     scale: Option<i32>,
     /// set_input_region: Some(None) is all of the surface.
     input: Option<Option<Region>>,
+    /// wp_viewport's source and destination (Some(None): unset).
+    view_src: Option<Option<[i32; 4]>>,
+    view_dst: Option<Option<(i32, i32)>>,
 }
 
 /// An xdg_surface's part of a toplevel or popup.
@@ -219,6 +226,9 @@ struct Top {
     popups: Vec<u32>,
     /// The size last asked for (0: the client chooses).
     asked: (i32, i32),
+    /// The frame a Windows program drew around its content (left, top,
+    /// right, bottom, units): left out, as the desktop frames the window.
+    nc: Option<[i32; 4]>,
 }
 
 struct Pop {
@@ -263,6 +273,11 @@ struct Surface {
     stack: Vec<u32>,
     /// Frame callbacks for the next time it is shown.
     frames: Vec<u32>,
+    /// wp_viewport: the part of the content shown (x, y, w, h in surface
+    /// units before scaling, 24.8 fixed point) and the size it is shown at
+    /// (units). Unset: all of it, at its own size.
+    view_src: Option<[i32; 4]>,
+    view_dst: Option<(i32, i32)>,
 }
 
 impl Surface {
@@ -278,12 +293,45 @@ impl Surface {
             role: Role::None,
             stack: alloc::vec![id],
             frames: Vec::new(),
+            view_src: None,
+            view_dst: None,
         }
     }
 
-    /// The size in units.
+    /// The size in units: the viewport's destination, else its source,
+    /// else the content's.
     fn size(&self) -> (i32, i32) {
+        if let Some(d) = self.view_dst {
+            return d;
+        }
+        if let Some([_, _, w, h]) = self.view_src {
+            return ((w >> 8).max(1), (h >> 8).max(1));
+        }
         (self.pw / self.scale, self.ph / self.scale)
+    }
+
+    fn viewported(&self) -> bool {
+        self.view_src.is_some() || self.view_dst.is_some()
+    }
+
+    /// The part of the content shown, in its pixels (x, y, w, h).
+    fn source_px(&self) -> (i32, i32, i32, i32) {
+        let Some([x, y, w, h]) = self.view_src else { return (0, 0, self.pw, self.ph) };
+        let k = self.scale.max(1) as i64;
+        let px = |v: i32| ((v as i64 * k) >> 8) as i32;
+        let (x, y) = (px(x).clamp(0, self.pw), px(y).clamp(0, self.ph));
+        (x, y, px(w).clamp(1, (self.pw - x).max(1)), px(h).clamp(1, (self.ph - y).max(1)))
+    }
+
+    /// Pixels per unit the content has where it is shown (at least 1): the
+    /// frame is made with as many, to keep it sharp.
+    fn pixel_scale(&self) -> i32 {
+        if !self.viewported() {
+            return self.scale;
+        }
+        let (_, _, sw, _) = self.source_px();
+        let (w, _) = self.size();
+        ((sw + w - 1) / w.max(1)).clamp(1, gfx::MAX_SCALE)
     }
 
     fn xdg(&self) -> Option<&Xdg> {
@@ -304,8 +352,18 @@ impl Surface {
         }
     }
 
-    /// Where the window geometry starts on the surface.
+    /// Where the window geometry starts on the surface: as the client set
+    /// it, else inside a Windows program's own frame.
     fn geometry_offset(&self) -> (i32, i32) {
+        if let Role::Top(Top { nc: Some(n), .. }) = &self.role {
+            return (n[0], n[1]);
+        }
+        self.client_geometry_offset()
+    }
+
+    /// The window geometry's offset as the client set it: what its popups
+    /// are placed from.
+    fn client_geometry_offset(&self) -> (i32, i32) {
         self.xdg().and_then(|x| x.geometry).map_or((0, 0), |g| (g.x, g.y))
     }
 }
@@ -328,6 +386,8 @@ struct Client {
     conn: Conn,
     pid: u32,
     icon: String,
+    /// A Windows program (Wine): it draws a frame of its own.
+    windows: bool,
     inbuf: Vec<u8>,
     infds: VecDeque<Arc<Desc>>,
     out: Out,
@@ -356,6 +416,7 @@ impl Client {
         Client {
             conn,
             pid,
+            windows: name.starts_with("wine"),
             icon,
             inbuf: Vec::new(),
             infds: VecDeque::new(),
@@ -667,6 +728,16 @@ impl Client {
             (Iface::DataSource, 1) | (Iface::DataDevice, 2) => self.destroyed(obj),
             (Iface::DataSource, _) | (Iface::DataDevice, _) => {}
             // Decorations: always the server's.
+            // wp_viewporter
+            (Iface::Viewporter, 0) => self.destroyed(obj),
+            (Iface::Viewporter, 1) => {
+                let (id, surf) = (a.uint(), a.uint());
+                if !self.surfs.contains_key(&surf) {
+                    return self.error(obj, 0, "no surface");
+                }
+                self.add(id, Iface::Viewport, 1, Data::Surface(surf));
+            }
+            (Iface::Viewport, _) => self.viewport_request(obj, op, a),
             (Iface::DecoManager, 0) => self.destroyed(obj),
             (Iface::DecoManager, 1) => {
                 let (id, top) = (a.uint(), a.uint());
@@ -791,6 +862,40 @@ impl Client {
         }
     }
 
+    /// wp_viewport: what part of the surface's content to show, and at what
+    /// size; both take effect on the surface's next commit.
+    fn viewport_request(&mut self, obj: u32, op: u16, a: &mut Args<'_>) {
+        let Some(surf) = self.surface_of(obj) else { return };
+        if op == 0 {
+            self.destroyed(obj);
+        }
+        let Some(s) = self.surfs.get_mut(&surf) else { return };
+        match op {
+            0 => {
+                s.pend.view_src = Some(None);
+                s.pend.view_dst = Some(None);
+            }
+            1 => {
+                let r = [a.int(), a.int(), a.int(), a.int()];
+                const UNSET: i32 = -256; // -1.0
+                if r == [UNSET; 4] {
+                    s.pend.view_src = Some(None);
+                } else if r[0] >= 0 && r[1] >= 0 && r[2] > 0 && r[3] > 0 {
+                    s.pend.view_src = Some(Some(r));
+                }
+            }
+            2 => {
+                let (w, h) = (a.int(), a.int());
+                if (w, h) == (-1, -1) {
+                    s.pend.view_dst = Some(None);
+                } else if w > 0 && h > 0 {
+                    s.pend.view_dst = Some(Some((w.min(MAX_W), h.min(MAX_H))));
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn subsurface_request(&mut self, obj: u32, op: u16, a: &mut Args<'_>) {
         let Some(surf) = self.surface_of(obj) else { return };
         match op {
@@ -839,7 +944,7 @@ impl Client {
                     Role::Xdg(x) => x,
                     _ => Xdg { id: obj, ..Xdg::default() },
                 };
-                s.role = Role::Top(Top { xdg, id, win: None, title: String::new(), min: (0, 0), max: (0, 0), popups: Vec::new(), asked: (0, 0) });
+                s.role = Role::Top(Top { xdg, id, win: None, title: String::new(), min: (0, 0), max: (0, 0), popups: Vec::new(), asked: (0, 0), nc: None });
             }
             2 => {
                 let (id, parent_xdg, positioner) = (a.uint(), a.uint(), a.uint());
@@ -928,7 +1033,9 @@ impl Client {
 
     fn update_resizable(&mut self, surf: u32) {
         if let Some(Surface { role: Role::Top(t), .. }) = self.surfs.get(&surf) {
-            let fixed = t.min.0 > 0 && t.min == t.max;
+            // A Windows window that cannot be resized has a thinner frame
+            // (a dialog's 3 pixels, a sizing frame's 4).
+            let fixed = (t.min.0 > 0 && t.min == t.max) || t.nc.is_some_and(|n| n[0] < 4);
             if let Some(w) = &t.win {
                 w.lock().resizable = !fixed;
             }
@@ -1058,6 +1165,12 @@ impl Client {
         if let Some(input) = pend.input {
             s.input = input;
         }
+        if let Some(v) = pend.view_src {
+            s.view_src = v;
+        }
+        if let Some(v) = pend.view_dst {
+            s.view_dst = v;
+        }
         s.frames.extend(pend.frames);
         let mut dirty = None;
         if let Some(b) = pend.buffer {
@@ -1082,8 +1195,22 @@ impl Client {
                 }
             }
         }
+        let mut framed = false;
+        if self.windows && dirty.is_some() {
+            let s = self.surfs.get_mut(&id).unwrap();
+            let nc = windows_frame(s);
+            if let Role::Top(t) = &mut s.role {
+                framed = t.nc != nc;
+                t.nc = nc;
+            }
+            if framed {
+                crate::debug!("wayland", "windows frame {:?}", nc);
+                self.update_resizable(id);
+            }
+        }
         let s = self.surfs.get(&id).unwrap();
-        let changed = s.size() != old_size || s.scale != old_scale || s.mapped != was_mapped;
+        // Damage on a cropped or scaled surface is not mapped: all of it.
+        let changed = framed || s.size() != old_size || s.scale != old_scale || s.mapped != was_mapped || (dirty.is_some() && s.viewported());
         // What changed, in units of the surface.
         let dirty_units = dirty.map(|d| {
             let k = s.scale.max(1);
@@ -1161,10 +1288,18 @@ impl Client {
         window::open(win, self.inbox.clone(), id, self.icon.clone());
     }
 
-    /// The content size of a toplevel: its window geometry, or its surface.
+    /// The content size of a toplevel: its window geometry, or its surface
+    /// (without a Windows program's frame).
     fn window_size(&self, id: u32) -> (i32, i32) {
         let Some(s) = self.surfs.get(&id) else { return (1, 1) };
-        let (w, h) = s.xdg().and_then(|x| x.geometry).map_or(s.size(), |g| (g.w, g.h));
+        let (w, h) = match (&s.role, s.xdg().and_then(|x| x.geometry)) {
+            (Role::Top(Top { nc: Some(n), .. }), _) => {
+                let (w, h) = s.size();
+                (w - n[0] - n[2], h - n[1] - n[3])
+            }
+            (_, Some(g)) => (g.w, g.h),
+            _ => s.size(),
+        };
         (w.clamp(1, MAX_W), h.clamp(1, MAX_H))
     }
 
@@ -1176,10 +1311,13 @@ impl Client {
         let Some(Surface { role: Role::Top(t), .. }) = self.surfs.get_mut(&id) else { return };
         t.xdg.sent = true;
         let (tid, xid, asked) = (t.id, t.xdg.id, t.asked);
+        // Sizes are the window's; a Windows program's frame comes on top.
+        let (ew, eh) = t.nc.map_or((0, 0), |n| (n[0] + n[2], n[1] + n[3]));
+        let asked = if asked == (0, 0) { asked } else { (asked.0 + ew, asked.1 + eh) };
         let focused = t.win.as_ref().is_some_and(|w| w.lock().focused);
         let v = self.version(tid);
         if v >= 4 {
-            self.out.event(tid, 2).int(pw / k - 2 * crate::gui::wm::GAP).int(ph / k - crate::gui::wm::TITLE_H - 80);
+            self.out.event(tid, 2).int(pw / k - 2 * crate::gui::wm::GAP + ew).int(ph / k - crate::gui::wm::TITLE_H - 80 + eh);
         }
         if v >= 5 {
             // The window menu and minimising are the desktop's; maximise
@@ -1250,7 +1388,7 @@ impl Client {
     /// Where an xdg surface's window geometry starts in its window.
     fn geometry_origin(&self, id: u32, depth: u32) -> (i32, i32) {
         let (x, y) = self.origin(id, depth);
-        let (gx, gy) = self.surfs.get(&id).map_or((0, 0), |s| s.geometry_offset());
+        let (gx, gy) = self.surfs.get(&id).map_or((0, 0), |s| s.client_geometry_offset());
         (x + gx, y + gy)
     }
 
@@ -1315,9 +1453,9 @@ impl Client {
     /// `dirty` (window units) of it.
     fn compose(&mut self, t: u32, dirty: Option<Rect>) {
         let (w, h) = self.window_size(t);
-        let Some(Surface { role: Role::Top(top), scale, .. }) = self.surfs.get(&t) else { return };
+        let Some(s @ Surface { role: Role::Top(top), .. }) = self.surfs.get(&t) else { return };
         let Some(win) = top.win.clone() else { return };
-        let k = (*scale).clamp(1, gfx::MAX_SCALE);
+        let k = s.pixel_scale().clamp(1, gfx::MAX_SCALE);
         let popups = top.popups.clone();
         let mut win = win.lock();
         let mut dirty = dirty;
@@ -1561,13 +1699,30 @@ impl Client {
         }
         let shift = if matches!(ev.key, crate::dev::input::Key::Char(_)) { press.shift } else { ev.shift };
         let mods = (shift as u32 * keymap::SHIFT) | (ev.ctrl as u32 * keymap::CTRL) | (ev.alt as u32 * keymap::ALT);
+        // The modifier keys go down before the key and up after it, as on a
+        // keyboard: programs that keep a key state of their own from key
+        // events (Windows programs, through Wine) see Shift held too.
+        let modkeys: Vec<u32> = [(keymap::SHIFT, keymap::KEY_SHIFT), (keymap::CTRL, keymap::KEY_CTRL), (keymap::ALT, keymap::KEY_ALT)]
+            .iter()
+            .filter(|&&(m, _)| mods & m != 0)
+            .map(|&(_, key)| key - 8)
+            .collect();
+        let send = |this: &mut Self, code: u32, state: u32| {
+            let serial = this.next_serial();
+            for &(k, _) in &keyboards {
+                this.out.event(k, 3).uint(serial).uint(time).uint(code).uint(state);
+            }
+        };
+        for &m in &modkeys {
+            send(self, m, 1);
+        }
         self.set_mods(mods, &keyboards);
         let code = press.code - 8;
         for state in [1u32, 0] {
-            let serial = self.next_serial();
-            for &(k, _) in &keyboards {
-                self.out.event(k, 3).uint(serial).uint(time).uint(code).uint(state);
-            }
+            send(self, code, state);
+        }
+        for &m in modkeys.iter().rev() {
+            send(self, m, 0);
         }
         // Back to what is held now.
         let (ctrl, alt, shift) = crate::dev::input::mods();
@@ -1633,6 +1788,48 @@ fn import(s: &mut Surface, b: &Buf, damage: Rect) -> bool {
     full
 }
 
+/// The frame a Windows program draws around a window, as Wine does under
+/// Wayland (it has no other way): borders, and a title bar in the colours
+/// justOS's Wine settings give it (tools/linux/winelook.py), active and
+/// not. Found on the content, it is left out of the window: the desktop
+/// frames it, with its own title and buttons. Returns its edges in units
+/// (left, top, right, bottom), None when there is none: windows without a
+/// title bar, or programs that set a window geometry of their own (one
+/// that is all of the surface, as Wine's, is none).
+fn windows_frame(s: &Surface) -> Option<[i32; 4]> {
+    const ACTIVE: u32 = 0x1b_1a1e;
+    const INACTIVE: u32 = 0x1b_1a1d;
+    if let Some(g) = s.xdg().and_then(|x| x.geometry) {
+        if (g.x, g.y) != (0, 0) || (g.w, g.h) != s.size() {
+            return None;
+        }
+    }
+    // Only the part of the content that is shown (Wine's buffers are larger
+    // than its windows, a viewport source cutting them).
+    let (x0, y0, w, h) = s.source_px();
+    let title = |x: i32, y: i32| {
+        x >= 0
+            && y >= 0
+            && x < w
+            && y < h
+            && s.px.get(((y0 + y) * s.pw + x0 + x) as usize).is_some_and(|&v| matches!(v & 0xff_ffff, ACTIVE | INACTIVE))
+    };
+    // The border is as wide on every side; the title bar's two ends (the
+    // icon is a little inside the left one, the buttons inside the right).
+    let b = (0..12).find(|&b| title(b, b + 1) && title(w - 1 - b, b + 1))?;
+    let r = w - 1 - b;
+    let mut bottom = b;
+    while bottom < h && title(r, bottom) {
+        bottom += 1;
+    }
+    if !(8..=96).contains(&(bottom - b)) || bottom + b >= h {
+        return None;
+    }
+    let (uw, _) = s.size();
+    let units = |v: i32| (v as i64 * uw as i64 / w.max(1) as i64) as i32;
+    Some([units(b), units(bottom), units(b), units(b)])
+}
+
 /// Wayland's ARGB is premultiplied; justOS's pictures are not.
 fn unpremultiply(v: u32) -> u32 {
     let a = v >> 24;
@@ -1654,6 +1851,35 @@ fn blit(frame: &mut Canvas, clip: Rect, s: &Surface, x: i32, y: i32) {
         return;
     }
     let fw = frame.pixel_width();
+    if s.viewported() {
+        // Cropped and scaled: each pixel of the frame from the nearest one
+        // of the part shown.
+        let (sx0, sy0, sw, sh) = s.source_px();
+        let (dw, dh) = ((w * k).max(1) as i64, (h * k).max(1) as i64);
+        for dy in dst.y..dst.bottom() {
+            let sy = sy0 + ((dy - y * k) as i64 * sh as i64 / dh) as i32;
+            if sy < 0 || sy >= s.ph {
+                continue;
+            }
+            let src_row = (sy * s.pw) as usize;
+            let dst_row = (dy * fw) as usize;
+            for dx in dst.x..dst.right() {
+                let sx = sx0 + ((dx - x * k) as i64 * sw as i64 / dw) as i32;
+                if sx < 0 || sx >= s.pw {
+                    continue;
+                }
+                let p = s.px[src_row + sx as usize];
+                let a = p >> 24;
+                let d = &mut frame.px[dst_row + dx as usize];
+                if a == 255 {
+                    *d = p;
+                } else if a != 0 {
+                    *d = gfx::over(*d, p, a);
+                }
+            }
+        }
+        return;
+    }
     if ss == k {
         // Pixel for pixel: whole rows.
         for dy in dst.y..dst.bottom() {
