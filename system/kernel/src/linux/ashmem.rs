@@ -32,8 +32,9 @@ const PROT_ALL: u32 = 7;
 /// What GET_PIN_STATUS says: the pages are pinned (they always stay).
 const IS_PINNED: i64 = 1;
 
-/// The device numbers of /dev/ashmem (a misc device, major 10).
-pub const RDEV: u64 = 0xa00 + 61;
+/// The device numbers of /dev/ashmem (a misc device, major 10; the binder
+/// devices are 60 to 62).
+pub const RDEV: u64 = 0xa00 + 63;
 
 /// Whether a path names the device: /dev/ashmem, or /dev/ashmem followed
 /// by the boot id (the name Android 10 and later open first).
