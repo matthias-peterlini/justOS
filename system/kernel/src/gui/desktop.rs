@@ -486,6 +486,20 @@ impl Desktop {
         (self.spaces > 1 && !self.full_screen()).then(|| Rect::new(self.w / 2 - w / 2, cb.bottom() + 2, w, 20))
     }
 
+    /// Is a window over the clock (one taller than the work area, or moved
+    /// up there)? Then the clock is part of the desktop under it, and clicks
+    /// there are the window's.
+    fn clock_covered(&self) -> bool {
+        if self.full_screen() {
+            return false;
+        }
+        let mut cb = self.clock_btn();
+        if let Some(sp) = self.spaces_btn() {
+            cb = cb.union(&sp);
+        }
+        self.windows.iter().any(|w| w.shown(self.space) && w.rect.overlaps(&cb))
+    }
+
     /// What the clock and the desktop dots may paint.
     fn clock_zone(&self) -> Rect {
         let cb = self.clock_btn();
@@ -787,8 +801,11 @@ impl Desktop {
                 return id;
             }
         }
-        let area = self.work_area();
+        let work = self.work_area();
         let (aw, ah) = Window::outer_size(app.size().0, app.size().1);
+        // A window taller than that (a Windows dialog on a small screen)
+        // covers the clock too, rather than losing its bottom.
+        let area = if ah > work.h { Rect::new(work.x, 4, work.w, work.bottom() - 4) } else { work };
         let (aw, full_h) = (aw.min(area.w), ah.min(area.h));
         let x = (area.x + (area.w - aw) / 2 + 120 + self.cascade * 26).min(area.right() - aw).max(area.x);
         let y = (area.y + 14 + self.cascade * 24).min(area.bottom() - full_h).max(area.y);
@@ -1686,11 +1703,12 @@ impl Desktop {
             self.show_popup(l, p);
             return;
         }
-        if self.spaces_btn().is_some_and(|b| b.contains(x, y)) {
+        let covered = self.clock_covered();
+        if !covered && self.spaces_btn().is_some_and(|b| b.contains(x, y)) {
             self.open_overview(l);
             return;
         }
-        if self.clock_btn().contains(x, y) {
+        if !covered && self.clock_btn().contains(x, y) {
             let p = Popup { kind: PopupKind::Notices, rect: self.notices_rect(), items: Vec::new(), anim: Anim::new(180), up: false, settled: false };
             self.show_popup(l, p);
             return;
@@ -2244,7 +2262,8 @@ impl Desktop {
     fn draw_clock(&self, c: &mut Canvas) {
         let cb = self.clock_btn();
         let (clock, date) = clock_strings();
-        let lit = cb.contains(self.mouse.0, self.mouse.1) || self.popup.as_ref().is_some_and(|p| p.kind == PopupKind::Notices);
+        let lit = (cb.contains(self.mouse.0, self.mouse.1) && !self.clock_covered())
+            || self.popup.as_ref().is_some_and(|p| p.kind == PopupKind::Notices);
         if self.full_screen() {
             // On the window's frame, like its name.
             let ink = ui::wants_ink(&self.blur, cb);
@@ -3196,6 +3215,10 @@ impl Desktop {
         }
         c.blit(&self.sharp, r.x, r.y, r);
         self.draw_widgets(c, r);
+        let clock_under = self.clock_covered();
+        if clock_under && r.overlaps(&self.clock_zone()) {
+            self.draw_clock(c);
+        }
         let focused = self.focused();
         let blur = &self.blur;
         let fx = &self.fx;
@@ -3230,7 +3253,7 @@ impl Desktop {
         if self.dock_shown() && r.overlaps(&self.dock_zone()) {
             self.draw_dock(c);
         }
-        if r.overlaps(&self.clock_zone()) {
+        if !clock_under && r.overlaps(&self.clock_zone()) {
             self.draw_clock(c);
         }
         if let Some(p) = &self.popup {
