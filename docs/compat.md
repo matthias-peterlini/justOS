@@ -53,7 +53,7 @@ busybox ls -la             un programma installato (vedi "Installare programmi")
 | file e cartelle | i volumi montati: il "/" di Linux è la radice del volume corrente, così `/home/x` è `<volume>:/home/x` |
 | memoria | `brk` e `mmap` anonimo (il programma alloca e libera normalmente) |
 | memoria condivisa | `memfd_create` (con i sigilli di `F_ADD_SEALS`), `shm_open` in `/dev/shm`, `MAP_SHARED` anonimo: chi la mappa vede le stesse pagine, anche tra processi diversi dopo `fork` o passandosi il descrittore su un socket; anche un `MAP_SHARED` di un file: le stesse pagine per tutti i processi, che `read` e `write` vedono e che tornano nel file (con `msync`, `fsync` e quando l'ultima mappatura se ne va) |
-| orologio | `clock_gettime`, `gettimeofday`, `nanosleep` |
+| orologio | `clock_gettime`, `gettimeofday`, `nanosleep`; `timerfd` (una volta o periodico, anche a un'ora assoluta), che `poll` ed `epoll` aspettano |
 | TLS | `arch_prctl(ARCH_SET_FS)` imposta la base del segmento FS del thread |
 | casualità | `getrandom` |
 | librerie condivise | il caricatore dinamico della glibc, `mmap` dei file (i byte di un file mappato più volte sono condivisi), `dlopen` |
@@ -64,7 +64,7 @@ busybox ls -la             un programma installato (vedi "Installare programmi")
 | finestre | Wayland: `WAYLAND_DISPLAY=wayland-0` in `XDG_RUNTIME_DIR=/home/tmp`, servito dal kernel (vedi sotto) |
 | utenti | tutto gira come `root` |
 | processi nuovi | `fork` (il figlio ha una copia della memoria), `vfork` e `posix_spawn` (il figlio usa la memoria del padre finché non chiama `execve`), `execve` (anche degli script che iniziano con `#!`), `wait4`, `waitid`, `getppid`; i descrittori aperti passano al figlio, quelli con `O_CLOEXEC` si chiudono con `execve` |
-| segnali | gestori con `sigaction` (`SA_SIGINFO`, `SA_RESTART`, `SA_ONSTACK`, `SA_RESETHAND`, `SA_NODEFER`) e `sigaltstack`, maschere per thread, `kill`, `tgkill`, `sigpending`, `sigtimedwait`, `sigsuspend`, `pause`, `SIGCHLD` quando un figlio finisce; un'attesa interrotta da un gestore risponde `EINTR` o riparte da sola con `SA_RESTART`; un accesso non valido diventa `SIGSEGV` (e `SIGBUS`, `SIGILL`, `SIGFPE`) per chi ha un gestore; Ctrl+C manda `SIGINT` ai programmi che lo gestiscono; scrivere su una pipe o un socket che nessuno legge manda `SIGPIPE`; niente controllo dei job (`SIGSTOP`, `SIGTSTP`) |
+| segnali | gestori con `sigaction` (`SA_SIGINFO`, `SA_RESTART`, `SA_ONSTACK`, `SA_RESETHAND`, `SA_NODEFER`) e `sigaltstack`, maschere per thread, `kill`, `tgkill`, `sigpending`, `sigtimedwait`, `sigsuspend`, `pause`, `SIGCHLD` quando un figlio finisce; `signalfd`, che legge i segnali bloccati (anche `SIGCHLD` con lo stato del figlio) come fanno l'init di Android e systemd; un'attesa interrotta da un gestore risponde `EINTR` o riparte da sola con `SA_RESTART`; un accesso non valido diventa `SIGSEGV` (e `SIGBUS`, `SIGILL`, `SIGFPE`) per chi ha un gestore; Ctrl+C manda `SIGINT` ai programmi che lo gestiscono; scrivere su una pipe o un socket che nessuno legge manda `SIGPIPE`; niente controllo dei job (`SIGSTOP`, `SIGTSTP`) |
 
 Le chiamate implementate bastano ai programmi da riga di comando: lettura e
 scrittura di file, elenco di cartelle (`getdents64`), `stat`, `ioctl` per sapere

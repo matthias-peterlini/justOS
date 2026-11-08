@@ -71,6 +71,10 @@ pub enum Kind {
     Binder(Arc<super::binder::Open>),
     /// /dev/ashmem: a region of Android's shared memory.
     Ashmem(Arc<super::ashmem::Ashmem>),
+    /// timerfd_create.
+    Timer(Arc<super::timerfd::TimerFd>),
+    /// signalfd.
+    Signal(Arc<super::signal::SignalFd>),
 }
 
 pub struct Desc {
@@ -538,6 +542,10 @@ pub struct Waits {
     queues: Vec<Arc<WaitQueue>>,
     events: bool,
     tick: bool,
+    /// Signals (signalfd).
+    signals: bool,
+    /// When a timer goes off (uptime ms).
+    deadline: Option<u64>,
 }
 
 /// How long a wait sleeps at most even when nothing tells it: a safety
@@ -561,6 +569,13 @@ impl Waits {
             Kind::Event(e) => self.queue(&e.wq),
             Kind::Inotify(i) => self.queue(&i.wq),
             Kind::Binder(b) => self.queue(&b.wq),
+            Kind::Timer(t) => {
+                self.queue(&t.wq);
+                if let Some(at) = t.deadline_ms() {
+                    self.deadline = Some(self.deadline.map_or(at, |d| d.min(at)));
+                }
+            }
+            Kind::Signal(_) => self.signals = true,
             Kind::Unix(u) => u.waits(self),
             Kind::Epoll(e) if depth < 4 => e.waits(self, depth + 1),
             Kind::Epoll(_) | Kind::Socket(_) => self.events = true,
@@ -583,8 +598,15 @@ impl Waits {
         if self.events {
             refs.push(&EVENTS);
         }
+        if self.signals {
+            refs.push(&super::signal::SIGNALS);
+        }
         let nap = crate::time::uptime_ms() + if self.tick { 10 } else { NAP_MS };
-        task::wait_any(&refs, Some(until.map_or(nap, |u| u.min(nap))), check)
+        let mut limit = until.map_or(nap, |u| u.min(nap));
+        if let Some(d) = self.deadline {
+            limit = limit.min(d);
+        }
+        task::wait_any(&refs, Some(limit), check)
     }
 }
 
@@ -668,6 +690,8 @@ pub fn read_desc(d: &Desc, buf: &mut [u8]) -> i64 {
         // Binder is read and written through its ioctl.
         Kind::Binder(_) => -err::EINVAL,
         Kind::Ashmem(a) => a.read(buf),
+        Kind::Timer(t) => t.read(d, buf),
+        Kind::Signal(s) => s.read(d, buf),
         Kind::PipeWrite(_) | Kind::Epoll(_) => -err::EBADF,
     }
 }
@@ -962,7 +986,7 @@ pub fn stat_of_desc(d: &Desc) -> Result<StatInfo, i64> {
         Kind::Random => device(0o020666, 0x109),
         Kind::PipeRead(_) | Kind::PipeWrite(_) => simple(0o010600),
         Kind::Socket(_) | Kind::Unix(_) => simple(0o140777),
-        Kind::Event(_) | Kind::Epoll(_) | Kind::Inotify(_) => simple(0o100600),
+        Kind::Event(_) | Kind::Epoll(_) | Kind::Inotify(_) | Kind::Timer(_) | Kind::Signal(_) => simple(0o100600),
         Kind::Binder(_) => device(0o020666, BINDER_RDEV),
         Kind::Ashmem(_) => device(0o020666, super::ashmem::RDEV),
     }
@@ -1417,6 +1441,8 @@ pub fn readiness(d: &Desc) -> (bool, bool, bool) {
         Kind::Epoll(e) => (e.any_ready(), false, false),
         Kind::Inotify(i) => (i.ready(), false, false),
         Kind::Binder(b) => (super::binder::readable(b), false, false),
+        Kind::Timer(t) => (t.ready(), false, false),
+        Kind::Signal(s) => (s.ready(), false, false),
         _ => (true, true, false),
     }
 }

@@ -34,6 +34,7 @@ mod shm;
 pub mod signal;
 mod sock;
 mod thread;
+mod timerfd;
 mod tty;
 mod unix;
 pub mod wayland;
@@ -1065,6 +1066,11 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         284 => fd::sys_eventfd2(a[0] as u32, 0),
         288 => sock::sys_accept4(fd0, a[1], a[2], a[3]),
         290 => fd::sys_eventfd2(a[0] as u32, a[1] as u32),
+        282 => signal::sys_signalfd4(fd0, a[1], a[2], 0),
+        289 => signal::sys_signalfd4(fd0, a[1], a[2], a[3] as u32),
+        283 => timerfd::sys_timerfd_create(a[0], a[1] as u32),
+        286 => timerfd::sys_timerfd_settime(fd0, a[1] as u32, a[2], a[3]),
+        287 => timerfd::sys_timerfd_gettime(fd0, a[1]),
         291 => poll::sys_epoll_create1(a[0] as u32),
         292 => fd::sys_dup3(fd0, a[1] as i32, a[2] as u32),
         293 => fd::sys_pipe2(a[0], a[1] as u32),

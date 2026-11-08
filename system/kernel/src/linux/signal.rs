@@ -229,7 +229,9 @@ fn send(pid: u32, tid: Option<Tid>, sig: u32, info: [u8; 32]) -> bool {
         return true;
     }
     // A thread waiting for a child should see the signal, and so should
-    // the thread it is for, or any of the process's, in a blocking call.
+    // the thread it is for, or any of the process's, in a blocking call,
+    // and signalfd readers.
+    SIGNALS.notify_all();
     user::wake_waiters();
     match tid {
         Some(t) => task::wake(t),
@@ -265,12 +267,14 @@ pub fn child_ended(parent: u32, child: u32, code: i64) -> bool {
     let mut i = info(SIGCHLD, if killed { CLD_KILLED } else { CLD_EXITED }, seen);
     let status = if killed { (-code - 128) as u32 } else { code as u32 & 0xff };
     i[24..28].copy_from_slice(&status.to_le_bytes());
-    with_state_of(parent, |st| {
+    let gone = with_state_of(parent, |st| {
         let a = act(st, SIGCHLD);
         queue(st, SIGCHLD, None, i);
         a.handler == SIG_IGN || a.flags & SA_NOCLDWAIT != 0
     })
-    .unwrap_or(false)
+    .unwrap_or(false);
+    SIGNALS.notify_all();
+    gone
 }
 
 /// A write to a pipe or socket that nobody reads any more: SIGPIPE for
@@ -878,4 +882,98 @@ pub fn exec(st: &mut LinuxState, me: Tid) {
     let mask = mask_of(st, me);
     st.sigthreads.clear();
     st.sigthreads.insert(me, ThreadSig { mask, ..Default::default() });
+}
+
+// ----------------------------------------------------------------------------
+// signalfd
+
+/// Told whenever a signal is queued: signalfd readers wait on it.
+pub static SIGNALS: crate::task::WaitQueue = crate::task::WaitQueue::new();
+
+const SFD_SIZE: usize = 128;
+
+/// signalfd: the signals in its mask that wait for the process reading it
+/// (or for the reading thread), read as signalfd_siginfo records instead
+/// of being delivered. Programs block those signals first.
+pub struct SignalFd {
+    mask: core::sync::atomic::AtomicU64,
+}
+
+pub fn sys_signalfd4(fd: i32, set: u64, size: u64, flags: u32) -> i64 {
+    use super::fd::{Desc, Kind, O_CLOEXEC, O_NONBLOCK};
+    if size != 8 || flags & !(O_CLOEXEC | O_NONBLOCK) != 0 {
+        return -err::EINVAL;
+    }
+    let mask = match read_set(set) {
+        Ok(m) => m & !UNBLOCKABLE,
+        Err(e) => return e,
+    };
+    if fd != -1 {
+        // A new mask for one there is.
+        return match super::fd::get(fd) {
+            Some(d) => match &d.kind {
+                Kind::Signal(s) => {
+                    s.mask.store(mask, Ordering::Relaxed);
+                    SIGNALS.notify_all();
+                    fd as i64
+                }
+                _ => -err::EINVAL,
+            },
+            None => -err::EBADF,
+        };
+    }
+    let s = alloc::sync::Arc::new(SignalFd { mask: core::sync::atomic::AtomicU64::new(mask) });
+    super::fd::install(Desc::new(Kind::Signal(s), flags & O_NONBLOCK), flags & O_CLOEXEC != 0)
+}
+
+impl SignalFd {
+    fn wants(&self, me: Tid, p: &Pending) -> bool {
+        p.tid.is_none_or(|t| t == me) && self.mask.load(Ordering::Relaxed) & bit(p.sig) != 0
+    }
+
+    pub fn ready(&self) -> bool {
+        let me = task::current_tid();
+        try_state(|st| st.pending.iter().any(|p| self.wants(me, p))).unwrap_or(false)
+    }
+
+    pub fn read(&self, d: &super::fd::Desc, buf: &mut [u8]) -> i64 {
+        if buf.len() < SFD_SIZE {
+            return -err::EINVAL;
+        }
+        let me = task::current_tid();
+        loop {
+            let mut n = 0;
+            while n + SFD_SIZE <= buf.len() {
+                let got = try_state(|st| {
+                    let i = st.pending.iter().position(|p| self.wants(me, p))?;
+                    Some(remove(st, i))
+                })
+                .flatten();
+                let Some(p) = got else { break };
+                siginfo_record(&p, &mut buf[n..n + SFD_SIZE]);
+                n += SFD_SIZE;
+            }
+            if n > 0 {
+                return n as i64;
+            }
+            if let Err(e) = super::fd::wait_until(d, || self.ready()) {
+                return e;
+            }
+        }
+    }
+}
+
+/// A signalfd_siginfo from what a signal carries (a siginfo's start).
+fn siginfo_record(p: &Pending, out: &mut [u8]) {
+    let i = &p.info;
+    out.fill(0);
+    out[0..4].copy_from_slice(&p.sig.to_le_bytes());
+    out[4..12].copy_from_slice(&i[4..12]); // errno, code
+    out[12..20].copy_from_slice(&i[16..24]); // pid, uid
+    if p.sig == SIGCHLD {
+        out[40..44].copy_from_slice(&i[24..28]); // status
+    } else {
+        out[44..48].copy_from_slice(&i[24..28]); // int
+        out[48..56].copy_from_slice(&i[24..32]); // ptr
+    }
 }
