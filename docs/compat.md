@@ -52,7 +52,7 @@ busybox ls -la             un programma installato (vedi "Installare programmi")
 | `stdin`, `stdout`, `stderr` | la console; `stdin` legge una riga per volta, con l'eco dei tasti |
 | file e cartelle | i volumi montati: il "/" di Linux è la radice del volume corrente, così `/home/x` è `<volume>:/home/x` |
 | memoria | `brk` e `mmap` anonimo (il programma alloca e libera normalmente) |
-| memoria condivisa | `memfd_create` (con i sigilli di `F_ADD_SEALS`), `shm_open` in `/dev/shm`, `MAP_SHARED` anonimo: chi la mappa vede le stesse pagine, anche tra processi diversi dopo `fork` o passandosi il descrittore su un socket; un `MAP_SHARED` di un file normale resta una copia privata |
+| memoria condivisa | `memfd_create` (con i sigilli di `F_ADD_SEALS`), `shm_open` in `/dev/shm`, `MAP_SHARED` anonimo: chi la mappa vede le stesse pagine, anche tra processi diversi dopo `fork` o passandosi il descrittore su un socket; anche un `MAP_SHARED` di un file: le stesse pagine per tutti i processi, che `read` e `write` vedono e che tornano nel file (con `msync`, `fsync` e quando l'ultima mappatura se ne va) |
 | orologio | `clock_gettime`, `gettimeofday`, `nanosleep` |
 | TLS | `arch_prctl(ARCH_SET_FS)` imposta la base del segmento FS del thread |
 | casualità | `getrandom` |
@@ -264,7 +264,10 @@ Accanto c'è **`/dev/ashmem`**, la memoria condivisa di Android (libcutils la
 usa ancora al posto di `memfd`): una regione con nome e dimensione, mappata
 da chi riceve il descrittore, con la maschera dei permessi che li può solo
 togliere (`system/kernel/src/linux/ashmem.rs`, provata da
-`scripts/linux/ashmem-test.c`). Sono i primi pezzi per eseguire
+`scripts/linux/ashmem-test.c`). Le aree delle proprietà di sistema sono file
+mappati `MAP_SHARED`: init le scrive, gli altri processi le mappano in sola
+lettura e aspettano i cambi con un futex nelle stesse pagine
+(`scripts/linux/mapshared-test.c`). Sono i primi pezzi per eseguire
 un'immagine di sistema Android sopra lo strato Linux, come fa Waydroid.
 
 ## Installare programmi
@@ -318,8 +321,7 @@ anche senza estensione) lo avvia nel Terminale.
   compilate con `invokedynamic` (quelle trasformate da `d8` vanno bene). I
   thread girano uno dopo l'altro.
 - **Linux**: `execve` da un programma con più thread e il controllo dei job
-  (`SIGSTOP`, `SIGTSTP`) non ci sono ancora; un `MAP_SHARED` di un file del
-  volume non scrive nel file. Le finestre si disegnano con il processore
+  (`SIGSTOP`, `SIGTSTP`) non ci sono ancora. Le finestre si disegnano con il processore
   (niente OpenGL o Vulkan, niente `linux-dmabuf`) e non c'è un server X11:
   servono programmi che parlano Wayland.
 - **Windows a 32 bit**: non ancora.

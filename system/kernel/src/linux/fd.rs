@@ -152,6 +152,7 @@ pub fn install_from(d: Arc<Desc>, cloexec: bool, min: i32) -> i64 {
 pub fn sys_fsync(fd: i32) -> i64 {
     let Some(d) = get(fd) else { return -err::EBADF };
     if let Kind::File { path, .. } = &d.kind {
+        super::mm::sync_file(path);
         crate::fs::flush(path);
     }
     0
@@ -487,9 +488,11 @@ fn open_path(path: &Path, text: &str, flags: u32, mode: u32) -> i64 {
                 return -err::EEXIST;
             }
             if flags & O_TRUNC != 0 && writable {
+                super::mm::forget_file(path);
                 if let Err(e) = fs::write_file(path, &[]) {
                     return -errno(user::fs_error(e));
                 }
+                super::mm::file_truncated(path, 0);
             }
         }
         Err(fs::Error::NotFound) if flags & O_CREAT != 0 => {
@@ -595,6 +598,7 @@ pub fn read_desc(d: &Desc, buf: &mut [u8]) -> i64 {
             let mut tmp = vec![0u8; buf.len().min(1 << 20)];
             match fs::read_at(path, at, &mut tmp) {
                 Ok(n) => {
+                    super::mm::file_read(path, at, &mut tmp[..n]);
                     buf[..n].copy_from_slice(&tmp[..n]);
                     *pos.lock() = at + n as u64;
                     n as i64
@@ -675,6 +679,7 @@ pub fn write_desc(d: &Desc, data: &[u8]) -> i64 {
             super::mm::forget_file(path);
             match fs::write_at(path, at, data) {
                 Ok(()) => {
+                    super::mm::file_written(path, at, data);
                     *pos.lock() = at + data.len() as u64;
                     data.len() as i64
                 }
@@ -771,6 +776,7 @@ pub fn sys_pread(fd: i32, ptr: u64, len: u64, off: u64) -> i64 {
             let mut tmp = vec![0u8; buf.len().min(1 << 20)];
             match fs::read_at(path, off, &mut tmp) {
                 Ok(n) => {
+                    super::mm::file_read(path, off, &mut tmp[..n]);
                     buf[..n].copy_from_slice(&tmp[..n]);
                     n as i64
                 }
@@ -798,7 +804,10 @@ pub fn sys_pwrite(fd: i32, ptr: u64, len: u64, off: u64) -> i64 {
         Kind::File { path, .. } => {
             super::mm::forget_file(path);
             match fs::write_at(path, off, data) {
-                Ok(()) => data.len() as i64,
+                Ok(()) => {
+                    super::mm::file_written(path, off, data);
+                    data.len() as i64
+                }
                 Err(e) => -errno(user::fs_error(e)),
             }
         }
@@ -858,7 +867,10 @@ pub fn sys_ftruncate(fd: i32, len: u64) -> i64 {
 pub fn truncate_path(path: &Path, len: u64) -> i64 {
     super::mm::forget_file(path);
     match fs::truncate(path, len) {
-        Ok(()) => 0,
+        Ok(()) => {
+            super::mm::file_truncated(path, len);
+            0
+        }
         Err(e) => -errno(user::fs_error(e)),
     }
 }
@@ -1192,6 +1204,7 @@ pub fn sys_unlinkat(dirfd: i32, path_ptr: u64) -> i64 {
             // Mappings of it keep what they map, and descriptors what they
             // read and write.
             super::mm::forget_file(&p);
+            super::mm::file_gone(&p);
             super::keep_open(&p);
             match fs::remove(&p) {
                 Ok(()) => 0,
@@ -1210,6 +1223,8 @@ pub fn sys_renameat(olddir: i32, old: u64, newdir: i32, new: u64) -> i64 {
     // Mappings of either keep what they map.
     super::mm::forget_file(&from);
     super::mm::forget_file(&to);
+    super::mm::file_gone(&from);
+    super::mm::file_gone(&to);
     if fs::exists(&to) && !fs::is_dir(&to) {
         let _ = fs::remove(&to);
     }

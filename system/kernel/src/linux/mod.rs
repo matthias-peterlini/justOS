@@ -190,6 +190,7 @@ pub fn forget(pid: u32) {
         signal::forgotten(s);
     }
     drop(st);
+    mm::sweep_shared();
     seccomp::forget(pid);
     // The end of a PID namespace's init ends the namespace.
     for p in ns::exited(pid) {
@@ -925,7 +926,8 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
             0
         }
         25 => mm::sys_mremap(a[0], a[1], a[2], a[3] as u32),
-        26 | 27 => 0, // msync, mincore
+        26 => mm::sys_msync(a[0], a[1]),
+        27 => 0, // mincore
         28 => mm::sys_madvise(a[0], a[1], a[2]),
         285 => shm::sys_fallocate(fd0, a[1], a[2], a[3]),
         319 => shm::sys_memfd_create(a[0], a[1] as u32),
@@ -1224,6 +1226,8 @@ fn reset_for_exec() {
     });
     // Closed outside the state lock: closing a socket talks to the network.
     drop(closed);
+    // The old program's shared mappings of files go back to them.
+    mm::sweep_shared();
 }
 
 /// The wait status of a child's exit code: a normal exit (code << 8), or

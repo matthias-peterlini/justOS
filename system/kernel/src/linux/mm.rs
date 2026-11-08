@@ -11,6 +11,9 @@
 //! gets a copy of its own (copy on write). A browser maps a 160 MB library
 //! in each of its processes and uses a part of it; reading it all at the
 //! first `mmap` took a minute.
+//!
+//! A shared mapping that may write to a file maps the frames of a
+//! [`SharedFile`], the same in every process; they go back to the file.
 
 use super::shm::Shm;
 use super::{err, with_state, LinuxState};
@@ -23,6 +26,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use crate::user::USER_TOP;
 
 pub const PROT_READ: u32 = 1;
@@ -49,6 +53,8 @@ pub enum Backing {
     /// Shared memory: the same frames for every mapping (true), or a
     /// private copy of each page made when it is first touched.
     Shm(Arc<Shm>, bool),
+    /// A file mapped MAP_SHARED: its frames, the same for every mapping.
+    SharedFile(Arc<SharedFile>),
 }
 
 /// A reserved area.
@@ -221,6 +227,267 @@ impl Drop for FileData {
     }
 }
 
+/// Files mapped MAP_SHARED by a mapping that may write, see [`SharedFile`].
+/// One stays here after its last mapping goes, until [`sweep_shared`]
+/// writes it back.
+static SHARED_FILES: IrqLock<Vec<Arc<SharedFile>>> = IrqLock::new(Vec::new());
+/// How many there are: reads and writes of files only look when some are.
+static SHARED_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// A file mapped MAP_SHARED with write access: its pages in frames that
+/// every shared mapping of it maps (writable where the mapping may write),
+/// so that processes see each other's stores, as Android's property areas
+/// and SQLite's -shm files expect. While it is here, read() and write() of
+/// the file go through its frames; they go back to the file at msync and
+/// fsync, and when no mapping is left.
+pub struct SharedFile {
+    path: Path,
+    key: String,
+    name: String,
+    /// Frames by page number.
+    pages: IrqLock<BTreeMap<u64, u64>>,
+    /// Bumped by every write() of the file: a page read from the disk
+    /// meanwhile is read again.
+    writes: AtomicU64,
+    /// A mapping may write: the pages go back to the file.
+    written: AtomicBool,
+    /// The file was removed or renamed: nothing goes back.
+    detached: AtomicBool,
+}
+
+impl SharedFile {
+    /// The frame of page `n` (zeroes past the end of the file).
+    fn frame(&self, n: u64) -> Option<u64> {
+        loop {
+            if let Some(&f) = self.pages.lock().get(&n) {
+                return Some(f);
+            }
+            let gen = self.writes.load(Ordering::Acquire);
+            let size = crate::fs::stat(&self.path).map(|s| s.size).unwrap_or(0);
+            let want = size.saturating_sub(n * PAGE_SIZE).min(PAGE_SIZE) as usize;
+            let mut buf = alloc::vec![0u8; PAGE_SIZE as usize];
+            let mut done = 0;
+            while done < want {
+                match crate::fs::read_at(&self.path, n * PAGE_SIZE + done as u64, &mut buf[done..want]) {
+                    Ok(0) | Err(_) => break,
+                    Ok(k) => done += k,
+                }
+            }
+            let f = frame::alloc()?;
+            // SAFETY: a frame just allocated, reached through the direct map.
+            unsafe { core::ptr::copy_nonoverlapping(buf.as_ptr(), phys_to_virt(f) as *mut u8, PAGE_SIZE as usize) };
+            let mut p = self.pages.lock();
+            // Another thread was first, or the file was written meanwhile
+            // (then read it again).
+            if p.contains_key(&n) || self.writes.load(Ordering::Acquire) != gen {
+                let have = p.get(&n).copied();
+                drop(p);
+                frame::free(f);
+                match have {
+                    Some(have) => return Some(have),
+                    None => continue,
+                }
+            }
+            p.insert(n, f);
+            return Some(f);
+        }
+    }
+
+    /// Writes the pages back to the file (up to its size).
+    fn write_back(&self) {
+        if !self.written.load(Ordering::Relaxed) || self.detached.load(Ordering::Relaxed) {
+            return;
+        }
+        let Ok(st) = crate::fs::stat(&self.path) else { return };
+        let pages: Vec<(u64, u64)> = self.pages.lock().iter().map(|(&n, &f)| (n, f)).filter(|&(n, _)| n * PAGE_SIZE < st.size).collect();
+        if pages.is_empty() {
+            return;
+        }
+        forget_file(&self.path);
+        // One write for each run of pages.
+        let mut i = 0;
+        while i < pages.len() {
+            let first = pages[i].0;
+            let mut buf = Vec::new();
+            let mut next = first;
+            while i < pages.len() && pages[i].0 == next && buf.len() < 1 << 20 {
+                let (n, f) = pages[i];
+                let len = (st.size - n * PAGE_SIZE).min(PAGE_SIZE) as usize;
+                // SAFETY: the file's frame, through the direct map.
+                buf.extend_from_slice(unsafe { core::slice::from_raw_parts(phys_to_virt(f) as *const u8, len) });
+                i += 1;
+                next += 1;
+            }
+            let _ = crate::fs::write_at(&self.path, first * PAGE_SIZE, &buf);
+        }
+    }
+
+    /// Calls `f` with each frame there is in `[off, off + len)`: where the
+    /// bytes are in the frame, how many, and where they are in the range.
+    fn each(&self, off: u64, len: usize, mut f: impl FnMut(*mut u8, usize, usize)) {
+        let end = off + len as u64;
+        let p = self.pages.lock();
+        for (&n, &frame) in p.range(off / PAGE_SIZE..end.div_ceil(PAGE_SIZE)) {
+            let (a, b) = ((n * PAGE_SIZE).max(off), ((n + 1) * PAGE_SIZE).min(end));
+            // SAFETY: the file's frame, through the direct map.
+            let at = unsafe { (phys_to_virt(frame) as *mut u8).add((a - n * PAGE_SIZE) as usize) };
+            f(at, (b - a) as usize, (a - off) as usize);
+        }
+    }
+}
+
+impl Drop for SharedFile {
+    fn drop(&mut self) {
+        for &f in self.pages.lock().values() {
+            frame::free(f);
+        }
+    }
+}
+
+/// The shared file open as `fd`, for a MAP_SHARED mapping: the one already
+/// here, or (for a mapping that may write) a new one. None: map the file
+/// as private mappings do.
+fn shared_file(fd: i32, write: bool) -> Result<Option<Arc<SharedFile>>, i64> {
+    let path = super::fd::file_path(fd).ok_or(-err::EBADF)?;
+    let key = map_key(&path);
+    let mut all = SHARED_FILES.lock();
+    if let Some(f) = all.iter().find(|f| f.key == key) {
+        if write {
+            f.written.store(true, Ordering::Relaxed);
+        }
+        return Ok(Some(f.clone()));
+    }
+    if !write {
+        return Ok(None);
+    }
+    let name = super::show_path(&path);
+    let f = Arc::new(SharedFile {
+        path,
+        key,
+        name,
+        pages: IrqLock::new(BTreeMap::new()),
+        writes: AtomicU64::new(0),
+        written: AtomicBool::new(true),
+        detached: AtomicBool::new(false),
+    });
+    all.push(f.clone());
+    SHARED_COUNT.fetch_add(1, Ordering::Relaxed);
+    Ok(Some(f))
+}
+
+fn shared_of(path: &Path) -> Option<Arc<SharedFile>> {
+    if SHARED_COUNT.load(Ordering::Relaxed) == 0 {
+        return None;
+    }
+    let key = map_key(path);
+    SHARED_FILES.lock().iter().find(|f| f.key == key).cloned()
+}
+
+/// `data` was written to the file at `off`: the shared pages get it too.
+pub fn file_written(path: &Path, off: u64, data: &[u8]) {
+    let Some(f) = shared_of(path) else { return };
+    f.each(off, data.len(), |at, n, from| {
+        // SAFETY: `at` is `n` bytes of the file's frame.
+        unsafe { core::ptr::copy_nonoverlapping(data.as_ptr().add(from), at, n) };
+    });
+    f.writes.fetch_add(1, Ordering::Release);
+}
+
+/// `buf` was read from the file at `off`: what the shared pages hold is
+/// newer.
+pub fn file_read(path: &Path, off: u64, buf: &mut [u8]) {
+    let Some(f) = shared_of(path) else { return };
+    f.each(off, buf.len(), |at, n, from| {
+        // SAFETY: `at` is `n` bytes of the file's frame.
+        unsafe { core::ptr::copy_nonoverlapping(at as *const u8, buf.as_mut_ptr().add(from), n) };
+    });
+}
+
+/// The file was cut to `len` bytes: what was past it reads as zeroes.
+pub fn file_truncated(path: &Path, len: u64) {
+    let Some(f) = shared_of(path) else { return };
+    let end = f.pages.lock().keys().next_back().map_or(0, |n| (n + 1) * PAGE_SIZE);
+    if end > len {
+        f.each(len, (end - len) as usize, |at, n, _| {
+            // SAFETY: `at` is `n` bytes of the file's frame.
+            unsafe { core::ptr::write_bytes(at, 0, n) };
+        });
+    }
+    f.writes.fetch_add(1, Ordering::Release);
+}
+
+/// The file was removed or renamed: its mappings keep their memory, new
+/// mappings of the name map the new file.
+pub fn file_gone(path: &Path) {
+    let Some(f) = shared_of(path) else { return };
+    f.detached.store(true, Ordering::Relaxed);
+    let mut all = SHARED_FILES.lock();
+    let before = all.len();
+    all.retain(|g| !Arc::ptr_eq(g, &f));
+    SHARED_COUNT.fetch_sub(before - all.len(), Ordering::Relaxed);
+}
+
+/// fsync: the shared pages of the file go back to it.
+pub fn sync_file(path: &Path) {
+    if let Some(f) = shared_of(path) {
+        f.write_back();
+    }
+}
+
+/// Writes back the shared files no mapping holds any more, and lets them
+/// go (called where mappings end, outside any lock).
+pub fn sweep_shared() {
+    if SHARED_COUNT.load(Ordering::Relaxed) == 0 {
+        return;
+    }
+    let idle: Vec<Arc<SharedFile>> = SHARED_FILES.lock().iter().filter(|f| Arc::strong_count(f) == 1).cloned().collect();
+    if idle.is_empty() {
+        return;
+    }
+    for f in &idle {
+        f.write_back();
+    }
+    // Those still unused (only here and in `idle`) go; one mapped again
+    // meanwhile stays.
+    let mut all = SHARED_FILES.lock();
+    let before = all.len();
+    all.retain(|f| !(Arc::strong_count(f) == 2 && idle.iter().any(|g| Arc::ptr_eq(f, g))));
+    SHARED_COUNT.fetch_sub(before - all.len(), Ordering::Relaxed);
+    drop(all);
+    drop(idle);
+}
+
+/// msync: the shared files mapped in the range go back to their files.
+pub fn sys_msync(addr: u64, len: u64) -> i64 {
+    if !addr.is_multiple_of(PAGE_SIZE) {
+        return -err::EINVAL;
+    }
+    let end = addr.saturating_add(len);
+    let files: Vec<Arc<SharedFile>> = with_state(|st| {
+        st.vmas
+            .range(..end)
+            .filter(|&(&s, v)| s < end && v.end > addr)
+            .filter_map(|(_, v)| match &v.backing {
+                Backing::SharedFile(f) => Some(f.clone()),
+                _ => None,
+            })
+            .collect()
+    });
+    for f in files {
+        f.write_back();
+    }
+    0
+}
+
+/// Whether `addr` is in a shared mapping (of shared memory or of a file),
+/// where a futex is the same one for every process that maps it.
+pub fn shared_at(addr: u64) -> bool {
+    super::try_state(|st| {
+        st.vmas.range(..=addr).next_back().is_some_and(|(_, v)| addr < v.end && matches!(v.backing, Backing::Shm(_, true) | Backing::SharedFile(_)))
+    })
+    .unwrap_or(false)
+}
+
 /// An area the loader placed (see `LinuxState::images`).
 #[derive(Clone)]
 pub struct Image {
@@ -300,10 +567,20 @@ pub fn sys_mmap(addr: u64, len: u64, prot: u32, flags: u32, fd: i32, off: u64) -
             },
             _ => None,
         };
-        match memfd {
-            Some(shm) => (Backing::Shm(shm, shared), off),
-            // A shared mapping of a file is a private copy here.
-            None => match mapped_file(fd) {
+        let file = if memfd.is_none() && shared {
+            match shared_file(fd, prot & PROT_WRITE != 0) {
+                Ok(f) => f,
+                Err(e) => return e,
+            }
+        } else {
+            None
+        };
+        match (memfd, file) {
+            (Some(shm), _) => (Backing::Shm(shm, shared), off),
+            (None, Some(file)) => (Backing::SharedFile(file), off),
+            // A read-only shared mapping of a file that nothing maps to
+            // write is as a private one (it cannot write).
+            (None, None) => match mapped_file(fd) {
                 Ok(d) => (Backing::File(d), off),
                 Err(e) => return e,
             },
@@ -343,6 +620,7 @@ fn map(addr: u64, len: u64, prot: u32, flags: u32, backing: Backing, off: u64) -
                 release_pages(at, at + len);
             }
             drop(old);
+            sweep_shared();
             at as i64
         }
         Err(e) => e,
@@ -357,6 +635,7 @@ pub fn sys_munmap(addr: u64, len: u64) -> i64 {
     let old = with_state(|st| cut(st, addr, end));
     release_pages(addr, end);
     drop(old);
+    sweep_shared();
     0
 }
 
@@ -368,6 +647,9 @@ pub fn sys_mprotect(addr: u64, len: u64, prot: u32) -> i64 {
     with_state(|st| {
         let parts: Vec<(u64, Vma)> = st.vmas.range(..end).filter(|(&s, v)| s < end && v.end > addr).map(|(&s, v)| (s, v.clone())).collect();
         for (s, v) in parts {
+            if let (Backing::SharedFile(f), true) = (&v.backing, prot & PROT_WRITE != 0) {
+                f.written.store(true, Ordering::Relaxed);
+            }
             let (a, b) = (s.max(addr), v.end.min(end));
             cut(st, a, b);
             st.vmas.insert(a, Vma { end: b, prot, backing: v.backing.clone(), off: v.off + (a - s) });
@@ -406,7 +688,7 @@ pub fn sys_mremap(old: u64, old_len: u64, new_len: u64, flags: u32) -> i64 {
     }
     let area = with_state(|st| st.vmas.range(..=old).next_back().map(|(&s, v)| (v.prot, v.backing.clone(), v.off + (old - s))));
     let (prot, backing, off) = area.unwrap_or((PROT_READ | PROT_WRITE, Backing::Anon, 0));
-    let shared = matches!(backing, Backing::Shm(_, true));
+    let shared = matches!(backing, Backing::Shm(_, true) | Backing::SharedFile(_));
     let new = map(0, new_len, prot, 0, backing, off);
     if new < 0 {
         return new;
@@ -460,6 +742,10 @@ pub fn fault(addr: u64, write: bool) -> bool {
     let Some((start, vma)) = found else { return false };
     let cr3 = cpu::read_cr3();
     if let Some(e) = paging::entry_in(cr3, page) {
+        if let (Backing::SharedFile(_), true) = (&vma.backing, write && e & paging::WRITE == 0 && vma.prot & PROT_WRITE != 0) {
+            // Mapped before mprotect let it write: the same frame, writable.
+            return paging::replace_in(cr3, page, e, e & paging::ADDR_MASK, paging::USER | paging::SHARED | paging::WRITE) || paging::user_accessible(cr3, page);
+        }
         if write && e & paging::WRITE == 0 {
             return copy_on_write(page);
         }
@@ -479,6 +765,10 @@ pub fn fault(addr: u64, write: bool) -> bool {
             None => return false,
         },
         Backing::Shm(shm, false) => (None, shm.existing(at / PAGE_SIZE)),
+        Backing::SharedFile(file) => match file.frame(at / PAGE_SIZE) {
+            Some(f) => (Some((f, if vma.prot & PROT_WRITE != 0 { paging::WRITE } else { 0 })), None),
+            None => return false,
+        },
         Backing::File(file) => match file.frame(at / PAGE_SIZE) {
             Some(f) if write => (None, Some(f)),
             Some(f) => (Some((f, 0)), None),
@@ -568,6 +858,7 @@ pub fn describe(pid: u32, addr: u64) -> String {
         let (&start, v) = st.vmas.range(..=addr).next_back()?;
         (addr < v.end).then(|| match &v.backing {
             Backing::File(f) => alloc::format!("{}+{:#x}", f.name.rsplit('/').next().unwrap_or(&f.name), addr - start + v.off),
+            Backing::SharedFile(f) => alloc::format!("{}+{:#x}", f.name.rsplit('/').next().unwrap_or(&f.name), addr - start + v.off),
             _ => alloc::format!("{addr:#x} (memory, +{:#x})", addr - start),
         })
     })
@@ -591,6 +882,7 @@ pub fn areas(pid: u32) -> Vec<(u64, u64, u32, u64, String)> {
             }
             let name = match &v.backing {
                 Backing::File(f) => f.name.clone(),
+                Backing::SharedFile(f) => f.name.clone(),
                 _ => String::new(),
             };
             out.push((s, v.end, v.prot, v.off, name));

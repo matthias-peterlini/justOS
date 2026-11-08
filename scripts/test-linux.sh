@@ -4,8 +4,9 @@
 # static, and one in C linked dynamically against glibc (the image carries
 # Debian's glibc, see tools/linux/debroot.py), built here from
 # scripts/linux/. Two more check what Android's own system needs: the
-# binder driver (its IPC) with two processes, and /dev/ashmem (its shared
-# memory). Each is skipped (and noted) when its compiler is missing. A web server on this machine answers their
+# binder driver (its IPC) with two processes, /dev/ashmem (its shared
+# memory) and shared mappings of files (its property areas). Each is
+# skipped (and noted) when its compiler is missing. A web server on this machine answers their
 # requests at 10.0.2.2.
 #
 # EXTRA=<folder> also copies the programs in it (for example ripgrep, fd,
@@ -29,7 +30,7 @@ PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); pr
 mkdir www && echo "hello from the host" > www/hello.txt
 (cd www && exec python3 -m http.server "$PORT" --bind 127.0.0.1 >/dev/null 2>&1) & PID=$!
 
-C=0; R=0; G=0; D=0; B=0; A=0
+C=0; R=0; G=0; D=0; B=0; A=0; M=0
 if command -v musl-gcc >/dev/null 2>&1 && musl-gcc -static -O2 -o ct "$HERE/linux/threads-net.c" -lpthread 2>/dev/null; then
     strip ct; put ct ct && C=1
 fi
@@ -41,6 +42,9 @@ if command -v gcc >/dev/null 2>&1 && gcc -O2 -o bt "$HERE/linux/binder-test.c" 2
 fi
 if command -v gcc >/dev/null 2>&1 && gcc -O2 -o am "$HERE/linux/ashmem-test.c" 2>/dev/null; then
     strip am; put am am && A=1
+fi
+if command -v gcc >/dev/null 2>&1 && gcc -O2 -o ms "$HERE/linux/mapshared-test.c" 2>/dev/null; then
+    strip ms; put ms ms && M=1
 fi
 if command -v cargo >/dev/null 2>&1 && rustup target list --installed 2>/dev/null | grep -q x86_64-unknown-linux-musl; then
     mkdir -p rt/src && cp "$HERE/linux/rust-test.rs" rt/src/main.rs
@@ -65,6 +69,7 @@ fi
     [ $D = 1 ] && { echo "./dt"; echo '@sleep 6'; }
     [ $B = 1 ] && { echo "./bt"; echo '@sleep 3'; }
     [ $A = 1 ] && { echo "./am"; echo '@sleep 2'; }
+    [ $M = 1 ] && { echo "./ms"; echo '@sleep 2'; }
     if [ -n "${EXTRA:-}" ]; then
         for f in "$EXTRA"/*; do
             n=$(basename "$f"); put "$f" "$n"; echo "./$n --version"; echo '@sleep 3'
@@ -108,6 +113,8 @@ fi
         'bt: dead cookie=0xdead clear=1 spawn=1' 'bt: done deadcall=-1 exit=0'
     [ $A = 1 ] && printf '%s
 ' 'am: open chr=1 same=1' 'am: region name=justos-region size=10000 early=1 e=0'         'am: map got=from the parent toobig=1 resize=1 pin=0/0/1' 'am: private zero=1'         'am: shared child=0 back=from the child' 'am: mask=1 back=1 denied=1 ro=from the parent e=0'         'am: done bootid=1'
+    [ $M = 1 ] && printf '%s\n' 'ms: reader exit=0 woken=1' 'ms: child wrote=from the child' \
+        'ms: pread=second mapped=by pwrite msync=0' 'ms: done zero=1 back=kept'
 } > expect.txt
 
 STEP_WAIT=${STEP_WAIT:-2} "$HERE/test.sh" justos.img session.txt > out.txt 2>&1
@@ -120,5 +127,5 @@ done < expect.txt
 grep -q "unimplemented syscall\|stopped:" out.txt && grep "unimplemented syscall\|stopped:" out.txt | sed 's/^/  /' | head -5
 [ $STATUS -ne 0 ] && { echo "  the kernel stopped"; FAILED=1; }
 [ "${VERBOSE:-0}" = 1 ] && cat out.txt
-[ $FAILED = 0 ] && echo "  ok    linux ($(grep -c . expect.txt) checks, c=$C rust=$R go=$G glibc=$D binder=$B ashmem=$A)"
+[ $FAILED = 0 ] && echo "  ok    linux ($(grep -c . expect.txt) checks, c=$C rust=$R go=$G glibc=$D binder=$B ashmem=$A mapshared=$M)"
 exit $FAILED

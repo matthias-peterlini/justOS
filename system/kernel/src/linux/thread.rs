@@ -213,7 +213,9 @@ fn futex_key(addr: u64, shared: bool) -> Key {
         super::mm::populate(addr, 4);
         let page = addr & !0xfff;
         if let Some(e) = paging::entry_in(cr3, page) {
-            if e & paging::SHARED != 0 && e & paging::WRITE != 0 {
+            // Read-only shared frames are files' pages: a private
+            // mapping's, unless the area is a shared one.
+            if e & paging::SHARED != 0 && (e & paging::WRITE != 0 || super::mm::shared_at(addr)) {
                 return (0, (e & paging::ADDR_MASK) | (addr & 0xfff));
             }
         }
