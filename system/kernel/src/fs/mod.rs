@@ -549,6 +549,8 @@ pub struct Stat {
     pub node: u32,
     /// Marked hidden (the Files app leaves it out).
     pub hidden: bool,
+    /// Unix permission bits with [`justfs::MODE_SET`], or 0 if never given.
+    pub mode: u16,
 }
 
 pub fn stat(path: &Path) -> Result<Stat> {
@@ -556,7 +558,17 @@ pub fn stat(path: &Path) -> Result<Stat> {
     let mut fs = v.fs.lock();
     let id = find(&v, &mut fs, &path.inner, Follow::Yes)?;
     let n = fs.node(id)?;
-    Ok(Stat { kind: n.kind, size: n.size, modified: n.modified, node: id, hidden: n.flags & justfs::FLAG_HIDDEN != 0 })
+    Ok(Stat { kind: n.kind, size: n.size, modified: n.modified, node: id, hidden: n.flags & justfs::FLAG_HIDDEN != 0, mode: n.mode })
+}
+
+/// Sets the Unix permission bits of what `path` names (through links).
+pub fn set_mode(path: &Path, mode: u16) -> Result<()> {
+    let v = vol(path)?;
+    let mut fs = v.fs.lock();
+    let id = find(&v, &mut fs, &path.inner, Follow::Yes)?;
+    fs.set_mode(id, mode)?;
+    tell_path(&v, &mut fs, &path.inner, id, change::ATTRIB);
+    changed(&v)
 }
 
 /// Like [`stat`], but a symbolic link at the end of the path describes
@@ -566,7 +578,7 @@ pub fn lstat(path: &Path) -> Result<Stat> {
     let mut fs = v.fs.lock();
     let id = find(&v, &mut fs, &path.inner, Follow::No)?;
     let n = fs.node(id)?;
-    Ok(Stat { kind: n.kind, size: n.size, modified: n.modified, node: id, hidden: n.flags & justfs::FLAG_HIDDEN != 0 })
+    Ok(Stat { kind: n.kind, size: n.size, modified: n.modified, node: id, hidden: n.flags & justfs::FLAG_HIDDEN != 0, mode: n.mode })
 }
 
 /// Creates a symbolic link at `path` that points to `target`.
@@ -707,7 +719,7 @@ pub fn list_dir(path: &Path) -> Result<Vec<(DirEntry, Stat)>> {
             node = find(&v, &mut fs, &full, Follow::Yes).unwrap_or(e.node);
         }
         let n = fs.node(node)?;
-        out.push((e, Stat { kind: n.kind, size: n.size, modified: n.modified, node, hidden }));
+        out.push((e, Stat { kind: n.kind, size: n.size, modified: n.modified, node, hidden, mode: n.mode }));
     }
     out.sort_by(|a, b| (a.1.kind != Kind::Dir).cmp(&(b.1.kind != Kind::Dir)).then(a.0.name.to_lowercase().cmp(&b.0.name.to_lowercase())));
     Ok(out)

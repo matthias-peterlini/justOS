@@ -68,8 +68,11 @@ impl Vma {
 }
 
 /// Is `[start, end)` free of areas?
-fn free_range(st: &LinuxState, start: u64, end: u64) -> bool {
-    !st.vmas.range(..end).any(|(&s, v)| s < end && v.end > start)
+pub fn free_range(st: &LinuxState, start: u64, end: u64) -> bool {
+    // The program's own segments and its heap are taken too.
+    let heap_end = mem::align_up(st.brk_cur, PAGE_SIZE);
+    let heap = heap_end > st.brk_start && st.brk_start < end && heap_end > start;
+    !heap && !st.images.iter().any(|i| i.start < end && i.end > start) && !st.vmas.range(..end).any(|(&s, v)| s < end && v.end > start)
 }
 
 /// Removes `[start, end)` from the areas, splitting those that straddle it.

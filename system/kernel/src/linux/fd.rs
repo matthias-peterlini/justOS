@@ -271,9 +271,20 @@ fn proc_of(text: &str) -> Option<(u32, &str)> {
 /// The folders under /proc/<pid>/: the process's own and its fd, fdinfo,
 /// ns and task folders, with what is in them.
 fn virtual_dir(text: &str) -> Option<Vec<(String, bool)>> {
-    let (pid, name) = proc_of(text.trim_end_matches('/'))?;
     let entries = |names: &[&str], dir: bool| names.iter().map(|n| (String::from(*n), dir)).collect::<Vec<_>>();
     let mut v = entries(&[".", ".."], true);
+    if text.trim_end_matches('/') == "/proc" {
+        // The processes the caller can see, and the links to itself.
+        v.extend(entries(&["self", "thread-self", "cpuinfo", "meminfo", "mounts"], false));
+        for p in user::processes() {
+            let local = super::ns::local(p.pid);
+            if local != 0 {
+                v.push((alloc::format!("{local}"), true));
+            }
+        }
+        return Some(v);
+    }
+    let (pid, name) = proc_of(text.trim_end_matches('/'))?;
     match name {
         "" => {
             v.extend(entries(&["fd", "fdinfo", "ns", "task"], true));
@@ -305,10 +316,10 @@ fn virtual_stat(text: &str, follow: bool) -> Option<Result<StatInfo, i64>> {
         // A namespace link leads to the namespace, whose number is its inode.
         let id = link.split_once('[').and_then(|(_, n)| n.trim_end_matches(']').parse().ok()).unwrap_or(0);
         let mode = if follow { 0o100444 } else { 0o120777 };
-        return Some(Ok(StatInfo { mode, size: 0, time: now, ino: id }));
+        return Some(Ok(StatInfo { mode, size: 0, time: now, ino: id, rdev: 0 }));
     }
     if virtual_dir(text).is_some() {
-        return Some(Ok(StatInfo { mode: 0o040555, size: 0, time: now, ino: 4 }));
+        return Some(Ok(StatInfo { mode: 0o040555, size: 0, time: now, ino: 4, rdev: 0 }));
     }
     if let Some(kind) = virtual_file(text) {
         return Some(stat_of_desc(&Desc::new(kind, 0)));
@@ -399,7 +410,9 @@ fn virtual_file(text: &str) -> Option<Kind> {
     }
 }
 
-pub fn sys_openat(dirfd: i32, path_ptr: u64, flags: u32) -> i64 {
+/// open / openat / creat: `mode` gives a file it creates its permissions
+/// (less the umask).
+pub fn sys_openat(dirfd: i32, path_ptr: u64, flags: u32, mode: u32) -> i64 {
     let text = match super::path_text_at(dirfd, path_ptr) {
         Ok(t) => t,
         Err(e) => return e,
@@ -415,7 +428,7 @@ pub fn sys_openat(dirfd: i32, path_ptr: u64, flags: u32) -> i64 {
         }) {
             Some(Some(dir)) => {
                 let path = dir_join(&dir, &text);
-                return open_path(&path, &show_path(&path), flags);
+                return open_path(&path, &show_path(&path), flags, mode);
             }
             Some(None) => return -err::ENOTDIR,
             None => return -err::EBADF,
@@ -425,14 +438,14 @@ pub fn sys_openat(dirfd: i32, path_ptr: u64, flags: u32) -> i64 {
         Ok(p) => p,
         Err(e) => return e,
     };
-    open_path(&path, &text, flags)
+    open_path(&path, &text, flags, mode)
 }
 
 fn dir_join(dir: &Path, rel: &str) -> Path {
-    Path::parse(rel, dir).unwrap_or_else(|_| dir.clone())
+    Path::parse(&super::no_volume(rel), dir).unwrap_or_else(|_| dir.clone())
 }
 
-fn open_path(path: &Path, text: &str, flags: u32) -> i64 {
+fn open_path(path: &Path, text: &str, flags: u32, mode: u32) -> i64 {
     let cloexec = flags & O_CLOEXEC != 0;
     let keep = flags & (O_NONBLOCK | O_APPEND | 3);
     if let Some(kind) = virtual_file(text) {
@@ -468,6 +481,7 @@ fn open_path(path: &Path, text: &str, flags: u32) -> i64 {
             if let Err(e) = fs::write_file(path, &[]) {
                 return -errno(user::fs_error(e));
             }
+            let _ = fs::set_mode(path, super::masked(mode));
         }
         Err(e) => return -errno(user::fs_error(e)),
     }
@@ -839,6 +853,9 @@ pub struct StatInfo {
     pub size: u64,
     pub time: u64,
     pub ino: u64,
+    /// The device a device file is (Linux's numbers: /dev/null is 1:3), as
+    /// glibc's makedev encodes it.
+    pub rdev: u64,
 }
 
 pub fn stat_of_path(path: &Path) -> Result<StatInfo, i64> {
@@ -852,20 +869,24 @@ pub fn lstat_of_path(path: &Path) -> Result<StatInfo, i64> {
 
 fn stat_info(path: &Path, st: Result<fs::Stat, justfs::Error>) -> Result<StatInfo, i64> {
     if matches!(st, Err(justfs::Error::NotFound)) && super::unix::is_bound(path) {
-        return Ok(StatInfo { mode: 0o140777, size: 0, time: crate::time::unix_now(), ino: 4 });
+        return Ok(StatInfo { mode: 0o140777, size: 0, time: crate::time::unix_now(), ino: 4, rdev: 0 });
     }
     // A generated /proc folder (glibc's opendir checks with fstat that it
     // opened a folder).
     if matches!(st, Err(justfs::Error::NotFound)) && virtual_dir(&path.inner).is_some() {
-        return Ok(StatInfo { mode: 0o040500, size: 0, time: crate::time::unix_now(), ino: 6 });
+        return Ok(StatInfo { mode: 0o040500, size: 0, time: crate::time::unix_now(), ino: 6, rdev: 0 });
     }
     let st = st.map_err(|e| -errno(user::fs_error(e)))?;
-    // Names without an extension are programs (Linux ones are); the
-    // shared libraries' names (libc.so.6) look like programs too.
+    // The permissions a program gave; without them, names without an
+    // extension are programs (Linux ones are), and the shared libraries'
+    // names (libc.so.6) look like programs too.
+    let given = (st.mode & justfs::MODE_SET != 0).then_some((st.mode & 0o7777) as u32);
     let mode = if st.kind == justfs::Kind::Dir {
-        0o040755
+        0o040000 | given.unwrap_or(0o755)
     } else if st.kind == justfs::Kind::Link {
         0o120777
+    } else if let Some(bits) = given {
+        0o100000 | bits
     } else if path.name().contains(".so") {
         0o100755
     } else if path.name().contains('.') {
@@ -878,29 +899,33 @@ fn stat_info(path: &Path, st: Result<fs::Stat, justfs::Error>) -> Result<StatInf
     // expects when it checks whether a library is already loaded).
     let vol = path.volume.to_ascii_lowercase().bytes().fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(b as u64));
     let ino = (vol << 32) | st.node as u64;
-    Ok(StatInfo { mode, size: st.size, time: st.modified + super::UNIX_2000, ino })
+    Ok(StatInfo { mode, size: st.size, time: st.modified + super::UNIX_2000, ino, rdev: 0 })
 }
 
 /// The stat of a /dev/shm path: the shared memory there, or ENOENT.
 fn shm_stat(text: &str) -> Option<Result<StatInfo, i64>> {
     let name = super::shm::named(text)?;
     Some(match super::shm::named_size(name) {
-        Some(size) => Ok(StatInfo { mode: 0o100600, size, time: crate::time::unix_now(), ino: 5 }),
+        Some(size) => Ok(StatInfo { mode: 0o100600, size, time: crate::time::unix_now(), ino: 5, rdev: 0 }),
         None => Err(-err::ENOENT),
     })
 }
 
 pub fn stat_of_desc(d: &Desc) -> Result<StatInfo, i64> {
-    let simple = |mode: u32| Ok(StatInfo { mode, size: 0, time: crate::time::unix_now(), ino: 2 });
+    let device = |mode: u32, rdev: u64| Ok(StatInfo { mode, size: 0, time: crate::time::unix_now(), ino: 2 + rdev, rdev });
+    let simple = |mode: u32| device(mode, 0);
     match &d.kind {
         Kind::File { path, .. } | Kind::Dir { path, .. } => stat_of_path(path),
         Kind::Virtual { data, sink, .. } => {
             let mode = if sink.is_some() { 0o100644 } else { 0o100444 };
-            Ok(StatInfo { mode, size: data.len() as u64, time: crate::time::unix_now(), ino: 3 })
+            Ok(StatInfo { mode, size: data.len() as u64, time: crate::time::unix_now(), ino: 3, rdev: 0 })
         }
-        Kind::Memfd { shm, .. } => Ok(StatInfo { mode: 0o100777, size: shm.size(), time: crate::time::unix_now(), ino: Arc::as_ptr(shm) as u64 >> 4 }),
-        Kind::Console => simple(0o020620),
-        Kind::Null | Kind::Zero | Kind::Random => simple(0o020666),
+        Kind::Memfd { shm, .. } => Ok(StatInfo { mode: 0o100777, size: shm.size(), time: crate::time::unix_now(), ino: Arc::as_ptr(shm) as u64 >> 4, rdev: 0 }),
+        // A terminal (pts/0), and the memory devices with their numbers.
+        Kind::Console => device(0o020620, 0x8800),
+        Kind::Null => device(0o020666, 0x103),
+        Kind::Zero => device(0o020666, 0x105),
+        Kind::Random => device(0o020666, 0x109),
         Kind::PipeRead(_) | Kind::PipeWrite(_) => simple(0o010600),
         Kind::Socket(_) | Kind::Unix(_) => simple(0o140777),
         Kind::Event(_) | Kind::Epoll(_) | Kind::Inotify(_) => simple(0o100600),
@@ -918,6 +943,7 @@ pub fn write_stat(ptr: u64, s: &StatInfo) -> i64 {
     put(buf, 8, s.ino);
     put(buf, 16, 1); // st_nlink
     buf[24..28].copy_from_slice(&s.mode.to_le_bytes());
+    put(buf, 40, s.rdev);
     put(buf, 48, s.size);
     put(buf, 56, 4096); // st_blksize
     put(buf, 64, s.size.div_ceil(512));
@@ -1009,6 +1035,12 @@ pub fn sys_statx(dirfd: i32, path_ptr: u64, flags: u64, buf: u64) -> i64 {
     for off in [64usize, 80, 96, 112] {
         out[off..off + 8].copy_from_slice(&s.time.to_le_bytes());
     }
+    // stx_rdev and stx_dev, as major and minor numbers (st_dev is 8:3).
+    let (major, minor) = ((s.rdev >> 8 & 0xfff) as u32, (s.rdev & 0xff | s.rdev >> 12 & !0xff) as u32);
+    out[128..132].copy_from_slice(&major.to_le_bytes());
+    out[132..136].copy_from_slice(&minor.to_le_bytes());
+    out[136..140].copy_from_slice(&8u32.to_le_bytes());
+    out[140..144].copy_from_slice(&3u32.to_le_bytes());
     0
 }
 
@@ -1072,13 +1104,55 @@ pub fn sys_getdents64(fd: i32, ptr: u64, cap: u64) -> i64 {
     off as i64
 }
 
-pub fn sys_mkdirat(dirfd: i32, path_ptr: u64) -> i64 {
+pub fn sys_mkdirat(dirfd: i32, path_ptr: u64, mode: u32) -> i64 {
+    let text = super::path_text_at(dirfd, path_ptr).unwrap_or_default();
+    if virtual_stat(&text, false).is_some() {
+        return -err::EEXIST;
+    }
     match path_arg(dirfd, path_ptr) {
+        // As on Linux: not over something that is there (a link too), and
+        // only in a folder that is.
+        Ok((p, _)) if fs::lstat(&p).is_ok() => -err::EEXIST,
+        Ok((p, _)) if !fs::is_dir(&p.parent()) => -err::ENOENT,
         Ok((p, _)) => match fs::make_dir(&p) {
+            Ok(()) => {
+                let _ = fs::set_mode(&p, super::masked(mode));
+                0
+            }
+            Err(e) => -errno(user::fs_error(e)),
+        },
+        Err(e) => e,
+    }
+}
+
+/// chmod / fchmodat (`flags` AT_SYMLINK_NOFOLLOW is refused, as by Linux
+/// for links) and fchmod: new permission bits.
+pub fn sys_fchmodat(dirfd: i32, path_ptr: u64, mode: u32) -> i64 {
+    let text = super::path_text_at(dirfd, path_ptr).unwrap_or_default();
+    if virtual_stat(&text, true).is_some() {
+        return -err::EPERM;
+    }
+    match path_arg(dirfd, path_ptr) {
+        Ok((p, _)) => match fs::set_mode(&p, (mode & 0o7777) as u16) {
             Ok(()) => 0,
             Err(e) => -errno(user::fs_error(e)),
         },
         Err(e) => e,
+    }
+}
+
+pub fn sys_fchmod(fd: i32, mode: u32) -> i64 {
+    match get(fd).map(|d| match &d.kind {
+        Kind::File { path, .. } | Kind::Dir { path, .. } => Some(path.clone()),
+        _ => None,
+    }) {
+        Some(Some(path)) => match fs::set_mode(&path, (mode & 0o7777) as u16) {
+            Ok(()) => 0,
+            Err(e) => -errno(user::fs_error(e)),
+        },
+        // Pipes, sockets, memfds: nothing kept.
+        Some(None) => 0,
+        None => -err::EBADF,
     }
 }
 
@@ -1091,8 +1165,10 @@ pub fn sys_unlinkat(dirfd: i32, path_ptr: u64) -> i64 {
         // A local socket's name.
         Ok((p, _)) if super::unix::unlink(&p) => 0,
         Ok((p, _)) => {
-            // Mappings of it keep what they map.
+            // Mappings of it keep what they map, and descriptors what they
+            // read and write.
             super::mm::forget_file(&p);
+            super::keep_open(&p);
             match fs::remove(&p) {
                 Ok(()) => 0,
                 Err(e) => -errno(user::fs_error(e)),
@@ -1125,6 +1201,15 @@ pub fn sys_readlinkat(dirfd: i32, path_ptr: u64, buf: u64, cap: u64) -> i64 {
     if let Some(link) = ns_link(&text) {
         return copy_link(&link, buf, cap);
     }
+    // /proc/self and /proc/thread-self are links to the caller's folders.
+    match text.trim_end_matches('/') {
+        "/proc/self" => return copy_link(&alloc::format!("{}", super::ns::local(me)), buf, cap),
+        "/proc/thread-self" => {
+            let tid = super::ns::local(super::thread::linux_tid(task::current_tid()));
+            return copy_link(&alloc::format!("{}/task/{tid}", super::ns::local(me)), buf, cap);
+        }
+        _ => {}
+    }
     let target = match proc_of(&text) {
         Some((pid, "exe")) => match super::with_state_of(pid, |st| st.exe.clone()) {
             Some(exe) => exe,
@@ -1141,6 +1226,8 @@ pub fn sys_readlinkat(dirfd: i32, path_ptr: u64, buf: u64, cap: u64) -> i64 {
                 None => return -err::ENOENT,
             }
         }
+        // Other virtual files and folders are not links.
+        _ if virtual_stat(&text, false).is_some() => return -err::EINVAL,
         _ => match path_arg(dirfd, path_ptr) {
             Ok((p, _)) => match fs::read_link(&p) {
                 Ok(t) => t,

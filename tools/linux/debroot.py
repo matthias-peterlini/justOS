@@ -345,6 +345,17 @@ def caches(out):
                     n += 1
         if n:
             made.append(f"{n} icon caches")
+    # Wine: libwine's script copies MinGW's zlib1.dll among Wine's own
+    # DLLs, marked as a builtin one (Debian's user32.dll needs it).
+    for mingw, arch in (("i686", "i386"), ("x86_64", "x86_64")):
+        src = os.path.join(out, f"usr/{mingw}-w64-mingw32/lib/zlib1.dll")
+        dst = os.path.join(out, lib, f"wine/{arch}-windows")
+        if os.path.exists(src) and os.path.isdir(dst):
+            with open(src, "rb") as f:
+                dll = f.read()
+            with open(os.path.join(dst, "zlib1.dll"), "wb") as f:
+                f.write(dll[:64] + b"Wine builtin DLL" + bytes(16) + dll[96:])
+            made.append(f"Wine's {arch} zlib1.dll")
     if made:
         print("debroot: made " + ", ".join(made))
 
@@ -386,6 +397,10 @@ def main():
                 os.remove(deb)
                 raise SystemExit(f"debroot: {n}: checksum mismatch")
         total += unpack(deb, a.out, a.keep_docs, names)
+    # /bin/sh is dash, as Debian's install scripts would make it.
+    sh = os.path.join(a.out, "usr", "bin", "sh")
+    if os.path.exists(os.path.join(a.out, "usr", "bin", "dash")) and not os.path.lexists(sh):
+        os.symlink("dash", sh)
     for d in ("bin", "sbin", "lib", "lib64"):
         os.makedirs(os.path.join(a.out, "usr", d), exist_ok=True)
         os.symlink(f"usr/{d}", os.path.join(a.out, d))

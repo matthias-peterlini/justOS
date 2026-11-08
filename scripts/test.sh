@@ -13,6 +13,8 @@
 # The image is not changed: the session runs on a copy. KEEP_DISK=FILE saves
 # that copy as it is after the session, to look at what the session wrote.
 #
+# QEMU_TIMEOUT (seconds, default 120) ends the machine however far the session got.
+#
 # Prints the whole session; exits non-zero if the kernel stopped.
 set -eu
 IMAGE=${1:?usage: test.sh <image> [commands-file] [qemu options...]}
@@ -57,7 +59,7 @@ fi
         sleep "$STEP_WAIT"
     done < "$COMMANDS"
     sleep 1
-} | timeout 120 "$QEMU" -m 512M -display none -no-reboot -monitor none -serial stdio \
+} | timeout "${QEMU_TIMEOUT:-120}" "$QEMU" -m 512M -display none -no-reboot -monitor none -serial stdio \
     $FIRMWARE $DRIVE "$@" > "$OUT" 2>&1 || true
 # Strip colours for readability.
 sed 's/\x1b\[[0-9;]*[A-Za-z]//g; s/\r//g' "$OUT"

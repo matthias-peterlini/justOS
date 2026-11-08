@@ -83,7 +83,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("uptime", "", "time since start"),
     ("log", "[lines]", "the system journal"),
     ("verbose", "[on|off]", "show debug messages on screen"),
-    ("strace", "[on|off]", "log every system call of Linux programs (in the journal)"),
+    ("strace", "[on|off] [failed] [n,n…]", "log the system calls of Linux programs (in the journal): only failed ones, only some calls"),
     ("export", "[NAME=value | NAME=]", "environment of the Linux programs started from now on"),
     ("echo", "<text>", "print text"),
     ("clear", "", "clear the screen (also: cls)"),
@@ -989,8 +989,10 @@ impl Shell {
                 println!("debug messages {}", if on { "on" } else { "off" });
             }
             "strace" => {
-                let on = !matches!(rest.first(), Some(&"off"));
-                crate::linux::TRACE.store(on, core::sync::atomic::Ordering::Relaxed);
+                let on = !rest.contains(&"off");
+                let failed = rest.contains(&"failed");
+                let only: Vec<u16> = rest.iter().flat_map(|w| w.split(',')).filter_map(|n| n.parse().ok()).collect();
+                crate::linux::set_trace(on, &only, failed);
                 println!("system call tracing {}", if on { "on" } else { "off" });
             }
             "export" => {

@@ -120,8 +120,29 @@ fn pump() {
     }
 }
 
+/// Whether the calling process may read the keyboard: background
+/// processes wait, as a stopped job would, until they are in front again.
+fn in_front() -> bool {
+    crate::user::in_foreground(task::current_pid())
+}
+
+/// Waits while the calling process is in the background; an error when a
+/// signal or a kill interrupts the wait.
+fn wait_front() -> Result<(), i64> {
+    while !in_front() {
+        if let Some(e) = super::signal::interrupted() {
+            return Err(e);
+        }
+        task::sleep_ms(20);
+    }
+    Ok(())
+}
+
 /// Bytes ready to read.
 pub fn pending() -> usize {
+    if !in_front() {
+        return 0;
+    }
     if lflag() & ICANON != 0 {
         // Cooked: a line is not complete until Enter, but poll() should
         // still wake when something was typed.
@@ -150,6 +171,14 @@ fn next_key() -> Option<KeyEvent> {
 }
 
 pub fn read(d: &super::fd::Desc, buf: &mut [u8]) -> i64 {
+    if !in_front() {
+        if d.nonblocking() {
+            return -err::EAGAIN;
+        }
+        if let Err(e) = wait_front() {
+            return e;
+        }
+    }
     if lflag() & ICANON != 0 {
         return read_line(buf);
     }
@@ -157,6 +186,9 @@ pub fn read(d: &super::fd::Desc, buf: &mut [u8]) -> i64 {
     let (vmin, vtime) = with(|t| (t.termios[17 + 6], t.termios[17 + 5]));
     let deadline = if vtime > 0 { Some(crate::time::uptime_ms() + vtime as u64 * 100) } else { None };
     loop {
+        if let Err(e) = wait_front() {
+            return e;
+        }
         pump();
         let n = with(|t| {
             let n = t.pending.len().min(buf.len());
@@ -198,6 +230,9 @@ fn read_line(buf: &mut [u8]) -> i64 {
     let mut line: Vec<u8> = Vec::new();
     loop {
         if let Some(e) = super::signal::interrupted() {
+            return e;
+        }
+        if let Err(e) = wait_front() {
             return e;
         }
         let Some(ev) = next_key() else {

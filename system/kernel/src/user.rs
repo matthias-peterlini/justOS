@@ -97,6 +97,10 @@ struct Process {
     shared_vm: bool,
     /// Its parent ended first: no one will wait for it.
     orphan: bool,
+    /// The job it belongs to, as a Linux process group in a terminal: the
+    /// pid of the program justOS started, which the processes it made
+    /// inherit; 0 after `setsid` (a daemon, off the terminal).
+    job: u32,
 }
 
 /// Where a process's paths start: its current folder and, after a Linux
@@ -257,6 +261,7 @@ fn start(image: Vec<u8>, name: String, args: &str, cwd: Path, kind: Kind, exe: &
             parent: None,
             shared_vm: false,
             orphan: false,
+            job: pid,
         },
     );
     let start = Box::into_raw(Box::new(Start { image, args: String::from(args), kind, exe: alloc::format!("{exe}") }));
@@ -296,10 +301,10 @@ fn next_pid() -> u32 {
 /// [`task::wake_new`] once its Linux state is set up.
 pub(crate) fn fork(child: TrapFrame, fs: u64, share_vm: bool, share_fs: bool) -> Result<(u32, Tid), Error> {
     let me = task::current_pid();
-    let (name, cr3, view, app, picked, exe, heap_next) = {
+    let (name, cr3, view, app, picked, exe, heap_next, job) = {
         let procs = PROCS.lock();
         let p = procs.get(&me).ok_or(Error::Unknown)?;
-        (p.name.clone(), p.cr3, p.fs.clone(), p.app.clone(), p.picked.clone(), p.exe.clone(), p.heap_next)
+        (p.name.clone(), p.cr3, p.fs.clone(), p.app.clone(), p.picked.clone(), p.exe.clone(), p.heap_next, p.job)
     };
     let view = if share_fs {
         view
@@ -328,6 +333,7 @@ pub(crate) fn fork(child: TrapFrame, fs: u64, share_vm: bool, share_fs: bool) ->
             parent: Some(me),
             shared_vm: share_vm,
             orphan: false,
+            job,
         },
     );
     let arg = Box::into_raw(Box::new(ThreadStart { frame: child, fs }));
@@ -809,6 +815,23 @@ pub fn run_applet_foreground(path: &Path, argv0: &str, args: &str, cwd: Path) ->
     let code = wait(pid);
     *FOREGROUND.lock() = None;
     Ok(code.unwrap_or(-1))
+}
+
+/// Whether a process is in the foreground job: the program the shell runs
+/// or one it made (orphans too). Only those read the keyboard as a
+/// terminal: the rest are background jobs, as the processes a program left
+/// behind are once it ended, and must not take the keys typed for the shell.
+pub fn in_foreground(pid: u32) -> bool {
+    let Some(fg) = *FOREGROUND.lock() else { return false };
+    PROCS.lock().get(&pid).is_some_and(|p| p.job == fg)
+}
+
+/// setsid: the calling process leaves its job and the terminal, as daemons
+/// do (Wine's server).
+pub fn leave_job() {
+    if let Some(p) = PROCS.lock().get_mut(&task::current_pid()) {
+        p.job = 0;
+    }
 }
 
 /// Ctrl+C: the foreground program and the processes it made stop, except

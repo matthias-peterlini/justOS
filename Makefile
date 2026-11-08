@@ -63,7 +63,7 @@ STORE    := $(notdir $(wildcard system/store/*))
 # locale, in libc-bin), what programs with windows link to talk to the
 # Wayland compositor, and GTK 3 (with the SVG loader for its icons, and
 # its demo programs gtk3-widget-factory and gtk3-demo).
-LINUX_PKGS ?= libc6 libc-bin libwayland-client0 libxkbcommon0 libgtk-3-0t64 librsvg2-common gtk-3-examples
+LINUX_PKGS ?= dash libc6 libc-bin libwayland-client0 libxkbcommon0 libgtk-3-0t64 librsvg2-common gtk-3-examples
 LINUX_DIST ?= trixie
 LINUX    := $(BUILD)/linux
 ROOT     := $(BUILD)/root

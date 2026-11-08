@@ -36,7 +36,20 @@ pub const DIRECT_EXTENTS: usize = 11;
 pub const INDIRECT_EXTENTS: usize = BLOCK_SIZE / 8;
 pub const MAX_EXTENTS: usize = DIRECT_EXTENTS + INDIRECT_EXTENTS;
 pub const DIRENT_SIZE: usize = 64;
-pub const MAX_NAME: usize = 56;
+/// The longest name, in bytes (as Linux's NAME_MAX; Windows programs, run
+/// through Wine, use long ones).
+pub const MAX_NAME: usize = 255;
+/// Name bytes in an entry's slot. A longer name goes on in the slots right
+/// after it, each marked [`CONT`] in place of a node and holding
+/// [`CONT_NAME`] bytes more; short names take one slot, as they always did.
+const HEAD_NAME: usize = 56;
+const CONT_NAME: usize = DIRENT_SIZE - 4;
+const CONT: NodeId = NodeId::MAX;
+
+/// The slots an entry with a name of `len` bytes takes.
+fn slots_for(len: usize) -> usize {
+    1 + len.saturating_sub(HEAD_NAME).div_ceil(CONT_NAME)
+}
 pub const ROOT: NodeId = 1;
 
 pub type NodeId = u32;
@@ -171,6 +184,10 @@ pub const FLAG_SYSTEM: u8 = 1;
 pub const FLAG_HIDDEN: u8 = 2;
 pub const FLAG_READONLY: u8 = 4;
 
+/// `Node::mode`: set on a node whose Unix permission bits (the low 12) were
+/// given; a node without it has none (programs see the usual defaults).
+pub const MODE_SET: u16 = 0x8000;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Extent {
     pub start: u32,
@@ -182,6 +199,8 @@ pub struct Extent {
 pub struct Node {
     pub kind: Kind,
     pub flags: u8,
+    /// Unix permission bits with [`MODE_SET`], or 0.
+    pub mode: u16,
     pub parent: NodeId,
     pub size: u64,
     pub created: u64,
@@ -196,6 +215,7 @@ impl Node {
         Node {
             kind,
             flags: 0,
+            mode: 0,
             parent,
             size: 0,
             created: now,
@@ -215,6 +235,7 @@ impl Node {
         Node {
             kind: Kind::from_u8(b[0]),
             flags: b[1],
+            mode: le16(b, 124),
             extent_count: le16(b, 2),
             parent: le32(b, 4),
             size: le64(b, 8),
@@ -239,6 +260,7 @@ impl Node {
             put32(b, 36 + i * 8, e.len);
         }
         put32(b, 120, self.indirect);
+        put16(b, 124, self.mode);
     }
 
     pub fn is_dir(&self) -> bool {
@@ -326,7 +348,9 @@ pub fn valid_name(name: &str) -> Result<()> {
     if name.len() > MAX_NAME {
         return Err(Error::NameTooLong);
     }
-    if name.chars().any(|c| c == '/' || c == ':' || c == '\\' || c.is_control()) {
+    // A ':' is the volume's only before the path's first '/' ("sys:/a"),
+    // so names may have one (as on Linux: Wine's drives are "c:" links).
+    if name.chars().any(|c| c == '/' || c == '\\' || c.is_control()) {
         return Err(Error::InvalidName);
     }
     Ok(())
@@ -894,16 +918,63 @@ impl<D: BlockDevice> Fs<D> {
         Ok(None)
     }
 
+    /// Goes through a directory's entries, each name put together from the
+    /// slots it takes, until `f` returns true for one; returns its first
+    /// slot. Slots that go on a name no entry starts are passed over.
+    fn scan_entries(&mut self, node: &Node, mut f: impl FnMut(NodeId, Kind, &[u8]) -> bool) -> Result<Option<usize>> {
+        let mut name = [0u8; MAX_NAME];
+        // The entry whose name is being put together: first slot, node,
+        // kind, name length and bytes so far.
+        let mut open: Option<(usize, NodeId, Kind, usize, usize)> = None;
+        let mut slot = 0;
+        let mut hit = None;
+        self.scan_dir(node, |e| {
+            let at = slot;
+            slot += 1;
+            let id = le32(e, 0);
+            if id == CONT {
+                let Some((first, id, kind, len, have)) = open.as_mut() else { return false };
+                let n = (*len - *have).min(CONT_NAME);
+                name[*have..*have + n].copy_from_slice(&e[4..4 + n]);
+                *have += n;
+                if *have < *len {
+                    return false;
+                }
+                let (first, id, kind, len) = (*first, *id, *kind, *len);
+                open = None;
+                if f(id, kind, &name[..len]) {
+                    hit = Some(first);
+                    return true;
+                }
+                return false;
+            }
+            open = None;
+            if id == 0 {
+                return false;
+            }
+            let len = e[5] as usize;
+            let n = len.min(HEAD_NAME);
+            name[..n].copy_from_slice(&e[8..8 + n]);
+            let kind = Kind::from_u8(e[4]);
+            if n < len {
+                open = Some((at, id, kind, len, n));
+                return false;
+            }
+            if f(id, kind, &name[..len]) {
+                hit = Some(at);
+                return true;
+            }
+            false
+        })?;
+        Ok(hit)
+    }
+
     /// Lists a directory.
     pub fn read_dir(&mut self, dir: NodeId) -> Result<Vec<DirEntry>> {
         let node = self.dir_node(dir)?;
         let mut out = Vec::new();
-        self.scan_dir(&node, |e| {
-            let id = le32(e, 0);
-            if id != 0 {
-                let len = (e[5] as usize).min(MAX_NAME);
-                out.push(DirEntry { name: String::from_utf8_lossy(&e[8..8 + len]).into_owned(), node: id, kind: Kind::from_u8(e[4]) });
-            }
+        self.scan_entries(&node, |id, kind, name| {
+            out.push(DirEntry { name: String::from_utf8_lossy(name).into_owned(), node: id, kind });
             false
         })?;
         Ok(out)
@@ -920,12 +991,10 @@ impl<D: BlockDevice> Fs<D> {
         let node = self.dir_node(dir)?;
         let want = name.as_bytes();
         let mut found = (0, Kind::Free);
-        self.scan_dir(&node, |e| {
-            let id = le32(e, 0);
-            let len = (e[5] as usize).min(MAX_NAME);
-            let hit = id != 0 && e[8..8 + len].eq_ignore_ascii_case(want);
+        self.scan_entries(&node, |id, kind, have| {
+            let hit = have.eq_ignore_ascii_case(want);
             if hit {
-                found = (id, Kind::from_u8(e[4]));
+                found = (id, kind);
             }
             hit
         })?
@@ -1013,19 +1082,50 @@ impl<D: BlockDevice> Fs<D> {
 
     fn dir_insert(&mut self, dir: NodeId, name: &str, id: NodeId, kind: Kind) -> Result<()> {
         let mut node = self.node(dir)?;
-        let mut entry = [0u8; DIRENT_SIZE];
+        let name = name.as_bytes();
+        if name.len() > MAX_NAME {
+            return Err(Error::NameTooLong);
+        }
+        let need = slots_for(name.len());
+        let mut entry = vec![0u8; need * DIRENT_SIZE];
         put32(&mut entry, 0, id);
         entry[4] = kind as u8;
         entry[5] = name.len() as u8;
-        entry[8..8 + name.len()].copy_from_slice(name.as_bytes());
-        let slot = self.scan_dir(&node, |e| le32(e, 0) == 0)?.unwrap_or(node.size as usize / DIRENT_SIZE);
+        let head = name.len().min(HEAD_NAME);
+        entry[8..8 + head].copy_from_slice(&name[..head]);
+        for (i, part) in name[head..].chunks(CONT_NAME).enumerate() {
+            let at = (i + 1) * DIRENT_SIZE;
+            put32(&mut entry, at, CONT);
+            entry[at + 4..at + 4 + part.len()].copy_from_slice(part);
+        }
+        // The first run of free slots long enough, else the end (with the
+        // free slots there).
+        let mut run = 0;
+        let found = self.scan_dir(&node, |e| {
+            run = if le32(e, 0) == 0 { run + 1 } else { 0 };
+            run == need
+        })?;
+        let slot = match found {
+            Some(last) => last + 1 - need,
+            None => node.size as usize / DIRENT_SIZE - run,
+        };
         self.write_node_data(dir, &mut node, (slot * DIRENT_SIZE) as u64, &entry)
     }
 
     fn dir_remove(&mut self, dir: NodeId, id: NodeId) -> Result<()> {
         let mut node = self.node(dir)?;
-        let slot = self.scan_dir(&node, |e| le32(e, 0) == id)?.ok_or(Error::NotFound)?;
-        self.write_node_data(dir, &mut node, (slot * DIRENT_SIZE) as u64, &[0u8; DIRENT_SIZE])
+        let mut len = 0;
+        let slot = self
+            .scan_dir(&node, |e| {
+                let hit = le32(e, 0) == id;
+                if hit {
+                    len = e[5] as usize;
+                }
+                hit
+            })?
+            .ok_or(Error::NotFound)?;
+        let zero = vec![0u8; slots_for(len) * DIRENT_SIZE];
+        self.write_node_data(dir, &mut node, (slot * DIRENT_SIZE) as u64, &zero)
     }
 
     /// Creates an empty file or directory in `dir`.
@@ -1051,12 +1151,28 @@ impl<D: BlockDevice> Fs<D> {
         Ok(id)
     }
 
-    /// Creates every missing directory of `path`.
+    /// Creates every missing directory of `path`, following links on the
+    /// way as `mkdir -p` does (Wine reaches its C: drive through one).
     pub fn create_dirs(&mut self, path: &str) -> Result<NodeId> {
         let mut id = ROOT;
-        for part in path.split('/').filter(|p| !p.is_empty()) {
-            id = match self.find(id, part) {
-                Ok(child) => {
+        let mut budget = MAX_LINKS;
+        for part in path.split('/').filter(|p| !p.is_empty() && *p != ".") {
+            if part == ".." {
+                id = self.node(id)?.parent;
+                continue;
+            }
+            id = match self.find_entry(id, part) {
+                Ok((child, kind)) => {
+                    let child = if kind == Kind::Link {
+                        if budget == 0 {
+                            return Err(Error::Loop);
+                        }
+                        budget -= 1;
+                        let target = self.read_link(child)?;
+                        self.walk(id, &target, true, &mut budget)?
+                    } else {
+                        child
+                    };
                     if !self.node(child)?.is_dir() {
                         return Err(Error::NotDir);
                     }
@@ -1119,6 +1235,14 @@ impl<D: BlockDevice> Fs<D> {
         self.check_writable()?;
         let mut node = self.node(id)?;
         node.flags = flags;
+        self.write_node(id, &node)
+    }
+
+    /// Gives a node Unix permission bits (`mode & 0o7777`).
+    pub fn set_mode(&mut self, id: NodeId, mode: u16) -> Result<()> {
+        self.check_writable()?;
+        let mut node = self.node(id)?;
+        node.mode = MODE_SET | (mode & 0o7777);
         self.write_node(id, &node)
     }
 
@@ -1290,9 +1414,53 @@ mod tests {
         assert_eq!(fs.lookup("a"), Err(Error::Loop));
         fs.symlink("gone", "nowhere").unwrap();
         assert_eq!(fs.lookup("gone"), Err(Error::NotFound));
+        // Folders are made through links on the way (Wine's "c:").
+        fs.create_dirs("prefix/drive_c").unwrap();
+        fs.symlink("prefix/c:", "drive_c").unwrap();
+        fs.create_dirs("prefix/c:/users/root").unwrap();
+        let made = fs.lookup("prefix/drive_c/users/root").unwrap();
+        assert!(fs.node(made).unwrap().is_dir());
+        let link = fs.lookup_link("prefix/c:").unwrap();
+        assert!(fs.node(link).unwrap().is_link());
+        assert_eq!(fs.create_dirs("lib/x86_64-linux-gnu/libz.so.1/x"), Err(Error::NotDir));
         // Removing a link leaves the target.
         fs.remove(ROOT, "lib").unwrap();
         assert!(fs.lookup("usr/lib").is_ok());
+        assert_eq!(fs.check().unwrap(), 0);
+    }
+
+    #[test]
+    fn long_names() {
+        let mut fs = fs(1024);
+        let long = |i: usize| alloc::format!("amd64_microsoft.windows.common-controls_6595b64144ccf1df_6.0.{i}_none_deadbeef");
+        fs.create_dirs("winsxs").unwrap();
+        for i in 0..40 {
+            fs.create_dirs(&alloc::format!("winsxs/{}", long(i))).unwrap();
+        }
+        let max = "x".repeat(MAX_NAME);
+        fs.write_file(&alloc::format!("winsxs/{max}"), b"255").unwrap();
+        assert_eq!(fs.write_file(&alloc::format!("winsxs/{max}y"), b""), Err(Error::NameTooLong));
+        assert_eq!(fs.read_file(&alloc::format!("winsxs/{}", max.to_uppercase())).unwrap(), b"255");
+        let dir = fs.lookup("winsxs").unwrap();
+        let mut names: Vec<String> = fs.read_dir(dir).unwrap().into_iter().map(|e| e.name).collect();
+        names.sort();
+        assert_eq!(names.len(), 41);
+        assert!(names.contains(&long(7)) && names.contains(&max));
+        // Removing frees all the slots; a short name and a long one fit again.
+        for i in (0..40).step_by(2) {
+            fs.remove(dir, &long(i)).unwrap();
+        }
+        let size = fs.node(dir).unwrap().size;
+        fs.create_dirs("winsxs/short").unwrap();
+        fs.create_dirs(&alloc::format!("winsxs/{}", long(100))).unwrap();
+        assert_eq!(fs.node(dir).unwrap().size, size);
+        assert!(fs.lookup(&alloc::format!("winsxs/{}", long(3))).is_ok());
+        assert_eq!(fs.lookup(&alloc::format!("winsxs/{}", long(4))), Err(Error::NotFound));
+        fs.rename(dir, &long(3), dir, "renamed").unwrap();
+        fs.rename(dir, "short", dir, &long(200)).unwrap();
+        assert!(fs.lookup("winsxs/renamed").is_ok());
+        assert!(fs.lookup(&alloc::format!("winsxs/{}", long(200))).is_ok());
+        assert_eq!(fs.read_dir(dir).unwrap().len(), 23);
         assert_eq!(fs.check().unwrap(), 0);
     }
 

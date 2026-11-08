@@ -143,6 +143,8 @@ pub struct LinuxState {
     pub pending: Vec<signal::Pending>,
     /// The program, as a Linux path.
     pub exe: String,
+    /// The permissions files and folders it makes do not get.
+    pub umask: u32,
     /// What the loader placed (the program's and the dynamic loader's
     /// segments, the stack), for /proc/self/maps: start, end, protection,
     /// file offset and name.
@@ -169,6 +171,7 @@ impl LinuxState {
             sigthreads: BTreeMap::new(),
             pending: Vec::new(),
             exe: String::new(),
+            umask: 0o022,
             images: Vec::new(),
         }
     }
@@ -234,11 +237,78 @@ pub fn fork_state(child: u32, tid: task::Tid) {
         sigthreads: signal::forked(st, me, tid),
         pending: Vec::new(),
         exe: st.exe.clone(),
+        umask: st.umask,
         images: st.images.clone(),
     });
     if let Some(c) = copy {
         states.insert(child, c);
     }
+}
+
+/// sendmmsg / recvmmsg: several sendmsg or recvmsg calls, each message's
+/// length written after its header (struct mmsghdr). Receiving waits only
+/// for the first message; it stops at the first error after that.
+fn sys_mmsg(fd: i32, vec: u64, count: u64, flags: u64, send: bool) -> i64 {
+    const MSG_DONTWAIT: u64 = 0x40;
+    const MSG_WAITFORONE: u64 = 0x1_0000;
+    let mut done = 0u64;
+    while done < count.min(1024) {
+        let hdr = vec + done * 64;
+        let f = if !send && done > 0 { (flags & !MSG_WAITFORONE) | MSG_DONTWAIT } else { flags & !MSG_WAITFORONE };
+        let r = if send { sock::sys_sendmsg(fd, hdr, f) } else { sock::sys_recvmsg(fd, hdr, f) };
+        if r < 0 {
+            return if done > 0 { done as i64 } else { r };
+        }
+        if let Ok(len) = user_bytes(hdr + 56, 4) {
+            len.copy_from_slice(&(r as u32).to_le_bytes());
+        }
+        done += 1;
+    }
+    done as i64
+}
+
+/// The file at `path` is losing its name while descriptors still have it
+/// open: as Linux keeps such a file until the last one closes (temporary
+/// files, and Wine's shared memory, are made like that), its contents move
+/// to memory and every descriptor of it, in every process, to that memory.
+pub fn keep_open(path: &Path) {
+    let same = |d: &fd::Desc| matches!(&d.kind, fd::Kind::File { path: p, .. } if p == path);
+    let mut open: Vec<Arc<fd::Desc>> = Vec::new();
+    for st in STATES.lock().values() {
+        for (d, _) in st.fds.values() {
+            if same(d) && !open.iter().any(|o| Arc::ptr_eq(o, d)) {
+                open.push(d.clone());
+            }
+        }
+    }
+    if open.is_empty() {
+        return;
+    }
+    // Read outside the lock; each open description keeps its position.
+    let data = crate::fs::read_file(path).unwrap_or_default();
+    let shm = shm::Shm::new(alloc::format!("{} (deleted)", show_path(path)), 0, 0);
+    let _ = shm.write_at(0, &data);
+    let moved: Vec<(Arc<fd::Desc>, Arc<fd::Desc>)> = open
+        .into_iter()
+        .map(|d| {
+            let pos = match &d.kind {
+                fd::Kind::File { pos, .. } => *pos.lock(),
+                _ => 0,
+            };
+            let flags = d.flags.load(core::sync::atomic::Ordering::Relaxed);
+            let new = fd::Desc::new(fd::Kind::Memfd { shm: shm.clone(), pos: IrqLock::new(pos) }, flags);
+            (d, new)
+        })
+        .collect();
+    let mut old = Vec::new();
+    for st in STATES.lock().values_mut() {
+        for (d, _) in st.fds.values_mut() {
+            if let Some((_, new)) = moved.iter().find(|(o, _)| Arc::ptr_eq(o, d)) {
+                old.push(core::mem::replace(d, new.clone()));
+            }
+        }
+    }
+    drop(old);
 }
 
 // ----------------------------------------------------------------------------
@@ -328,7 +398,17 @@ pub fn linux_path(text: &str) -> Result<Path, i64> {
     // An absolute Linux path is rooted at the volume; a relative one hangs
     // off the current folder.
     let base = if text.starts_with('/') { Path::root(&cwd.volume) } else { cwd };
-    Path::parse(text, &base).map_err(|e| -errno(user::fs_error(e)))
+    Path::parse(&no_volume(text), &base).map_err(|e| -errno(user::fs_error(e)))
+}
+
+/// A Linux path never names a volume: a relative one whose first name has
+/// a ':' ("c:") starts with "./" so that it is not read as one.
+pub fn no_volume(text: &str) -> alloc::borrow::Cow<'_, str> {
+    if !text.starts_with('/') && text.split('/').next().is_some_and(|first| first.contains(':')) {
+        alloc::borrow::Cow::Owned(alloc::format!("./{text}"))
+    } else {
+        alloc::borrow::Cow::Borrowed(text)
+    }
 }
 
 /// Turns a justOS path back into the Linux path a program sees ("/a/b").
@@ -396,13 +476,18 @@ pub fn extra_env() -> Vec<String> {
     EXTRA_ENV.lock().clone()
 }
 
+/// Permissions `mode` less the caller's umask, for a file or folder it makes.
+pub fn masked(mode: u32) -> u16 {
+    (mode & 0o7777 & !with_state(|st| st.umask)) as u16
+}
+
 /// The environment of a Linux program justOS starts (one started by
 /// another Linux program gets what that one passes to execve).
 fn default_env() -> Vec<String> {
     let (cols, rows) = crate::console::size();
     let extra = extra_env();
     let set = |v: &String| extra.iter().any(|e| e.split_once('=').map(|(n, _)| n) == v.split_once('=').map(|(n, _)| n));
-    ["PATH=/apps:/usr/local/bin:/usr/bin:/bin", "HOME=/home", "USER=root", "LANG=C.UTF-8", "TERM=xterm", "SHELL=/bin/sh", "TMPDIR=/home/tmp"]
+    ["PATH=/apps:/usr/local/bin:/usr/bin:/bin", "HOME=/home", "USER=root", "LANG=C.UTF-8", "TERM=xterm", "SHELL=/bin/sh"]
         .iter()
         .map(|s| s.to_string())
         .chain([alloc::format!("COLUMNS={cols}"), alloc::format!("LINES={rows}")])
@@ -707,6 +792,39 @@ fn build_stack(info: &Loaded, interp_base: u64, argv: &[String], envp: &[String]
 /// the ones that may wait when they start, all of them with their result.
 pub static TRACE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
+/// The calls traced (`strace 83,258`): a bit per call number, all when none
+/// is set.
+static TRACE_ONLY: [core::sync::atomic::AtomicU64; 8] = [const { core::sync::atomic::AtomicU64::new(0) }; 8];
+
+/// Only calls that failed are traced (`strace failed`).
+static TRACE_FAILED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Sets what `strace` logs: the calls (none: all) and whether only failures.
+pub fn set_trace(on: bool, only: &[u16], failed: bool) {
+    use core::sync::atomic::Ordering::Relaxed;
+    for word in &TRACE_ONLY {
+        word.store(0, Relaxed);
+    }
+    for &n in only {
+        if let Some(word) = TRACE_ONLY.get(n as usize / 64) {
+            word.fetch_or(1 << (n % 64), Relaxed);
+        }
+    }
+    TRACE_FAILED.store(failed, Relaxed);
+    TRACE.store(on, Relaxed);
+}
+
+fn traced(n: u64) -> bool {
+    use core::sync::atomic::Ordering::Relaxed;
+    if !TRACE.load(Relaxed) {
+        return false;
+    }
+    if TRACE_ONLY.iter().all(|w| w.load(Relaxed) == 0) {
+        return true;
+    }
+    TRACE_ONLY.get(n as usize / 64).is_some_and(|w| w.load(Relaxed) & (1 << (n % 64)) != 0)
+}
+
 /// Calls that may wait: traced when they start too, to see where a program
 /// stopped.
 fn may_wait(n: u64) -> bool {
@@ -716,8 +834,9 @@ fn may_wait(n: u64) -> bool {
 /// The file name a call is about, for the trace (` "/usr/lib/…"`).
 fn traced_path(n: u64, a: &[u64; 6]) -> String {
     let ptr = match n {
-        2 | 4 | 6 | 21 | 59 | 80 | 83 | 87 | 89 => a[0],
-        257 | 262 | 263 | 267 | 269 | 332 | 439 => a[1],
+        2 | 4 | 6 | 21 | 59 | 80 | 82 | 83 | 84 | 85 | 87 | 89 | 90 => a[0],
+        257 | 258 | 262 | 263 | 264 | 267 | 268 | 269 | 316 | 332 | 439 | 452 => a[1],
+        266 => a[2],
         _ => return String::new(),
     };
     user::user_cstr(ptr, 200).map(|s| alloc::format!(" \"{s}\"")).unwrap_or_default()
@@ -743,9 +862,10 @@ pub fn syscall(frame: &mut TrapFrame) {
         return;
     }
     let a = [frame.rdi, frame.rsi, frame.rdx, frame.r10, frame.r8, frame.r9];
-    let trace = TRACE.load(core::sync::atomic::Ordering::Relaxed);
+    let trace = traced(n);
+    let failed_only = TRACE_FAILED.load(core::sync::atomic::Ordering::Relaxed);
     let named = if trace { traced_path(n, &a) } else { String::new() };
-    if trace && may_wait(n) {
+    if trace && !failed_only && may_wait(n) {
         crate::debug!("strace", "{}[{}] {n}({:#x}, {:#x}, {:#x}, {:#x}){named} ...", user::current_name(), task::current_tid(), a[0], a[1], a[2], a[3]);
     }
     // clone, fork and vfork need the caller's registers for the child.
@@ -759,7 +879,7 @@ pub fn syscall(frame: &mut TrapFrame) {
     if ret == -err::ENOSYS && n != 435 {
         crate::debug!("linux", "{}: unimplemented syscall {n}", user::current_name());
     }
-    if trace {
+    if trace && (!failed_only || (-4095..0).contains(&ret)) {
         crate::debug!("strace", "{}[{}] {n}({:#x}, {:#x}, {:#x}, {:#x}){named} = {ret:#x}", user::current_name(), task::current_tid(), a[0], a[1], a[2], a[3]);
     }
     frame.rax = ret as u64;
@@ -775,7 +895,7 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
     match n {
         0 => fd::sys_read(fd0, a[1], a[2]),
         1 => fd::sys_write(fd0, a[1], a[2]),
-        2 => fd::sys_openat(fd::AT_FDCWD, a[0], a[1] as u32),
+        2 => fd::sys_openat(fd::AT_FDCWD, a[0], a[1] as u32, a[2] as u32),
         3 => fd::sys_close(fd0),
         4 => fd::sys_newfstatat(fd::AT_FDCWD, a[0], a[1], 0),         // stat
         6 => fd::sys_newfstatat(fd::AT_FDCWD, a[0], a[1], fd::AT_SYMLINK_NOFOLLOW), // lstat
@@ -817,6 +937,11 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         45 => sock::sys_recvfrom(fd0, a[1], a[2], a[3], a[4], a[5]),
         46 => sock::sys_sendmsg(fd0, a[1], a[2]),
         47 => sock::sys_recvmsg(fd0, a[1], a[2]),
+        299 => sys_mmsg(fd0, a[1], a[2], a[3], false), // recvmmsg
+        307 => sys_mmsg(fd0, a[1], a[2], a[3], true),  // sendmmsg
+        // Extended attributes: the volumes keep none (as a file system
+        // without them answers).
+        188..=199 => -err::EOPNOTSUPP,
         48 => sock::sys_shutdown(fd0, a[1]),
         49 => sock::sys_bind(fd0, a[1], a[2]),
         50 => sock::sys_listen(fd0, a[1]),
@@ -847,13 +972,16 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         80 => sys_chdir(a[0]),
         81 => sys_fchdir(fd0),
         82 => fd::sys_renameat(fd::AT_FDCWD, a[0], fd::AT_FDCWD, a[1]),
-        83 => fd::sys_mkdirat(fd::AT_FDCWD, a[0]),
+        83 => fd::sys_mkdirat(fd::AT_FDCWD, a[0], a[1] as u32),
         84 | 87 => fd::sys_unlinkat(fd::AT_FDCWD, a[0]),
+        85 => fd::sys_openat(fd::AT_FDCWD, a[0], fd::O_CREAT | fd::O_WRONLY | fd::O_TRUNC, a[1] as u32), // creat
         86 => -err::EPERM, // link: no hard links
         88 => fd::sys_symlinkat(a[0], fd::AT_FDCWD, a[1]),
         89 => fd::sys_readlinkat(fd::AT_FDCWD, a[0], a[1], a[2]),
-        90..=94 => 0, // chmod, fchmod, chown, fchown, lchown
-        95 => 0o022,  // umask
+        90 => fd::sys_fchmodat(fd::AT_FDCWD, a[0], a[1] as u32),
+        91 => fd::sys_fchmod(fd0, a[1] as u32),
+        92..=94 => 0, // chown, fchown, lchown
+        95 => with_state(|st| core::mem::replace(&mut st.umask, a[0] as u32 & 0o777)) as i64,
         96 => sys_gettimeofday(a[0]),
         97 => sys_getrlimit(a[0], a[1]),
         98 => zero_out(a[1], 144), // getrusage
@@ -861,7 +989,12 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         100 => zero_out(a[0], 32), // times
         102 | 107 => ns::uid() as i64, // getuid, geteuid
         104 | 108 => ns::gid() as i64, // getgid, getegid
-        105 | 106 | 109 | 112 | 113 | 114 | 116 | 117 | 119 => 0, // set*id, setpgid, setsid...
+        112 => {
+            // setsid: a new session, without the terminal.
+            user::leave_job();
+            ns::local(task::current_pid()) as i64
+        }
+        105 | 106 | 109 | 113 | 114 | 116 | 117 | 119 => 0, // set*id, setpgid...
         110 => ns::local(user::parent_pid()) as i64,
         111 | 121 | 124 => ns::local(task::current_pid()) as i64, // getpgrp, getpgid, getsid
         115 => 0,                                                 // getgroups: none
@@ -905,15 +1038,16 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         232 => poll::sys_epoll_wait(fd0, a[1], a[2] as i32, a[3] as i32 as i64),
         233 => poll::sys_epoll_ctl(fd0, a[1] as u32, a[2] as i32, a[3]),
         234 => signal::sys_tgkill(a[0] as i64, a[1] as i64, a[2]),
-        257 => fd::sys_openat(fd0, a[1], a[2] as u32),
-        258 => fd::sys_mkdirat(fd0, a[1]),
+        257 => fd::sys_openat(fd0, a[1], a[2] as u32, a[3] as u32),
+        258 => fd::sys_mkdirat(fd0, a[1], a[2] as u32),
         262 => fd::sys_newfstatat(fd0, a[1], a[2], a[3]),
         263 => fd::sys_unlinkat(fd0, a[1]),
         264 | 316 => fd::sys_renameat(fd0, a[1], a[2] as i32, a[3]),
         265 => -err::EPERM, // linkat
         266 => fd::sys_symlinkat(a[0], a[1] as i32, a[2]),
         267 => fd::sys_readlinkat(fd0, a[1], a[2], a[3]),
-        268 | 260 | 280 => 0,     // fchmodat, fchownat, utimensat
+        268 | 452 => fd::sys_fchmodat(fd0, a[1], a[2] as u32), // fchmodat, fchmodat2
+        260 | 280 => 0,           // fchownat, utimensat
         269 | 439 => fd::sys_faccessat(fd0, a[1]),
         270 => poll::sys_pselect6(a[0], a[1], a[2], a[3], a[4]),
         271 => poll::sys_ppoll(a[0], a[1], a[2]),
@@ -1172,7 +1306,8 @@ fn sys_brk(req: u64) -> i64 {
         let new = mem::align_up(req, PAGE_SIZE);
         let old = mem::align_up(st.brk_cur, PAGE_SIZE);
         if new > old {
-            if user::map_fixed(old, new - old).is_err() {
+            // The heap does not grow over other mappings (malloc then uses mmap).
+            if !mm::free_range(st, old, new) || user::map_fixed(old, new - old).is_err() {
                 return st.brk_cur as i64;
             }
         } else if new < old {
