@@ -238,6 +238,11 @@ fn send(pid: u32, tid: Option<Tid>, sig: u32, info: [u8; 32]) -> bool {
     true
 }
 
+/// Ends process `pid` (SIGKILL from the kernel).
+pub fn kill(pid: u32) {
+    send(pid, None, SIGKILL, info(SIGKILL, SI_KERNEL, 0));
+}
+
 /// Ctrl+C for a Linux program: one that handles SIGINT gets it, one that
 /// ignores it carries on (true for both). False: it should stop.
 pub fn interrupt(pid: u32) -> bool {
@@ -256,7 +261,8 @@ pub fn interrupt(pid: u32) -> bool {
 /// SA_NOCLDWAIT): the child goes right away.
 pub fn child_ended(parent: u32, child: u32, code: i64) -> bool {
     let killed = code < -128;
-    let mut i = info(SIGCHLD, if killed { CLD_KILLED } else { CLD_EXITED }, child);
+    let seen = super::ns::local_in(parent, child);
+    let mut i = info(SIGCHLD, if killed { CLD_KILLED } else { CLD_EXITED }, seen);
     let status = if killed { (-code - 128) as u32 } else { code as u32 & 0xff };
     i[24..28].copy_from_slice(&status.to_le_bytes());
     with_state_of(parent, |st| {
@@ -793,15 +799,16 @@ pub fn sys_kill(pid: i64, sig: u64) -> i64 {
         return -err::EINVAL;
     }
     let me = task::current_pid();
-    let target = match pid {
-        0 => me,
+    let named = match pid {
+        0 => Some(me),
         // Every process: not something a program here gets to do.
         -1 => return 0,
         // A process group: the one led by that process.
-        p if p < 0 => p.unsigned_abs() as u32,
-        p => p as u32,
+        p if p < 0 => super::ns::global(p.unsigned_abs() as u32),
+        p => super::ns::global(p as u32),
     };
-    if send(target, None, sig as u32, info(sig as u32, SI_USER, me)) {
+    let Some(target) = named else { return -err::ESRCH };
+    if send(target, None, sig as u32, info(sig as u32, SI_USER, super::ns::local_in(target, me))) {
         0
     } else {
         -err::ESRCH
@@ -813,11 +820,12 @@ pub fn sys_tgkill(tgid: i64, ltid: i64, sig: u64) -> i64 {
     if sig > 64 || ltid <= 0 {
         return -err::EINVAL;
     }
-    let Some((pid, tid)) = thread_of(ltid as u32) else { return -err::ESRCH };
-    if tgid > 0 && tgid as u32 != pid {
+    let Some((pid, tid)) = super::ns::global(ltid as u32).and_then(thread_of) else { return -err::ESRCH };
+    if tgid > 0 && super::ns::global(tgid as u32) != Some(pid) {
         return -err::ESRCH;
     }
-    if send(pid, Some(tid), sig as u32, info(sig as u32, SI_TKILL, task::current_pid())) {
+    let me = super::ns::local_in(pid, task::current_pid());
+    if send(pid, Some(tid), sig as u32, info(sig as u32, SI_TKILL, me)) {
         0
     } else {
         -err::ESRCH

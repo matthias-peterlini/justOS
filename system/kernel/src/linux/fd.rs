@@ -51,8 +51,9 @@ pub struct EventFd {
 pub enum Kind {
     File { path: Path, pos: IrqLock<u64>, append: bool },
     Dir { path: Path, names: IrqLock<Option<Vec<(String, bool)>>> },
-    /// Fixed contents (generated at open).
-    Virtual { data: Vec<u8>, pos: IrqLock<u64> },
+    /// Fixed contents (generated at open), and where writes go if it takes
+    /// them (/proc/<pid>/uid_map and the like).
+    Virtual { data: Vec<u8>, pos: IrqLock<u64>, sink: Option<super::ns::Sink> },
     Null,
     Zero,
     Random,
@@ -252,22 +253,78 @@ pub fn sys_eventfd2(init: u32, flags: u32) -> i64 {
 /// A process's own /proc files: /proc/self/…, /proc/thread-self/… and
 /// /proc/<pid>/… of a running process (/proc/<pid>/task/<tid>/… are the
 /// process's): which process, and the name in its folder.
+/// The folder itself gives an empty name.
 fn proc_of(text: &str) -> Option<(u32, &str)> {
-    let (who, rest) = text.strip_prefix("/proc/")?.split_once('/')?;
+    let rest = text.strip_prefix("/proc/")?;
+    let (who, rest) = rest.split_once('/').unwrap_or((rest, ""));
     let pid = match who {
         "self" | "thread-self" => task::current_pid(),
         n => n.parse().ok().filter(|&p| user::is_running(p))?,
     };
     let rest = match rest.strip_prefix("task/") {
-        Some(r) => r.split_once('/')?.1,
+        Some(r) => r.split_once('/').map_or("", |(_, name)| name),
         None => rest,
     };
     Some((pid, rest))
 }
 
+/// The folders under /proc/<pid>/: the process's own and its fd, fdinfo,
+/// ns and task folders, with what is in them.
+fn virtual_dir(text: &str) -> Option<Vec<(String, bool)>> {
+    let (pid, name) = proc_of(text.trim_end_matches('/'))?;
+    let entries = |names: &[&str], dir: bool| names.iter().map(|n| (String::from(*n), dir)).collect::<Vec<_>>();
+    let mut v = entries(&[".", ".."], true);
+    match name {
+        "" => {
+            v.extend(entries(&["fd", "fdinfo", "ns", "task"], true));
+            v.extend(entries(&["cmdline", "comm", "exe", "gid_map", "maps", "mountinfo", "mounts", "setgroups", "stat", "status", "uid_map"], false));
+        }
+        // Only a process's own descriptors are listed.
+        "fd" | "fdinfo" if pid == task::current_pid() => {
+            v.extend(open_numbers().into_iter().map(|n| (alloc::format!("{n}"), false)));
+        }
+        "fd" | "fdinfo" => {}
+        "ns" => v.extend(entries(&super::ns::NS_NAMES, false)),
+        "task" => v.push((alloc::format!("{}", super::ns::local(pid)), true)),
+        _ => return None,
+    }
+    Some(v)
+}
+
+/// What /proc/<pid>/ns/<name> points to.
+fn ns_link(text: &str) -> Option<String> {
+    let (pid, name) = proc_of(text)?;
+    super::ns::link(pid, name.strip_prefix("ns/")?)
+}
+
+/// The stat of a /proc folder, namespace link or other virtual file, if
+/// `text` names one.
+fn virtual_stat(text: &str, follow: bool) -> Option<Result<StatInfo, i64>> {
+    let now = crate::time::unix_now();
+    if let Some(link) = ns_link(text) {
+        // A namespace link leads to the namespace, whose number is its inode.
+        let id = link.split_once('[').and_then(|(_, n)| n.trim_end_matches(']').parse().ok()).unwrap_or(0);
+        let mode = if follow { 0o100444 } else { 0o120777 };
+        return Some(Ok(StatInfo { mode, size: 0, time: now, ino: id }));
+    }
+    if virtual_dir(text).is_some() {
+        return Some(Ok(StatInfo { mode: 0o040555, size: 0, time: now, ino: 4 }));
+    }
+    if let Some(kind) = virtual_file(text) {
+        return Some(stat_of_desc(&Desc::new(kind, 0)));
+    }
+    shm_stat(text)
+}
+
+/// Whether `text` is a folder, real or virtual (chdir and chroot ask).
+pub fn is_dir(text: &str) -> bool {
+    virtual_dir(text).is_some() || linux_path(text).is_ok_and(|p| fs::is_dir(&p))
+}
+
 /// The files in a process's /proc folder.
 fn proc_file(pid: u32, name: &str) -> Option<String> {
     let (prog, parent, threads) = user::proc_info(pid)?;
+    let (me, parent) = (super::ns::local(pid), super::ns::local(parent));
     // The name as Linux keeps it ("comm"): at most 15 bytes.
     let comm: String = prog.chars().take(15).collect();
     Some(match name {
@@ -286,20 +343,37 @@ fn proc_file(pid: u32, name: &str) -> Option<String> {
         "mountinfo" => String::from("1 1 0:1 / / rw,relatime shared:1 - justfs /dev/root rw\n"),
         "cmdline" => alloc::format!("{prog}\0"),
         "comm" => alloc::format!("{comm}\n"),
-        "stat" => alloc::format!("{pid} ({comm}) R {parent} {pid} {pid} 0 -1 0 0 0 0 0 0 0 0 0 20 0 {threads} 0 0 0 0\n"),
-        "status" => alloc::format!(
-            "Name:\t{comm}\nUmask:\t0022\nState:\tR (running)\nTgid:\t{pid}\nPid:\t{pid}\nPPid:\t{parent}\nTracerPid:\t0\n\
-             Uid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\nThreads:\t{threads}\nSeccomp:\t{}\n",
-            super::seccomp::mode_of(pid)
-        ),
+        "stat" => alloc::format!("{me} ({comm}) R {parent} {me} {me} 0 -1 0 0 0 0 0 0 0 0 0 20 0 {threads} 0 0 0 0\n"),
+        "status" => {
+            let (uid, gid) = (super::ns::uid(), super::ns::gid());
+            let ids = super::ns::ids_of(pid).iter().map(|i| alloc::format!("\t{i}")).collect::<String>();
+            alloc::format!(
+                "Name:\t{comm}\nUmask:\t0022\nState:\tR (running)\nTgid:\t{me}\nNgid:\t0\nPid:\t{me}\nPPid:\t{parent}\nTracerPid:\t0\n\
+                 Uid:\t{uid}\t{uid}\t{uid}\t{uid}\nGid:\t{gid}\t{gid}\t{gid}\t{gid}\nNStgid:{ids}\nNSpid:{ids}\n\
+                 Threads:\t{threads}\nSeccomp:\t{}\n",
+                super::seccomp::mode_of(pid)
+            )
+        }
+        n if n.starts_with("fdinfo/") && pid == task::current_pid() => {
+            let fd: i32 = n[7..].parse().ok()?;
+            let d = get(fd)?;
+            let pos = match &d.kind {
+                Kind::File { pos, .. } | Kind::Virtual { pos, .. } | Kind::Memfd { pos, .. } => *pos.lock(),
+                _ => 0,
+            };
+            alloc::format!("pos:\t{pos}\nflags:\t0{:o}\nmnt_id:\t1\nino:\t0\n", d.flags.load(Ordering::Relaxed))
+        }
         _ => return None,
     })
 }
 
 /// Contents of the virtual files, by Linux path.
 fn virtual_file(text: &str) -> Option<Kind> {
-    let data = |s: String| Some(Kind::Virtual { data: s.into_bytes(), pos: IrqLock::new(0) });
+    let data = |s: String| Some(Kind::Virtual { data: s.into_bytes(), pos: IrqLock::new(0), sink: None });
     if let Some((pid, name)) = proc_of(text) {
+        if let Some((now, sink)) = super::ns::id_file(pid, name) {
+            return Some(Kind::Virtual { data: now.into_bytes(), pos: IrqLock::new(0), sink: Some(sink) });
+        }
         return proc_file(pid, name).and_then(data);
     }
     match text {
@@ -326,9 +400,9 @@ fn virtual_file(text: &str) -> Option<Kind> {
 }
 
 pub fn sys_openat(dirfd: i32, path_ptr: u64, flags: u32) -> i64 {
-    let text = match user::user_cstr(path_ptr, 4096) {
+    let text = match super::path_text_at(dirfd, path_ptr) {
         Ok(t) => t,
-        Err(e) => return -errno(e),
+        Err(e) => return e,
     };
     if let Some(name) = super::shm::named(&text) {
         return super::shm::open_named(name, flags);
@@ -339,7 +413,10 @@ pub fn sys_openat(dirfd: i32, path_ptr: u64, flags: u32) -> i64 {
             Kind::Dir { path, .. } => Some(path.clone()),
             _ => None,
         }) {
-            Some(Some(dir)) => return open_path(&dir_join(&dir, &text), &text, flags),
+            Some(Some(dir)) => {
+                let path = dir_join(&dir, &text);
+                return open_path(&path, &show_path(&path), flags);
+            }
             Some(None) => return -err::ENOTDIR,
             None => return -err::EBADF,
         }
@@ -355,23 +432,18 @@ fn dir_join(dir: &Path, rel: &str) -> Path {
     Path::parse(rel, dir).unwrap_or_else(|_| dir.clone())
 }
 
-/// Whether a Linux path names /proc/self/fd, the folder of the calling
-/// process's descriptors.
-fn is_proc_fd(text: &str) -> bool {
-    proc_of(text.trim_end_matches('/')) == Some((task::current_pid(), "fd"))
-}
-
 fn open_path(path: &Path, text: &str, flags: u32) -> i64 {
     let cloexec = flags & O_CLOEXEC != 0;
     let keep = flags & (O_NONBLOCK | O_APPEND | 3);
     if let Some(kind) = virtual_file(text) {
         return install(Desc::new(kind, keep), cloexec);
     }
-    if is_proc_fd(text) {
-        // The open descriptors, as a folder of numbers (programs read it to
+    if let Some(names) = virtual_dir(text) {
+        // The open descriptors are a folder of numbers (programs read it to
         // close what a child must not inherit).
-        let mut names = vec![(String::from("."), true), (String::from(".."), true)];
-        names.extend(open_numbers().into_iter().map(|n| (alloc::format!("{n}"), false)));
+        if flags & (O_WRONLY | O_RDWR) != 0 {
+            return -err::EISDIR;
+        }
         return install(Desc::new(Kind::Dir { path: path.clone(), names: IrqLock::new(Some(names)) }, keep), cloexec);
     }
     let writable = flags & (O_WRONLY | O_RDWR) != 0;
@@ -500,7 +572,7 @@ pub fn read_desc(d: &Desc, buf: &mut [u8]) -> i64 {
                 Err(e) => -errno(user::fs_error(e)),
             }
         }
-        Kind::Virtual { data, pos } => {
+        Kind::Virtual { data, pos, .. } => {
             let mut p = pos.lock();
             let at = (*p as usize).min(data.len());
             let n = (data.len() - at).min(buf.len());
@@ -625,6 +697,14 @@ pub fn write_desc(d: &Desc, data: &[u8]) -> i64 {
         }
         Kind::Socket(s) => s.send(d, data, 0),
         Kind::Unix(u) => u.write(d, data),
+        Kind::Virtual { sink: Some(sink), pos, .. } => {
+            let r = sink.write(data, *pos.lock());
+            if r > 0 {
+                *pos.lock() += r as u64;
+            }
+            r
+        }
+        Kind::Virtual { .. } => -err::EACCES,
         _ => -err::EBADF,
     }
 }
@@ -702,7 +782,7 @@ pub fn sys_lseek(fd: i32, off: i64, whence: i32) -> i64 {
     let (pos, size) = match &d.kind {
         // The size only matters from the end (and costs a lookup).
         Kind::File { path, pos, .. } => (pos, if whence == 2 { fs::stat(path).map(|s| s.size).unwrap_or(0) as i64 } else { 0 }),
-        Kind::Virtual { data, pos } => (pos, data.len() as i64),
+        Kind::Virtual { data, pos, .. } => (pos, data.len() as i64),
         Kind::Memfd { shm, pos } => (pos, shm.size() as i64),
         Kind::Dir { names, .. } => {
             if off == 0 && whence == 0 {
@@ -774,9 +854,9 @@ fn stat_info(path: &Path, st: Result<fs::Stat, justfs::Error>) -> Result<StatInf
     if matches!(st, Err(justfs::Error::NotFound)) && super::unix::is_bound(path) {
         return Ok(StatInfo { mode: 0o140777, size: 0, time: crate::time::unix_now(), ino: 4 });
     }
-    // The generated folder of descriptors (glibc's opendir checks with
-    // fstat that it opened a folder).
-    if matches!(st, Err(justfs::Error::NotFound)) && is_proc_fd(&path.inner) {
+    // A generated /proc folder (glibc's opendir checks with fstat that it
+    // opened a folder).
+    if matches!(st, Err(justfs::Error::NotFound)) && virtual_dir(&path.inner).is_some() {
         return Ok(StatInfo { mode: 0o040500, size: 0, time: crate::time::unix_now(), ino: 6 });
     }
     let st = st.map_err(|e| -errno(user::fs_error(e)))?;
@@ -814,7 +894,10 @@ pub fn stat_of_desc(d: &Desc) -> Result<StatInfo, i64> {
     let simple = |mode: u32| Ok(StatInfo { mode, size: 0, time: crate::time::unix_now(), ino: 2 });
     match &d.kind {
         Kind::File { path, .. } | Kind::Dir { path, .. } => stat_of_path(path),
-        Kind::Virtual { data, .. } => Ok(StatInfo { mode: 0o100444, size: data.len() as u64, time: crate::time::unix_now(), ino: 3 }),
+        Kind::Virtual { data, sink, .. } => {
+            let mode = if sink.is_some() { 0o100644 } else { 0o100444 };
+            Ok(StatInfo { mode, size: data.len() as u64, time: crate::time::unix_now(), ino: 3 })
+        }
         Kind::Memfd { shm, .. } => Ok(StatInfo { mode: 0o100777, size: shm.size(), time: crate::time::unix_now(), ino: Arc::as_ptr(shm) as u64 >> 4 }),
         Kind::Console => simple(0o020620),
         Kind::Null | Kind::Zero | Kind::Random => simple(0o020666),
@@ -845,7 +928,7 @@ pub fn write_stat(ptr: u64, s: &StatInfo) -> i64 {
 }
 
 fn path_arg(dirfd: i32, ptr: u64) -> Result<(Path, String), i64> {
-    let text = user::user_cstr(ptr, 4096).map_err(|e| -errno(e))?;
+    let text = super::path_text_at(dirfd, ptr)?;
     if dirfd != AT_FDCWD && !text.starts_with('/') && !text.is_empty() {
         if let Some(d) = get(dirfd) {
             if let Kind::Dir { path, .. } = &d.kind {
@@ -861,18 +944,11 @@ pub const AT_SYMLINK_NOFOLLOW: u64 = 0x100;
 
 pub fn sys_newfstatat(dirfd: i32, path_ptr: u64, buf: u64, flags: u64) -> i64 {
     const AT_EMPTY_PATH: u64 = 0x1000;
-    let text = user::user_cstr(path_ptr, 4096).unwrap_or_default();
+    let text = super::path_text_at(dirfd, path_ptr).unwrap_or_default();
     if text.is_empty() && flags & AT_EMPTY_PATH != 0 {
         return sys_fstat(dirfd, buf);
     }
-    if let Some(kind) = virtual_file(&text) {
-        let d = Desc::new(kind, 0);
-        return match stat_of_desc(&d) {
-            Ok(s) => write_stat(buf, &s),
-            Err(e) => e,
-        };
-    }
-    if let Some(info) = shm_stat(&text) {
+    if let Some(info) = virtual_stat(&text, flags & AT_SYMLINK_NOFOLLOW == 0) {
         return match info {
             Ok(s) => write_stat(buf, &s),
             Err(e) => e,
@@ -899,15 +975,13 @@ pub fn sys_fstat(fd: i32, buf: u64) -> i64 {
 
 pub fn sys_statx(dirfd: i32, path_ptr: u64, flags: u64, buf: u64) -> i64 {
     const AT_EMPTY_PATH: u64 = 0x1000;
-    let text = user::user_cstr(path_ptr, 4096).unwrap_or_default();
+    let text = super::path_text_at(dirfd, path_ptr).unwrap_or_default();
     let info = if text.is_empty() && flags & AT_EMPTY_PATH != 0 {
         match get(dirfd) {
             Some(d) => stat_of_desc(&d),
             None => return -err::EBADF,
         }
-    } else if let Some(kind) = virtual_file(&text) {
-        stat_of_desc(&Desc::new(kind, 0))
-    } else if let Some(info) = shm_stat(&text) {
+    } else if let Some(info) = virtual_stat(&text, flags & AT_SYMLINK_NOFOLLOW == 0) {
         info
     } else {
         match path_arg(dirfd, path_ptr) {
@@ -939,11 +1013,8 @@ pub fn sys_statx(dirfd: i32, path_ptr: u64, flags: u64, buf: u64) -> i64 {
 }
 
 pub fn sys_faccessat(dirfd: i32, path_ptr: u64) -> i64 {
-    let text = user::user_cstr(path_ptr, 4096).unwrap_or_default();
-    if virtual_file(&text).is_some() {
-        return 0;
-    }
-    if let Some(info) = shm_stat(&text) {
+    let text = super::path_text_at(dirfd, path_ptr).unwrap_or_default();
+    if let Some(info) = virtual_stat(&text, true) {
         return info.map_or_else(|e| e, |_| 0);
     }
     match path_arg(dirfd, path_ptr) {
@@ -959,6 +1030,11 @@ pub fn sys_faccessat(dirfd: i32, path_ptr: u64) -> i64 {
 pub fn sys_getdents64(fd: i32, ptr: u64, cap: u64) -> i64 {
     let Some(d) = get(fd) else { return -err::EBADF };
     let Kind::Dir { path, names } = &d.kind else { return -err::ENOTDIR };
+    if names.lock().is_none() {
+        if let Some(v) = virtual_dir(&show_path(path)) {
+            *names.lock() = Some(v);
+        }
+    }
     if names.lock().is_none() {
         let list = match fs::list_dir(path) {
             Ok(l) => l,
@@ -1007,7 +1083,7 @@ pub fn sys_mkdirat(dirfd: i32, path_ptr: u64) -> i64 {
 }
 
 pub fn sys_unlinkat(dirfd: i32, path_ptr: u64) -> i64 {
-    let text = user::user_cstr(path_ptr, 4096).unwrap_or_default();
+    let text = super::path_text_at(dirfd, path_ptr).unwrap_or_default();
     if let Some(name) = super::shm::named(&text) {
         return super::shm::unlink_named(name);
     }
@@ -1044,8 +1120,11 @@ pub fn sys_renameat(olddir: i32, old: u64, newdir: i32, new: u64) -> i64 {
 }
 
 pub fn sys_readlinkat(dirfd: i32, path_ptr: u64, buf: u64, cap: u64) -> i64 {
-    let text = user::user_cstr(path_ptr, 4096).unwrap_or_default();
+    let text = super::path_text_at(dirfd, path_ptr).unwrap_or_default();
     let me = task::current_pid();
+    if let Some(link) = ns_link(&text) {
+        return copy_link(&link, buf, cap);
+    }
     let target = match proc_of(&text) {
         Some((pid, "exe")) => match super::with_state_of(pid, |st| st.exe.clone()) {
             Some(exe) => exe,
@@ -1071,6 +1150,11 @@ pub fn sys_readlinkat(dirfd: i32, path_ptr: u64, buf: u64, cap: u64) -> i64 {
             Err(e) => return e,
         },
     };
+    copy_link(&target, buf, cap)
+}
+
+/// readlink's answer: as much of the link as fits, without a NUL.
+fn copy_link(target: &str, buf: u64, cap: u64) -> i64 {
     let out = match user_bytes(buf, cap) {
         Ok(b) => b,
         Err(e) => return e,

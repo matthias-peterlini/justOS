@@ -79,8 +79,9 @@ impl Ty {
 /// How the kernel tells names apart.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum Key {
-    /// The abstract namespace: `sun_path` starts with a 0 byte.
-    Abstract(Vec<u8>),
+    /// The abstract namespace: `sun_path` starts with a 0 byte. Each
+    /// network namespace has its own (the number).
+    Abstract(u32, Vec<u8>),
     /// A place on a volume ("volume:/path").
     Path(String),
 }
@@ -107,11 +108,11 @@ fn read_name(addr: u64, len: u64) -> Result<Option<Name>, i64> {
         return Ok(None);
     }
     if path[0] == 0 {
-        return Ok(Some(Name { key: Key::Abstract(path[1..].to_vec()), raw: path.to_vec() }));
+        return Ok(Some(Name { key: Key::Abstract(super::ns::net(), path[1..].to_vec()), raw: path.to_vec() }));
     }
     let end = path.iter().position(|&c| c == 0).unwrap_or(path.len());
     let text = core::str::from_utf8(&path[..end]).map_err(|_| -err::EINVAL)?;
-    let p = linux_path(text)?;
+    let p = linux_path(&super::rooted(text))?;
     Ok(Some(Name { key: path_key(&p), raw: path[..end].to_vec() }))
 }
 
@@ -191,7 +192,7 @@ fn unregister(key: &Key, id: u64) {
 fn refused(name: &Name) -> i64 {
     match name.key {
         Key::Path(_) => -err::ENOENT,
-        Key::Abstract(_) => -err::ECONNREFUSED,
+        Key::Abstract(..) => -err::ECONNREFUSED,
     }
 }
 
@@ -540,7 +541,7 @@ impl Unix {
         // No name: one in the abstract namespace, as Linux's autobind.
         let name = name.unwrap_or_else(|| {
             let raw = alloc::format!("\0{:05x}", self.id & 0xfffff).into_bytes();
-            Name { key: Key::Abstract(raw[1..].to_vec()), raw }
+            Name { key: Key::Abstract(super::ns::net(), raw[1..].to_vec()), raw }
         });
         let what = match &*self.state.lock() {
             St::Fresh => Bound::Reserved,
@@ -922,13 +923,15 @@ impl Unix {
             SO_DOMAIN => int(AF_UNIX as u32),
             SO_ACCEPTCONN => int(matches!(&*self.state.lock(), St::Listening(_)) as u32),
             SO_PEERCRED => {
-                // struct ucred: pid, uid, gid (everything runs as root).
+                // struct ucred: pid, uid, gid. Everything runs as root, as
+                // the caller's user namespace shows root.
                 let pid = match &*self.state.lock() {
-                    St::Connected(e) => e.peer_pid,
+                    St::Connected(e) => super::ns::local(e.peer_pid),
                     _ => 0,
                 };
                 let mut v = Vec::from(pid.to_le_bytes());
-                v.extend_from_slice(&[0; 8]);
+                v.extend_from_slice(&super::ns::uid().to_le_bytes());
+                v.extend_from_slice(&super::ns::gid().to_le_bytes());
                 Some(v)
             }
             _ => None,

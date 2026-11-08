@@ -5,8 +5,8 @@
  * local sockets (pairs, a named server, SCM_RIGHTS, datagrams) and shared
  * memory (memfd, MAP_SHARED across fork and over a socket, shm_open),
  * starting a child the way browsers do (dup2 into place, close the rest),
- * a process-shared semaphore, inotify, seccomp filters and prompt
- * wake-ups.
+ * a process-shared semaphore, inotify, seccomp filters, namespaces,
+ * capabilities and chroot, and prompt wake-ups.
  * Built by scripts/test-linux.sh with the host's gcc. */
 #define _GNU_SOURCE
 #include <dirent.h>
@@ -14,12 +14,16 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <gnu/libc-version.h>
+#include <arpa/inet.h>
 #include <linux/audit.h>
+#include <linux/capability.h>
 #include <linux/filter.h>
 #include <linux/futex.h>
 #include <linux/seccomp.h>
+#include <netinet/in.h>
 #include <poll.h>
 #include <pthread.h>
+#include <sched.h>
 #include <semaphore.h>
 #include <setjmp.h>
 #include <signal.h>
@@ -37,6 +41,7 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/un.h>
+#include <sys/utsname.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <ucontext.h>
@@ -132,6 +137,37 @@ static int reap(pid_t pid) {
     if (waitpid(pid, &st, 0) != pid)
         return -2;
     return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+}
+
+/* Writes `text` to the file `path` at once: 0, or -errno. */
+static int write_file(const char *path, const char *text) {
+    int fd = open(path, O_WRONLY);
+    if (fd < 0)
+        return -errno;
+    int r = write(fd, text, strlen(text)) == (ssize_t)strlen(text) ? 0 : -errno;
+    close(fd);
+    return r;
+}
+
+/* The last number on the line of /proc/self/status that starts with
+   `key` (-1 if there is none). */
+static long status_last(const char *key) {
+    FILE *f = fopen("/proc/self/status", "r");
+    char line[256];
+    long v = -1;
+    while (f && fgets(line, sizeof line, f)) {
+        if (strncmp(line, key, strlen(key)) != 0)
+            continue;
+        char *end = line + strlen(line);
+        while (end > line && (end[-1] < '0' || end[-1] > '9'))
+            end--;
+        while (end > line && end[-1] >= '0' && end[-1] <= '9')
+            end--;
+        v = strtol(end, NULL, 10);
+    }
+    if (f)
+        fclose(f);
+    return v;
 }
 
 static long long now_ns(void) {
@@ -930,6 +966,149 @@ int main(int argc, char **argv) {
     int ss = 0;
     waitpid(c15, &ss, 0);
     printf("dt: seccomp exit=%d strict %d\n", sc_exit, WIFSIGNALED(ss) ? WTERMSIG(ss) : -1);
+
+    /* Namespaces, in a child: a user namespace (ids unmapped until the
+       maps are written, setgroups, a map written only once) and the
+       capabilities it gives. With them, chroot as Firefox's sandbox does
+       it: a helper sharing the folders (CLONE_FS) shuts both in, nothing
+       climbs out with "..", and no new user namespace is made inside; the
+       same with the /proc/self/fdinfo of a helper that ends, where nothing
+       is left. capset: dropping and taking back effective capabilities,
+       which chroot needs, and not more than permitted. Last, PID, UTS,
+       network and IPC namespaces: the first child in the new PID
+       namespace is 1 there, has no parent it can see, names the host,
+       reaches no network and not the abstract socket made outside; when
+       it ends, the other process there goes too, and no new one can
+       start there. */
+    mkdir("nsroot", 0755);
+    close(open("nsroot/inside", O_CREAT | O_WRONLY, 0644));
+    fflush(stdout);
+    pid_t c16 = fork();
+    if (c16 == 0) {
+        uid_t ou = getuid();
+        gid_t og = getgid();
+        char l1[64] = "", l2[64] = "", m[64], c;
+        if (readlink("/proc/self/ns/user", l1, sizeof l1 - 1) < 0)
+            _exit(1);
+        struct sockaddr_un an = {.sun_family = AF_UNIX};
+        memcpy(an.sun_path, "\0dt-ns", 6);
+        socklen_t alen = offsetof(struct sockaddr_un, sun_path) + 6;
+        int as = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (bind(as, (struct sockaddr *)&an, alen) != 0 || listen(as, 1) != 0)
+            _exit(1);
+        int us = unshare(CLONE_NEWUSER);
+        if (readlink("/proc/self/ns/user", l2, sizeof l2 - 1) < 0)
+            _exit(1);
+        int changed = strcmp(l1, l2) != 0 && strncmp(l2, "user:[", 6) == 0;
+        int unmapped = getuid();
+        int sg = write_file("/proc/self/setgroups", "deny");
+        snprintf(m, sizeof m, "0 %u 1", ou);
+        int um = write_file("/proc/self/uid_map", m);
+        int again = write_file("/proc/self/uid_map", m);
+        snprintf(m, sizeof m, "0 %u 1", og);
+        int gm = write_file("/proc/self/gid_map", m);
+        struct __user_cap_header_struct ch = {_LINUX_CAPABILITY_VERSION_3, 0};
+        struct __user_cap_data_struct cd[2];
+        int caps = syscall(SYS_capget, &ch, cd) == 0 && (cd[0].effective >> CAP_SYS_ADMIN & 1) && (cd[0].permitted >> CAP_SYS_CHROOT & 1);
+        printf("dt: ns user=%d changed=%d unmapped=%d setgroups=%d maps=%d,%d again=%d ids=%d,%d caps=%d\n",
+               us, changed, unmapped, sg, um, gm, again, getuid(), getgid(), caps);
+        fflush(stdout);
+
+        pid_t a = fork();
+        if (a == 0) {
+            long h = syscall(SYS_clone, CLONE_FS | SIGCHLD, 0, 0, 0, 0);
+            if (h == 0)
+                syscall(SYS_exit, chroot("nsroot") == 0 && chdir("/") == 0 ? 0 : 1);
+            int hs = 0;
+            waitpid(h, &hs, 0);
+            char cwd[64] = "";
+            if (!getcwd(cwd, sizeof cwd))
+                strcpy(cwd, "?");
+            int in = access("/inside", F_OK);
+            int up = access("/../../inside", F_OK);
+            int nested = unshare(CLONE_NEWUSER) == 0 ? 0 : errno;
+            printf("dt: chroot helper=%d cwd=%s inside=%d up=%d nested=%d\n", WIFEXITED(hs) ? WEXITSTATUS(hs) : -1, cwd, in, up, nested);
+            fflush(stdout);
+            _exit(0);
+        }
+        reap(a);
+        pid_t b = fork();
+        if (b == 0) {
+            long h = syscall(SYS_clone, CLONE_FS | SIGCHLD, 0, 0, 0, 0);
+            if (h == 0)
+                syscall(SYS_exit, chroot("/proc/self/fdinfo") == 0 && chdir("/") == 0 ? 0 : 1);
+            int hs = 0;
+            waitpid(h, &hs, 0);
+            int none = open("/0", O_RDONLY) < 0 ? errno : 0;
+            int out = open("/inside", O_RDONLY) < 0 ? errno : 0;
+            printf("dt: chroot fdinfo helper=%d none=%d out=%d\n", WIFEXITED(hs) ? WEXITSTATUS(hs) : -1, none, out);
+            fflush(stdout);
+            _exit(0);
+        }
+        reap(b);
+        pid_t k = fork();
+        if (k == 0) {
+            syscall(SYS_capget, &ch, cd);
+            unsigned p0 = cd[0].permitted, p1 = cd[1].permitted;
+            cd[0].effective = cd[1].effective = 0;
+            int drop = syscall(SYS_capset, &ch, cd);
+            int cr = chroot("nsroot") == 0 ? 0 : errno;
+            cd[0].effective = p0;
+            cd[1].effective = p1;
+            int back = syscall(SYS_capset, &ch, cd);
+            memset(cd, 0, sizeof cd);
+            int none = syscall(SYS_capset, &ch, cd);
+            cd[0].permitted = cd[0].effective = 1u << CAP_SYS_CHROOT;
+            int up = syscall(SYS_capset, &ch, cd) == 0 ? 0 : errno;
+            syscall(SYS_capget, &ch, cd);
+            printf("dt: capset drop=%d chroot=%d back=%d none=%d up=%d now=%x\n", drop, cr, back, none, up, cd[0].effective);
+            fflush(stdout);
+            _exit(0);
+        }
+        reap(k);
+
+        int more = unshare(CLONE_NEWPID | CLONE_NEWNET | CLONE_NEWUTS | CLONE_NEWIPC);
+        int pp[2];
+        if (pipe(pp) != 0)
+            _exit(1);
+        pid_t g = fork();
+        if (g == 0) {
+            int named = sethostname("dt-sandbox", 10);
+            struct utsname un;
+            uname(&un);
+            int s = socket(AF_INET, SOCK_STREAM, 0);
+            struct sockaddr_in sin = {.sin_family = AF_INET, .sin_port = htons(80), .sin_addr.s_addr = htonl(0x7f000001)};
+            int net = connect(s, (struct sockaddr *)&sin, sizeof sin) == 0 ? 0 : errno;
+            int u = socket(AF_UNIX, SOCK_STREAM, 0);
+            int abs = connect(u, (struct sockaddr *)&an, alen) == 0 ? 0 : errno;
+            pid_t gg = fork();
+            if (gg == 0) {
+                close(pp[0]);
+                pause();
+                _exit(0);
+            }
+            printf("dt: ns more=%d pid=%d ppid=%d child=%d nspid=%ld host=%d,%s net=%d abstract=%d\n", more, getpid(), getppid(), gg,
+                   status_last("NSpid:"), named, un.nodename, net, abs);
+            fflush(stdout);
+            _exit(0);
+        }
+        close(pp[1]);
+        int gs = 0;
+        int waited = waitpid(g, &gs, 0) == g && WIFEXITED(gs);
+        struct pollfd pf = {pp[0], POLLIN, 0};
+        int gone = poll(&pf, 1, 3000) == 1 && read(pp[0], &c, 1) == 0;
+        // The namespace ended with its init: no new process there.
+        pid_t late = fork();
+        if (late == 0)
+            _exit(0);
+        int ended = late < 0 ? errno : 0;
+        printf("dt: ns waited=%d gone=%d ended=%d\n", waited, gone, ended);
+        fflush(stdout);
+        _exit(0);
+    }
+    reap(c16);
+    unlink("nsroot/inside");
+    rmdir("nsroot");
 
     /* Waking is prompt: a process waiting in poll on a pipe, a thread in
        epoll_wait on a local socket and one on a futex wake when the other

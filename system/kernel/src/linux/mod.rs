@@ -18,11 +18,14 @@
 //! New processes come from fork, vfork and posix_spawn, and execve
 //! replaces a program (scripts with `#!` too); parents wait for children
 //! with wait4. Signals ([`signal`]) run the program's handlers, as on Linux,
-//! and seccomp filters ([`seccomp`]) can sandbox a program's calls.
+//! seccomp filters ([`seccomp`]) can sandbox a program's calls, and
+//! namespaces ([`ns`]), capabilities and chroot give sandboxes a view of
+//! their own.
 
 pub mod fd;
 mod inotify;
 pub mod mm;
+mod ns;
 mod poll;
 mod seccomp;
 mod shm;
@@ -84,6 +87,7 @@ pub mod err {
     pub const EOPNOTSUPP: i64 = 95;
     pub const EAFNOSUPPORT: i64 = 97;
     pub const EADDRINUSE: i64 = 98;
+    pub const EADDRNOTAVAIL: i64 = 99;
     pub const ENETUNREACH: i64 = 101;
     pub const ECONNRESET: i64 = 104;
     pub const EISCONN: i64 = 106;
@@ -181,6 +185,16 @@ pub fn forget(pid: u32) {
     }
     drop(st);
     seccomp::forget(pid);
+    // The end of a PID namespace's init ends the namespace.
+    for p in ns::exited(pid) {
+        signal::kill(p);
+    }
+}
+
+/// An ended process was waited for (or never will be): its ids in PID
+/// namespaces go.
+pub fn released(pid: u32) {
+    ns::released(pid);
 }
 
 pub fn with_state<T>(f: impl FnOnce(&mut LinuxState) -> T) -> T {
@@ -230,12 +244,91 @@ pub fn fork_state(child: u32, tid: task::Tid) {
 // ----------------------------------------------------------------------------
 // Paths: a Linux path names a place in the running process's justOS volume.
 
+/// A path a program names, as the kernel looks it up: unchanged, unless the
+/// process was shut into a folder with chroot. Then the path starts there
+/// (a relative one at the current folder inside it), and ".." never climbs
+/// above it.
+pub fn rooted(text: &str) -> alloc::borrow::Cow<'_, str> {
+    match user::root() {
+        Some(root) if !text.is_empty() => alloc::borrow::Cow::Owned(resolve_under(&root, text)),
+        _ => alloc::borrow::Cow::Borrowed(text),
+    }
+}
+
+/// `text` as an absolute Linux path under `root` ("" for the whole tree),
+/// with "." and ".." resolved.
+fn resolve_under(root: &str, text: &str) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut add = |part: &str| match part {
+        "" | "." => {}
+        ".." => {
+            parts.pop();
+        }
+        p => parts.push(String::from(p)),
+    };
+    if !text.starts_with('/') {
+        let cwd = user::cwd().map(|c| show_path(&c)).unwrap_or_default();
+        // A current folder outside the root counts as the root.
+        if let Some(inside) = strip_root(&cwd, root) {
+            inside.split('/').for_each(&mut add);
+        }
+    }
+    text.split('/').for_each(&mut add);
+    let mut out = String::from(root);
+    for p in parts {
+        out.push('/');
+        out.push_str(&p);
+    }
+    if out.is_empty() {
+        out.push('/');
+    }
+    out
+}
+
+/// A Linux path as seen from inside `root`, if it is there.
+fn strip_root<'a>(path: &'a str, root: &str) -> Option<&'a str> {
+    let rest = path.strip_prefix(root)?;
+    (rest.is_empty() || rest.starts_with('/')).then_some(rest)
+}
+
+/// Reads a path a program passes, as the kernel looks it up ([`rooted`]).
+pub fn path_text(ptr: u64) -> Result<String, i64> {
+    let text = user::user_cstr(ptr, 4096).map_err(|e| -errno(e))?;
+    root_alive(&text)?;
+    Ok(rooted(&text).into_owned())
+}
+
+/// Like [`path_text`], for a path relative to the open folder `dirfd`: that
+/// is looked up from the folder, as it is.
+pub fn path_text_at(dirfd: i32, ptr: u64) -> Result<String, i64> {
+    let text = user::user_cstr(ptr, 4096).map_err(|e| -errno(e))?;
+    if dirfd != fd::AT_FDCWD && !text.starts_with('/') {
+        return Ok(text);
+    }
+    root_alive(&text)?;
+    Ok(rooted(&text).into_owned())
+}
+
+/// A root in the /proc folder of a process that ended (where Firefox's
+/// sandbox shuts itself) has nothing left in it: Linux answers ESRCH.
+fn root_alive(text: &str) -> Result<(), i64> {
+    if text.is_empty() {
+        return Ok(());
+    }
+    let Some(root) = user::root() else { return Ok(()) };
+    let who = root.strip_prefix("/proc/").map(|r| r.split('/').next().unwrap_or(""));
+    match who.and_then(|n| n.parse::<u32>().ok()) {
+        Some(pid) if !user::is_running(pid) => Err(-err::ESRCH),
+        _ => Ok(()),
+    }
+}
+
 pub fn linux_path(text: &str) -> Result<Path, i64> {
-    let cwd = user::cwd().map_err(errno)?;
+    let cwd = user::cwd().map_err(|e| -errno(e))?;
     // An absolute Linux path is rooted at the volume; a relative one hangs
     // off the current folder.
     let base = if text.starts_with('/') { Path::root(&cwd.volume) } else { cwd };
-    Path::parse(text, &base).map_err(|e| errno(user::fs_error(e)))
+    Path::parse(text, &base).map_err(|e| -errno(user::fs_error(e)))
 }
 
 /// Turns a justOS path back into the Linux path a program sees ("/a/b").
@@ -348,7 +441,7 @@ const INTERP_BASE: u64 = 0x7000_0000_0000;
 
 /// Maps the dynamic loader `path` (a Linux path on the program's volume).
 fn load_interpreter(name: &str, path: &str) -> Result<Loaded, JustError> {
-    let Some(bytes) = linux_path(path).ok().and_then(|p| crate::fs::read_file(&p).ok()) else {
+    let Some(bytes) = linux_path(&rooted(path)).ok().and_then(|p| crate::fs::read_file(&p).ok()) else {
         crate::println!("\x1b[91m{name}: needs {path}, which is not on this volume (are the Linux libraries installed?)\x1b[0m");
         return Err(JustError::BadProgram);
     };
@@ -716,7 +809,7 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         32 => fd::sys_dup(fd0),
         33 => fd::sys_dup3(fd0, a[1] as i32, u32::MAX),
         35 => sys_nanosleep(a[0]),
-        39 => task::current_pid() as i64,
+        39 => ns::local(task::current_pid()) as i64,
         41 => sock::sys_socket(a[0], a[1], a[2]),
         42 => sock::sys_connect(fd0, a[1], a[2]),
         43 => sock::sys_accept4(fd0, a[1], a[2], 0),
@@ -766,12 +859,16 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         98 => zero_out(a[1], 144), // getrusage
         99 => sys_sysinfo(a[0]),
         100 => zero_out(a[0], 32), // times
-        102 | 104 | 107 | 108 => 0, // getuid, getgid, geteuid, getegid: root
+        102 | 107 => ns::uid() as i64, // getuid, geteuid
+        104 | 108 => ns::gid() as i64, // getgid, getegid
         105 | 106 | 109 | 112 | 113 | 114 | 116 | 117 | 119 => 0, // set*id, setpgid, setsid...
-        110 => user::parent_pid() as i64,
-        111 | 121 | 124 => task::current_pid() as i64,             // getpgrp, getpgid, getsid
+        110 => ns::local(user::parent_pid()) as i64,
+        111 | 121 | 124 => ns::local(task::current_pid()) as i64, // getpgrp, getpgid, getsid
         115 => 0,                                                 // getgroups: none
-        118 | 120 => sys_getresid(a[0], a[1], a[2]),
+        118 => sys_getresid(a[0], a[1], a[2], ns::uid()),
+        120 => sys_getresid(a[0], a[1], a[2], ns::gid()),
+        125 => ns::sys_capget(a[0], a[1]),
+        126 => ns::sys_capset(a[0], a[1]),
         127 => signal::sys_rt_sigpending(a[0]),
         128 => signal::sys_rt_sigtimedwait(a[0], a[1], a[2]),
         130 => signal::sys_rt_sigsuspend(a[0]),
@@ -787,6 +884,9 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         157 => sys_prctl(a[0], a[1], a[2], a[3], a[4]),
         158 => sys_arch_prctl(a[0], a[1]),
         160 => 0, // setrlimit
+        161 => sys_chroot(a[0]),
+        170 => ns::set_name(false, a[0], a[1]),
+        171 => ns::set_name(true, a[0], a[1]),
         186 => thread::sys_gettid(),
         187 => 0, // readahead: the cache reads what is asked
         200 => signal::sys_tgkill(0, a[0] as i64, a[1]),
@@ -817,6 +917,7 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         269 | 439 => fd::sys_faccessat(fd0, a[1]),
         270 => poll::sys_pselect6(a[0], a[1], a[2], a[3], a[4]),
         271 => poll::sys_ppoll(a[0], a[1], a[2]),
+        272 => ns::sys_unshare(a[0]),
         273 | 334 => 0, // set_robust_list, rseq... (glibc asks rseq; 0 = "fine")
         281 => poll::sys_epoll_wait(fd0, a[1], a[2] as i32, a[3] as i32 as i64),
         253 => inotify::sys_inotify_init1(0),
@@ -853,8 +954,7 @@ fn sys_prctl(option: u64, a2: u64, a3: u64, a4: u64, a5: u64) -> i64 {
 }
 
 fn linux_arg_path(ptr: u64) -> Result<Path, i64> {
-    let text = user::user_cstr(ptr, 4096).map_err(errno)?;
-    linux_path(&text)
+    linux_path(&path_text(ptr)?)
 }
 
 fn zero_out(ptr: u64, len: u64) -> i64 {
@@ -903,7 +1003,7 @@ fn sys_execve(path_ptr: u64, argv_ptr: u64, envp_ptr: u64) -> i64 {
         (Err(e), _) | (_, Err(e)) => return e,
     };
     let read = |linux: &str| -> Result<(Path, Vec<u8>), i64> {
-        let path = linux_path(linux)?;
+        let path = linux_path(&rooted(linux))?;
         if crate::fs::is_dir(&path) {
             return Err(-err::EACCES);
         }
@@ -940,7 +1040,7 @@ fn sys_execve(path_ptr: u64, argv_ptr: u64, envp_ptr: u64) -> i64 {
         return -err::ENOEXEC;
     }
     if let Some(ld) = interpreter(&image) {
-        if !linux_path(&ld).is_ok_and(|p| crate::fs::exists(&p)) {
+        if !linux_path(&rooted(&ld)).is_ok_and(|p| crate::fs::exists(&p)) {
             return -err::ENOENT;
         }
     }
@@ -954,6 +1054,7 @@ fn sys_execve(path_ptr: u64, argv_ptr: u64, envp_ptr: u64) -> i64 {
     if user::exec_address_space(&name, &path).is_err() {
         return -err::ENOMEM;
     }
+    ns::exec();
     reset_for_exec();
     let loaded = load_program(&image, &name, &argv, &envp, &show_path(&path));
     // Nothing on this stack is dropped once the new program starts.
@@ -1000,7 +1101,13 @@ fn wait_status(code: i64) -> u32 {
 
 fn sys_wait4(pid: i64, status: u64, options: u64) -> i64 {
     const WNOHANG: u64 = 1;
-    let want = (pid > 0).then_some(pid as u32);
+    let want = match pid {
+        p if p > 0 => match ns::global(p as u32) {
+            Some(g) => Some(g),
+            None => return -err::ECHILD,
+        },
+        _ => None,
+    };
     match user::wait_child(want, options & WNOHANG != 0, signal::pending_here) {
         Ok(Some((child, code))) => {
             if status != 0 {
@@ -1008,7 +1115,9 @@ fn sys_wait4(pid: i64, status: u64, options: u64) -> i64 {
                     b.copy_from_slice(&wait_status(code).to_le_bytes());
                 }
             }
-            child as i64
+            let seen = ns::local(child);
+            ns::released(child);
+            seen as i64
         }
         Ok(None) => 0,
         Err(JustError::Cancelled) => signal::interrupted().unwrap_or(-err::EINTR),
@@ -1020,12 +1129,23 @@ fn sys_wait4(pid: i64, status: u64, options: u64) -> i64 {
 fn sys_waitid(idtype: u64, id: u64, info: u64, options: u64) -> i64 {
     const WNOHANG: u64 = 1;
     const P_PID: u64 = 1;
-    let want = (idtype == P_PID).then_some(id as u32);
+    let want = match idtype {
+        P_PID => match ns::global(id as u32) {
+            Some(g) => Some(g),
+            None => return -err::ECHILD,
+        },
+        _ => None,
+    };
     let got = match user::wait_child(want, options & WNOHANG != 0, signal::pending_here) {
         Ok(g) => g,
         Err(JustError::Cancelled) => return signal::interrupted().unwrap_or(-err::EINTR),
         Err(_) => return -err::ECHILD,
     };
+    let got = got.map(|(child, code)| {
+        let seen = ns::local(child);
+        ns::released(child);
+        (seen, code)
+    });
     if info != 0 {
         let Ok(b) = user_bytes(info, 128) else { return -err::EFAULT };
         b.fill(0);
@@ -1137,7 +1257,16 @@ fn sys_getcwd(ptr: u64, cap: u64) -> i64 {
         Ok(c) => c,
         Err(e) => return -errno(e),
     };
-    let text = show_path(&cwd);
+    let mut text = show_path(&cwd);
+    // Inside a chroot, the folder as seen from the root; Linux marks one
+    // outside it.
+    if let Some(root) = user::root() {
+        text = match strip_root(&text, &root) {
+            Some("") => String::from("/"),
+            Some(inside) => String::from(inside),
+            None => alloc::format!("(unreachable){text}"),
+        };
+    }
     let bytes = text.as_bytes();
     if bytes.len() + 1 > cap as usize {
         return -err::ERANGE;
@@ -1152,14 +1281,52 @@ fn sys_getcwd(ptr: u64, cap: u64) -> i64 {
 }
 
 fn sys_chdir(path_ptr: u64) -> i64 {
-    let path = match linux_arg_path(path_ptr) {
+    let text = match path_text(path_ptr) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    let path = match linux_path(&text) {
         Ok(p) => p,
         Err(e) => return e,
     };
-    if !crate::fs::is_dir(&path) {
-        return -err::ENOTDIR;
+    if !fd::is_dir(&show_path(&path)) {
+        return if crate::fs::exists(&path) { -err::ENOTDIR } else { -err::ENOENT };
     }
     user::set_cwd(path);
+    0
+}
+
+/// chroot: the process (and those sharing its folders, CLONE_FS) sees
+/// `path` as "/" from now on. Sandboxes shut themselves in an empty folder
+/// with it (Firefox's in the /proc/<pid>/fdinfo of a helper that then
+/// ends, which leaves nothing to see).
+fn sys_chroot(path_ptr: u64) -> i64 {
+    if !ns::capable(ns::CAP_SYS_CHROOT) {
+        return -err::EPERM;
+    }
+    let text = match path_text(path_ptr) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    let path = match linux_path(&text) {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+    let mut target = show_path(&path);
+    // The root stays where it was found: /proc/self is this process's
+    // folder, not that of whoever looks later.
+    let me = task::current_pid();
+    for (alias, real) in [("/proc/self", alloc::format!("/proc/{me}")), ("/proc/thread-self", alloc::format!("/proc/{me}/task/{me}"))] {
+        if let Some(rest) = strip_root(&target, alias) {
+            target = alloc::format!("{real}{rest}");
+        }
+    }
+    if !fd::is_dir(&target) {
+        return if crate::fs::exists(&path) { -err::ENOTDIR } else { -err::ENOENT };
+    }
+    let target = String::from(target.trim_end_matches('/'));
+    crate::debug!("linux", "{}: chroot to {target}", user::current_name());
+    user::set_root(target);
     0
 }
 
@@ -1323,7 +1490,8 @@ fn sys_uname(buf: u64) -> i64 {
         Err(e) => return e,
     };
     out.fill(0);
-    let fields = ["Linux", "justos", "6.1.0-justos", "#1 SMP justOS", "x86_64", "(none)"];
+    let (host, domain) = ns::names();
+    let fields = ["Linux", &host, "6.1.0-justos", "#1 SMP justOS", "x86_64", &domain];
     for (i, f) in fields.iter().enumerate() {
         let at = i * 65;
         out[at..at + f.len()].copy_from_slice(f.as_bytes());
@@ -1360,11 +1528,13 @@ fn sys_prlimit(resource: u64, old: u64) -> i64 {
     0
 }
 
-fn sys_getresid(a: u64, b: u64, c: u64) -> i64 {
+/// getresuid, getresgid: the real, effective and saved ids are one.
+fn sys_getresid(a: u64, b: u64, c: u64, id: u32) -> i64 {
     for p in [a, b, c] {
         if p != 0 {
-            if let Ok(x) = user_bytes(p, 4) {
-                x.copy_from_slice(&0u32.to_le_bytes());
+            match user_bytes(p, 4) {
+                Ok(x) => x.copy_from_slice(&id.to_le_bytes()),
+                Err(e) => return e,
             }
         }
     }

@@ -85,6 +85,11 @@ fi
         "dt: inotify CaMaWaFaTbm'd'i'Db cookie=1 poll=1 again=1 rm=0 ignored=1" \
         'dt: seccomp probe=1 nnp=1 set=0,0 getpid=-1/88 getppid=4242 sys=110,1,9,1,1,1 gettid=66 prio=33,20 thread=77,1 mode=2' \
         'dt: seccomp kill 31' 'dt: strict write' 'dt: seccomp exit=0 strict 9' \
+        'dt: ns user=0 changed=1 unmapped=65534 setgroups=0 maps=0,0 again=-1 ids=0,0 caps=1' \
+        'dt: chroot helper=0 cwd=/ inside=0 up=0 nested=1' 'dt: chroot fdinfo helper=0 none=3 out=3' \
+        'dt: capset drop=0 chroot=1 back=0 none=0 up=1 now=0' \
+        'dt: ns more=0 pid=1 ppid=0 child=2 nspid=1 host=0,dt-sandbox net=101 abstract=111' \
+        'dt: ns waited=1 gone=1 ended=12' \
         'dt: prompt wake pipe=1 unix=1 futex=1'
 } > expect.txt
 

@@ -35,6 +35,9 @@ pub struct Socket {
     state: IrqLock<State>,
     /// An error a non-blocking connect left, for SO_ERROR.
     error: IrqLock<i64>,
+    /// Made in a network namespace of its own, which (as a new one on
+    /// Linux, with its loopback down) reaches nothing.
+    isolated: bool,
 }
 
 fn tcp_err(e: &str) -> i64 {
@@ -122,7 +125,8 @@ pub fn sys_socket(domain: u64, ty: u64, _proto: u64) -> i64 {
         SOCK_DGRAM => false,
         _ => return -err::EINVAL,
     };
-    let s = Socket { stream, state: IrqLock::new(State::Fresh { port: 0 }), error: IrqLock::new(0) };
+    let isolated = super::ns::net() != 0;
+    let s = Socket { stream, state: IrqLock::new(State::Fresh { port: 0 }), error: IrqLock::new(0), isolated };
     let flags = O_RDWR | if ty & SOCK_NONBLOCK != 0 { O_NONBLOCK } else { 0 };
     fd::install(Desc::new(Kind::Socket(s), flags), ty & SOCK_CLOEXEC != 0)
 }
@@ -147,6 +151,9 @@ pub fn sys_connect(fd: i32, addr: u64, len: u64) -> i64 {
         Ok(a) => a,
         Err(e) => return e,
     };
+    if s.isolated {
+        return -err::ENETUNREACH;
+    }
     if !s.stream {
         let mut st = s.state.lock();
         let my = match *st {
@@ -368,7 +375,8 @@ pub fn sys_bind(fd: i32, addr: u64, len: u64) -> i64 {
         Ok(a) => a,
         Err(e) => return e,
     };
-    if s.stream {
+    // An isolated socket's port is its namespace's, not the system's.
+    if s.stream || s.isolated {
         *s.state.lock() = State::Fresh { port };
         return 0;
     }
@@ -395,6 +403,10 @@ pub fn sys_listen(fd: i32, backlog: u64) -> i64 {
         State::Listening(..) => return 0,
         _ => return -err::EINVAL,
     };
+    // Nobody could connect: nothing to listen for.
+    if s.isolated {
+        return -err::EADDRNOTAVAIL;
+    }
     let port = if port == 0 { 40000 + (crate::time::uptime_ms() % 20000) as u16 } else { port };
     match tcp::listen(port) {
         Ok(c) => {
@@ -430,7 +442,7 @@ pub fn sys_accept4(fd: i32, addr: u64, lenp: u64, flags: u64) -> i64 {
     if let Some((_, ip, port)) = tcp::endpoints(conn) {
         write_addr(addr, lenp, ip, port);
     }
-    let ns = Socket { stream: true, state: IrqLock::new(State::Connected(conn)), error: IrqLock::new(0) };
+    let ns = Socket { stream: true, state: IrqLock::new(State::Connected(conn)), error: IrqLock::new(0), isolated: false };
     let fl = O_RDWR | if flags & SOCK_NONBLOCK != 0 { O_NONBLOCK } else { 0 };
     fd::install(Desc::new(Kind::Socket(ns), fl), flags & SOCK_CLOEXEC != 0)
 }
@@ -456,6 +468,9 @@ pub fn sys_sendto(fd: i32, ptr: u64, len: u64, flags: u64, addr: u64, alen: u64)
             Ok(a) => a,
             Err(e) => return e,
         };
+        if s.isolated {
+            return -err::ENETUNREACH;
+        }
         let my = {
             let st = s.state.lock();
             match *st {

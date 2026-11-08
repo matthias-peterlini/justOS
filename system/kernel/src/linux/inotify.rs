@@ -254,13 +254,13 @@ pub fn sys_inotify_add_watch(fd: i32, path_ptr: u64, mask: u32) -> i64 {
     if mask & IN_ALL_EVENTS == 0 || mask & IN_MASK_ADD != 0 && mask & IN_MASK_CREATE != 0 {
         return -err::EINVAL;
     }
-    let text = match user::user_cstr(path_ptr, 4096) {
+    let text = match super::path_text(path_ptr) {
         Ok(t) => t,
-        Err(e) => return -errno(e),
+        Err(e) => return e,
     };
     let path = match linux_path(&text) {
         Ok(p) => p,
-        Err(e) => return -e,
+        Err(e) => return e,
     };
     let (volume, node, kind) = match fs::node_of(&path, mask & IN_DONT_FOLLOW == 0) {
         Ok(n) => n,

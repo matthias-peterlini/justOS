@@ -80,7 +80,7 @@ struct Process {
     exit_code: Option<i64>,
     handles: Vec<Option<Handle>>,
     heap_next: u64,
-    cwd: Path,
+    fs: SharedFs,
     state: State,
     kill: bool,
     /// The app it runs as, in its sandbox (None: a system program).
@@ -98,6 +98,24 @@ struct Process {
     /// Its parent ended first: no one will wait for it.
     orphan: bool,
 }
+
+/// Where a process's paths start: its current folder and, after a Linux
+/// chroot, the folder it was shut into (a Linux path; None: the whole
+/// volume). Linux processes made with CLONE_FS share one.
+struct FsView {
+    cwd: Path,
+    root: Option<String>,
+}
+
+type SharedFs = alloc::sync::Arc<IrqLock<FsView>>;
+
+fn new_fs(cwd: Path, root: Option<String>) -> SharedFs {
+    alloc::sync::Arc::new(IrqLock::new(FsView { cwd, root }))
+}
+
+/// Set once any process has been shut into a folder: until then no path
+/// needs to be looked at for it.
+static CHROOTED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 static PROCS: IrqLock<BTreeMap<u32, Process>> = IrqLock::new(BTreeMap::new());
 static NEXT_PID: IrqLock<u32> = IrqLock::new(1);
@@ -230,7 +248,7 @@ fn start(image: Vec<u8>, name: String, args: &str, cwd: Path, kind: Kind, exe: &
             exit_code: None,
             handles: Vec::new(),
             heap_next: sys::USER_HEAP_BASE,
-            cwd,
+            fs: new_fs(cwd, None),
             state: State::Running,
             kill: false,
             app,
@@ -272,14 +290,22 @@ fn next_pid() -> u32 {
 /// the registers of `child` (the caller's, with the return value and stack
 /// set). It gets a copy of the caller's memory, or, with `share_vm`, the
 /// caller's memory itself until it execs or ends (the caller then waits in
-/// [`wait_vfork`]). Returns the child's pid and thread, created suspended:
-/// wake it with [`task::wake_new`] once its Linux state is set up.
-pub(crate) fn fork(child: TrapFrame, fs: u64, share_vm: bool) -> Result<(u32, Tid), Error> {
+/// [`wait_vfork`]). With `share_fs` (CLONE_FS) the two share their current
+/// folder and chroot folder, else the child gets a copy. Returns the
+/// child's pid and thread, created suspended: wake it with
+/// [`task::wake_new`] once its Linux state is set up.
+pub(crate) fn fork(child: TrapFrame, fs: u64, share_vm: bool, share_fs: bool) -> Result<(u32, Tid), Error> {
     let me = task::current_pid();
-    let (name, cr3, cwd, app, picked, exe, heap_next) = {
+    let (name, cr3, view, app, picked, exe, heap_next) = {
         let procs = PROCS.lock();
         let p = procs.get(&me).ok_or(Error::Unknown)?;
-        (p.name.clone(), p.cr3, p.cwd.clone(), p.app.clone(), p.picked.clone(), p.exe.clone(), p.heap_next)
+        (p.name.clone(), p.cr3, p.fs.clone(), p.app.clone(), p.picked.clone(), p.exe.clone(), p.heap_next)
+    };
+    let view = if share_fs {
+        view
+    } else {
+        let v = view.lock();
+        new_fs(v.cwd.clone(), v.root.clone())
     };
     let child_cr3 = if share_vm { cr3 } else { paging::copy_address_space(cr3).ok_or(Error::NoMemory)? };
     let pid = next_pid();
@@ -293,7 +319,7 @@ pub(crate) fn fork(child: TrapFrame, fs: u64, share_vm: bool) -> Result<(u32, Ti
             exit_code: None,
             handles: Vec::new(),
             heap_next,
-            cwd,
+            fs: view,
             state: State::Running,
             kill: false,
             app,
@@ -456,10 +482,12 @@ pub(crate) fn wait_child(want: Option<u32>, nohang: bool, stop: impl Fn() -> boo
 /// no longer there to wait for it, or will not (`reap`).
 fn settle(pid: u32, reap: bool) {
     let mut procs = PROCS.lock();
+    let mut released = Vec::new();
     let children: Vec<u32> = procs.iter().filter(|(_, p)| p.parent == Some(pid)).map(|(&id, _)| id).collect();
     for id in children {
         if procs.get(&id).is_some_and(|p| matches!(p.state, State::Exited(_))) {
             procs.remove(&id);
+            released.push(id);
         } else if let Some(p) = procs.get_mut(&id) {
             p.parent = None;
             p.orphan = true;
@@ -471,6 +499,11 @@ fn settle(pid: u32, reap: bool) {
     });
     if gone {
         procs.remove(&pid);
+        released.push(pid);
+    }
+    drop(procs);
+    for id in released {
+        crate::linux::released(id);
     }
 }
 
@@ -753,6 +786,7 @@ pub fn wait(pid: u32) -> Option<i64> {
         None => Some(None),
     });
     PROCS.lock().remove(&pid);
+    crate::linux::released(pid);
     code
 }
 
@@ -971,14 +1005,53 @@ fn writable(path: Path) -> Result<Path, Error> {
 
 /// The current folder of the calling process.
 pub(crate) fn cwd() -> Result<Path, Error> {
-    let pid = task::current_pid();
-    PROCS.lock().get(&pid).map(|p| p.cwd.clone()).ok_or(Error::Unknown)
+    let view = my_fs().ok_or(Error::Unknown)?;
+    let cwd = view.lock().cwd.clone();
+    Ok(cwd)
 }
 
 pub(crate) fn set_cwd(path: Path) {
+    if let Some(view) = my_fs() {
+        view.lock().cwd = path;
+    }
+}
+
+fn my_fs() -> Option<SharedFs> {
     let pid = task::current_pid();
-    if let Some(p) = PROCS.lock().get_mut(&pid) {
-        p.cwd = path;
+    PROCS.lock().get(&pid).map(|p| p.fs.clone())
+}
+
+/// The folder the calling process was shut into with chroot (a Linux path),
+/// if any.
+pub(crate) fn root() -> Option<String> {
+    if !CHROOTED.load(core::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
+    let view = my_fs()?;
+    let root = view.lock().root.clone();
+    root
+}
+
+/// chroot: shuts the calling process (and those sharing its fs view) into
+/// `root`, a Linux path.
+pub(crate) fn set_root(root: String) {
+    CHROOTED.store(true, core::sync::atomic::Ordering::Relaxed);
+    if let Some(view) = my_fs() {
+        view.lock().root = Some(root);
+    }
+}
+
+/// unshare(CLONE_FS): the calling process gets a copy of the view it
+/// shares.
+pub(crate) fn unshare_fs() {
+    let pid = task::current_pid();
+    let mut procs = PROCS.lock();
+    if let Some(p) = procs.get_mut(&pid) {
+        let copy = {
+            let v = p.fs.lock();
+            new_fs(v.cwd.clone(), v.root.clone())
+        };
+        p.fs = copy;
     }
 }
 
@@ -1153,7 +1226,7 @@ fn enter_app(app: crate::sandbox::App) -> Result<(), Error> {
         Some(_) => Ok(()),
         None => {
             p.app = Some(app);
-            p.cwd = home;
+            p.fs.lock().cwd = home;
             Ok(())
         }
     }
@@ -1415,7 +1488,8 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
         }
         sys::GET_CWD => {
             let pid = task::current_pid();
-            let cwd = PROCS.lock().get(&pid).map(|p| p.cwd.to_string()).ok_or(Error::Unknown)?;
+            let view = PROCS.lock().get(&pid).map(|p| p.fs.clone()).ok_or(Error::Unknown)?;
+            let cwd = view.lock().cwd.to_string();
             let buf = user_slice(a[0], a[1])?;
             let n = cwd.len().min(buf.len());
             buf[..n].copy_from_slice(&cwd.as_bytes()[..n]);

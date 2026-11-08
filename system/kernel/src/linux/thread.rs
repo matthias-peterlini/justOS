@@ -3,7 +3,7 @@
 //! for new processes (fork, vfork, posix_spawn), futexes, and thread exit
 //! with its `clear_child_tid` wake-up. Signals are in [`super::signal`].
 
-use super::{err, user_bytes, with_state};
+use super::{err, ns, user_bytes, with_state};
 use crate::arch::cpu;
 use crate::arch::idt::TrapFrame;
 use crate::mem::paging;
@@ -19,10 +19,6 @@ const CLONE_SETTLS: u64 = 0x80000;
 const CLONE_PARENT_SETTID: u64 = 0x100000;
 const CLONE_CHILD_CLEARTID: u64 = 0x200000;
 const CLONE_CHILD_SETTID: u64 = 0x1000000;
-/// New namespaces (mount, cgroup, UTS, IPC, user, PID, network): there are
-/// none, and callers fall back to doing without, as on a Linux built
-/// without them.
-const CLONE_NEW_NAMESPACES: u64 = 0x7e02_0000;
 
 /// Linux thread ids: the main thread's is the process id; the others get
 /// their kernel id moved out of the range of process ids.
@@ -35,15 +31,16 @@ pub fn linux_tid(t: Tid) -> u32 {
 }
 
 pub fn sys_gettid() -> i64 {
-    linux_tid(task::current_tid()) as i64
+    ns::local(linux_tid(task::current_tid())) as i64
 }
 
 pub fn sys_clone(frame: &TrapFrame, flags: u64, stack: u64, ptid: u64, ctid: u64, tls: u64) -> i64 {
-    if flags & CLONE_NEW_NAMESPACES != 0 {
-        return -err::EINVAL;
-    }
     if flags & CLONE_THREAD == 0 {
         return clone_process(frame, flags, stack, ptid, ctid, tls);
+    }
+    // A thread lives in its process's namespaces.
+    if flags & ns::CLONE_NAMESPACES != 0 {
+        return -err::EINVAL;
     }
     if flags & CLONE_VM == 0 {
         return -err::EINVAL; // a thread shares the memory
@@ -58,9 +55,11 @@ pub fn sys_clone(frame: &TrapFrame, flags: u64, stack: u64, ptid: u64, ctid: u64
         Ok(t) => t,
         Err(e) => return -super::errno(e),
     };
-    let lt = tid + 100_000;
     super::signal::thread_started(tid);
     super::seccomp::inherit(tid, task::current_pid());
+    ns::thread_started(tid + 100_000);
+    // The id the process sees.
+    let lt = ns::local(tid + 100_000);
     if flags & CLONE_PARENT_SETTID != 0 {
         super::mm::populate(ptid, 4);
         if let Ok(b) = user_bytes(ptid, 4) {
@@ -97,7 +96,12 @@ pub fn sys_vfork(frame: &TrapFrame) -> i64 {
 /// A new process. Without CLONE_VM (fork) it gets a copy of the memory;
 /// with it (vfork, posix_spawn) it runs in the caller's memory, on its own
 /// stack, and with CLONE_VFORK the caller waits until it execs or ends.
+/// It can have namespaces of its own ([`ns`]), and share the caller's root
+/// and current folder (CLONE_FS).
 fn clone_process(frame: &TrapFrame, flags: u64, stack: u64, ptid: u64, ctid: u64, tls: u64) -> i64 {
+    if let Err(e) = ns::check_clone(flags) {
+        return e;
+    }
     let share = flags & CLONE_VM != 0;
     let mut child = *frame;
     child.rax = 0;
@@ -105,14 +109,16 @@ fn clone_process(frame: &TrapFrame, flags: u64, stack: u64, ptid: u64, ctid: u64
         child.rsp = stack;
     }
     let fs = if flags & CLONE_SETTLS != 0 { tls } else { crate::arch::syscall::user_bases().0 };
-    let (pid, tid) = match user::fork(child, fs, share) {
+    let (pid, tid) = match user::fork(child, fs, share, flags & ns::CLONE_FS != 0) {
         Ok(v) => v,
         Err(e) => return -super::errno(e),
     };
     super::fork_state(pid, tid);
     super::seccomp::inherit(tid, pid);
-    // The child's main thread has the process's id as its thread id.
-    let id = pid.to_le_bytes();
+    ns::forked(pid, flags);
+    // The child's main thread has the process's id as its thread id: as
+    // the caller sees it, and as the child does (1 in a new PID namespace).
+    let id = ns::local(pid).to_le_bytes();
     if flags & CLONE_PARENT_SETTID != 0 {
         super::mm::populate(ptid, 4);
         if let Ok(b) = user_bytes(ptid, 4) {
@@ -120,13 +126,14 @@ fn clone_process(frame: &TrapFrame, flags: u64, stack: u64, ptid: u64, ctid: u64
         }
     }
     if flags & CLONE_CHILD_SETTID != 0 {
+        let own = ns::local_in(pid, pid).to_le_bytes();
         if share {
             super::mm::populate(ctid, 4);
             if let Ok(b) = user_bytes(ctid, 4) {
-                b.copy_from_slice(&id);
+                b.copy_from_slice(&own);
             }
         } else {
-            user::write_in(pid, ctid, &id);
+            user::write_in(pid, ctid, &own);
         }
     }
     if flags & CLONE_CHILD_CLEARTID != 0 {
@@ -138,7 +145,7 @@ fn clone_process(frame: &TrapFrame, flags: u64, stack: u64, ptid: u64, ctid: u64
     if flags & CLONE_VFORK != 0 {
         user::wait_vfork(pid);
     }
-    pid as i64
+    ns::local(pid) as i64
 }
 
 pub fn sys_set_tid_address(ptr: u64) -> i64 {
@@ -146,7 +153,7 @@ pub fn sys_set_tid_address(ptr: u64) -> i64 {
     with_state(|st| {
         st.clear_tid.insert(me, ptr);
     });
-    linux_tid(me) as i64
+    ns::local(linux_tid(me)) as i64
 }
 
 /// The calling thread ends (exit); the process goes on unless it was the
@@ -158,6 +165,9 @@ pub fn sys_exit(code: i64) -> ! {
         st.clear_tid.remove(&me)
     });
     super::seccomp::thread_ended(me);
+    if user::main_thread() != Some(me) {
+        ns::thread_ended(me + 100_000);
+    }
     if let Some(ctid) = ctid {
         if ctid != 0 {
             if let Ok(b) = user_bytes(ctid, 4) {
