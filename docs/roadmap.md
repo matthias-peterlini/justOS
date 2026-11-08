@@ -134,8 +134,8 @@ chiamate `WIN_CREATE`/`WIN_PRESENT`/`WIN_EVENT`.
 | Negozio grafico con installazione in un clic | ✅ (`sys:/store`, pacchetti `.app`) |
 | Aggiornamenti delle app in background | ✅ indice firmato Ed25519, servizio `just.updates`, sezione Aggiornamenti del Negozio |
 | Permessi in stile mobile | ✅ cartelle, dischi, fotocamera, microfono, posizione, rete (`just.permissions`) |
-| Programmi Linux (ELF) | 🟡 solo collegati staticamente (musl), senza `ld.so` (`kernel/src/linux`, `make test-linux`) |
-| Programmi Windows (PE) | 🟡 console e finestre semplici (`winrun`) |
+| Programmi Linux (ELF) | ✅ statici e dinamici con la glibc di Debian, finestre Wayland, GTK 3, Firefox ESR (`kernel/src/linux`, `make test-linux`, `make test-gtk`) |
+| Programmi Windows (PE) | 🟡 Wine 10 per i programmi a 64 bit, console e finestre (`make wine-image`); `winrun` per quelli semplici |
 | Android (DEX/APK) | 🟡 `dalvik`, programmi semplici |
 | JustScript con IDE (JustStudio) | ✅ |
 

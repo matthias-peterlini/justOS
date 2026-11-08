@@ -97,6 +97,7 @@ programma disegna.
 | `wl_shm` | buffer in memoria condivisa (`memfd`), ARGB8888 e XRGB8888; il compositor copia solo la parte cambiata e libera subito il buffer |
 | `wl_output` | lo schermo, con la sua scala: su uno schermo ad alta densità il programma disegna al doppio dei pixel |
 | `xdg_wm_base` | finestre (`xdg_toplevel`: titolo, dimensioni minime e massime, ridimensionamento dalla cornice, stato attivo, chiusura) e popup (`xdg_popup`, posizionati con le regole del loro `xdg_positioner` dentro la finestra; un clic fuori chiude un menu) |
+| `wp_viewporter` | una parte del buffer, mostrata a una dimensione data (Wine disegna in buffer più grandi delle sue finestre) |
 | `wl_seat` | puntatore (movimento, pulsanti, rotellina) e tastiera, con una mappa XKB di justOS: i tasti arrivano già tradotti dal layout scelto, anche le lettere accentate |
 | `wl_data_device_manager` | presente, ma gli appunti non passano ancora tra i programmi Linux e justOS |
 
@@ -123,6 +124,13 @@ un programma GTK prende qualche secondo.
 `make test-gtk` avvia `gtk3-widget-factory` dalla console seriale e
 controlla la sua finestra sullo schermo: c'è, ha i colori del tema e non il
 blu di Adwaita.
+
+### Firefox
+
+Anche **Firefox ESR** di Debian gira, con i suoi processi figli e le pagine
+web dalla rete: basta aggiungere `firefox-esr` a `LINUX_PKGS` (e un'immagine
+più grande, `SIZE=1G`). Sotto emulazione, senza accelerazione, la prima
+finestra arriva dopo una quarantina di secondi.
 
 ## Programmi Windows
 
@@ -165,6 +173,39 @@ Mancano il registro, i processi e i thread veri, i controlli comuni
 Com'è fatto: `system/apps/winrun/src/pe.rs` (il caricatore),
 `system/apps/winrun/src/win.rs` (`kernel32`), `crt.rs` (il runtime C) e
 `gui.rs` (`user32` e `gdi32`).
+
+### Wine
+
+`winrun` basta ai programmi piccoli. I programmi Windows veri (controlli
+comuni, registro, processi, installatori) li esegue **Wine 10** di Debian,
+senza modifiche, sopra lo strato Linux. `make wine-image` costruisce
+`build/justos-wine.img` (3 GiB) con Wine dentro:
+
+```
+cd sys:/usr/lib/wine
+./wine64 notepad              il Blocco note di Wine
+./wine64 winecfg              la configurazione di Wine
+./wine64 cmd /c echo ciao     un programma da console
+./wine64 "C:\Program Files\Windows NT\Accessories\wordpad.exe"
+```
+
+La prima volta Wine prepara il disco `C:` (il suo prefisso, in
+`/home/.wine`): ci vuole circa un minuto.
+
+Le finestre passano per il driver Wayland di Wine e diventano **finestre di
+justOS**. Wine disegna da sé la cornice di Windows, perché Wayland non gliene
+offre una del server: il compositor la riconosce dai colori della barra del
+titolo e la lascia fuori, così resta solo la cornice di justOS. Una cornice
+da finestra di dialogo, più sottile, dice che la finestra non si
+ridimensiona. `tools/linux/winelook.py` aggiunge al `wine.inf` di Wine, che
+ogni prefisso installa, l'aspetto di justOS: colori scuri con l'arancione,
+Google Sans Flex per l'interfaccia (menu, finestre di dialogo, messaggi) e
+DejaVu Sans Mono per i caratteri a larghezza fissa e il Blocco note.
+
+Provati: Blocco note, WordPad, Editor del Registro, winecfg, Task Manager,
+WineMine, `cmd`. Mancano ancora i programmi a 32 bit (servono i pacchetti
+i386 di Wine, che l'immagine non porta), Vulkan e DirectX accelerati,
+l'audio, gli appunti condivisi con justOS e le icone nell'area di notifica.
 
 ## Programmi Java e app Android
 

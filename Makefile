@@ -65,6 +65,14 @@ STORE    := $(notdir $(wildcard system/store/*))
 # its demo programs gtk3-widget-factory and gtk3-demo).
 LINUX_PKGS ?= dash libc6 libc-bin libwayland-client0 libxkbcommon0 libgtk-3-0t64 librsvg2-common gtk-3-examples
 LINUX_DIST ?= trixie
+# Packages left out although others depend on them (comma-separated):
+# libraries the programs run without.
+LINUX_SKIP ?=
+# Wine 10 for Windows programs (make wine-image). It runs without the
+# multimedia, camera, scanner, smart card, sound server and OpenCL
+# libraries its packages pull in.
+WINE_PKGS := wine wine64 libwine fonts-wine
+WINE_SKIP := libavcodec61,libavformat61,libavutil59,libcapi20-3t64,libgphoto2-6t64,libgphoto2-port12t64,libgstreamer-plugins-base1.0-0,libgstreamer1.0-0,libpcap0.8t64,libpcsclite1,libpulse0,libusb-1.0-0,ocl-icd-libopencl1,libopencl1,libopencl-1.2-1
 LINUX    := $(BUILD)/linux
 ROOT     := $(BUILD)/root
 LIVE_ROOT := $(BUILD)/liveroot
@@ -82,7 +90,7 @@ ifeq ($(PROFILE),release)
 CARGO_PROFILE := --release
 endif
 
-.PHONY: photos all uefi system tools root linux-root image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-justscript test-compat test-audio test-display test-acpi test-net test-linux test-wayland test-gtk test-update shots assets check updates clean $(PACKAGES)
+.PHONY: photos all uefi system tools root linux-root image wine-image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-justscript test-compat test-audio test-display test-acpi test-net test-linux test-wayland test-gtk test-update shots assets check updates clean $(PACKAGES)
 
 all: image
 
@@ -112,7 +120,8 @@ $(PACKAGES): $(BUILD)/drivers/%.jdp: system tools
 # The Linux libraries, unpacked from Debian's packages (downloads are kept
 # in build/debcache, so this runs offline once they are there).
 $(LINUX)/usr/PACKAGES: tools/linux/debroot.py Makefile
-	tools/linux/debroot.py --out $(LINUX) --cache $(BUILD)/debcache --dist $(LINUX_DIST) $(LINUX_PKGS)
+	tools/linux/debroot.py --out $(LINUX) --cache $(BUILD)/debcache --dist $(LINUX_DIST) \
+		$(if $(LINUX_SKIP),--skip $(LINUX_SKIP)) $(LINUX_PKGS)
 
 linux-root:
 	rm -f $(LINUX)/usr/PACKAGES
@@ -148,6 +157,12 @@ image: $(BUILD)/stage1.bin $(BUILD)/stage2.bin uefi system tools $(PACKAGES) roo
 	$(JUSTTOOL) image $(IMAGE) --size $(SIZE) --slot-size $(SLOT_SIZE) --version $(VERSION) \
 		--stage1 $(BUILD)/stage1.bin --stage2 $(BUILD)/stage2.bin --efi $(EFI_APP) \
 		--kernel $(TARGET)/just-kernel --drivers $(BUILD)/drivers --files $(ROOT)
+
+# An image with Wine too (build/justos-wine.img, 3 GiB): Windows programs
+# (docs/compat.md#wine). Its Linux tree is kept apart from the usual one.
+wine-image:
+	$(MAKE) image LINUX=$(BUILD)/winelinux ROOT=$(BUILD)/wineroot LIVE_ROOT=$(BUILD)/winelive \
+		IMAGE=$(BUILD)/justos-wine.img SIZE=3G LINUX_PKGS="$(LINUX_PKGS) $(WINE_PKGS)" LINUX_SKIP=$(WINE_SKIP)
 
 # This justOS as a system update (a slot image).
 $(BUILD)/justos-$(VERSION).slot: system tools $(PACKAGES)
