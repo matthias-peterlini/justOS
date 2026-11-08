@@ -67,6 +67,8 @@ pub enum Kind {
     Unix(super::unix::Unix),
     Epoll(super::poll::Epoll),
     Inotify(Arc<super::inotify::Inotify>),
+    /// /dev/binder and its siblings: a binder process (Android's IPC).
+    Binder(Arc<super::binder::Open>),
 }
 
 pub struct Desc {
@@ -321,6 +323,10 @@ fn virtual_stat(text: &str, follow: bool) -> Option<Result<StatInfo, i64>> {
     if virtual_dir(text).is_some() {
         return Some(Ok(StatInfo { mode: 0o040555, size: 0, time: now, ino: 4, rdev: 0 }));
     }
+    if let Some(ctx) = super::binder::device(text) {
+        // Without opening it (an open is a binder process).
+        return Some(Ok(StatInfo { mode: 0o020666, size: 0, time: now, ino: 2 + BINDER_RDEV + ctx as u64, rdev: BINDER_RDEV + ctx as u64 }));
+    }
     if let Some(kind) = virtual_file(text) {
         return Some(stat_of_desc(&Desc::new(kind, 0)));
     }
@@ -392,6 +398,7 @@ fn virtual_file(text: &str) -> Option<Kind> {
         "/dev/zero" => Some(Kind::Zero),
         "/dev/urandom" | "/dev/random" => Some(Kind::Random),
         "/dev/tty" | "/dev/console" | "/dev/stdin" | "/dev/stdout" | "/dev/stderr" => Some(Kind::Console),
+        _ if super::binder::device(text).is_some() => super::binder::device(text).map(|ctx| Kind::Binder(super::binder::open(ctx))),
         "/etc/resolv.conf" => {
             let dns = crate::net::dns_server().map(|ip| alloc::format!("{ip}")).unwrap_or_else(|| String::from("10.0.2.3"));
             data(alloc::format!("nameserver {dns}\n"))
@@ -542,6 +549,7 @@ impl Waits {
             Kind::PipeRead(p) | Kind::PipeWrite(p) => self.queue(&p.wq),
             Kind::Event(e) => self.queue(&e.wq),
             Kind::Inotify(i) => self.queue(&i.wq),
+            Kind::Binder(b) => self.queue(&b.wq),
             Kind::Unix(u) => u.waits(self),
             Kind::Epoll(e) if depth < 4 => e.waits(self, depth + 1),
             Kind::Epoll(_) | Kind::Socket(_) => self.events = true,
@@ -645,6 +653,8 @@ pub fn read_desc(d: &Desc, buf: &mut [u8]) -> i64 {
         Kind::Socket(s) => s.recv(d, buf, 0).0,
         Kind::Unix(u) => u.read(d, buf),
         Kind::Inotify(i) => i.read(d, buf),
+        // Binder is read and written through its ioctl.
+        Kind::Binder(_) => -err::EINVAL,
         Kind::PipeWrite(_) | Kind::Epoll(_) => -err::EBADF,
     }
 }
@@ -902,6 +912,9 @@ fn stat_info(path: &Path, st: Result<fs::Stat, justfs::Error>) -> Result<StatInf
     Ok(StatInfo { mode, size: st.size, time: st.modified + super::UNIX_2000, ino, rdev: 0 })
 }
 
+/// The device numbers of the binder devices (a misc device, major 10).
+const BINDER_RDEV: u64 = 0xa00 + 60;
+
 /// The stat of a /dev/shm path: the shared memory there, or ENOENT.
 fn shm_stat(text: &str) -> Option<Result<StatInfo, i64>> {
     let name = super::shm::named(text)?;
@@ -929,6 +942,7 @@ pub fn stat_of_desc(d: &Desc) -> Result<StatInfo, i64> {
         Kind::PipeRead(_) | Kind::PipeWrite(_) => simple(0o010600),
         Kind::Socket(_) | Kind::Unix(_) => simple(0o140777),
         Kind::Event(_) | Kind::Epoll(_) | Kind::Inotify(_) => simple(0o100600),
+        Kind::Binder(_) => device(0o020666, BINDER_RDEV),
     }
 }
 
@@ -1349,6 +1363,7 @@ pub fn sys_ioctl(fd: i32, req: u64, arg: u64) -> i64 {
         }
         _ => match &d.kind {
             Kind::Console => super::tty::ioctl(req, arg),
+            Kind::Binder(b) => super::binder::ioctl(b, req, arg, d.nonblocking()),
             _ => -err::ENOTTY,
         },
     }
@@ -1374,6 +1389,7 @@ pub fn readiness(d: &Desc) -> (bool, bool, bool) {
         Kind::Console => (super::tty::pending() > 0, true, false),
         Kind::Epoll(e) => (e.any_ready(), false, false),
         Kind::Inotify(i) => (i.ready(), false, false),
+        Kind::Binder(b) => (super::binder::readable(b), false, false),
         _ => (true, true, false),
     }
 }

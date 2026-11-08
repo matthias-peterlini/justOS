@@ -246,6 +246,22 @@ Com'è fatto: `system/libs/justdex/src/dex.rs` (il formato DEX),
 `format` ed espressioni regolari), `android.rs` (le viste e le attività) e
 `system/apps/dalvik/src/screen.rs` (il disegno delle finestre).
 
+### Verso Android vero: binder
+
+`dalvik` basta alle app semplici. Le app vere vogliono il loro sistema:
+ART, il framework e i servizi di Android, che parlano tra loro con
+**binder**. Il kernel ha il driver binder di Linux (protocollo 8, a 64 bit;
+`system/kernel/src/linux/binder.rs`), con i dispositivi `/dev/binder`,
+`/dev/hwbinder` e `/dev/vndbinder`: il context manager (servicemanager),
+transazioni a due vie e one-way (in fila per oggetto), chiamate annidate
+che tornano al thread che aspetta, oggetti e handle con i loro conteggi
+(`BR_INCREFS`, `BR_ACQUIRE` e i rilasci), descrittori installati in chi
+riceve, buffer con puntatori (scatter-gather), notifiche di morte, la
+richiesta di thread nuovi (`BR_SPAWN_LOOPER`) e `poll` sul dispositivo.
+`make test-linux` lo prova con due processi (`scripts/linux/binder-test.c`).
+È il primo pezzo per eseguire un'immagine di sistema Android sopra lo strato
+Linux, come fa Waydroid.
+
 ## Installare programmi
 
 Il Negozio (`sys:/store`) ha, nella categoria *Sviluppatori*, due programmi

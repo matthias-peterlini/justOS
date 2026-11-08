@@ -136,7 +136,7 @@ chiamate `WIN_CREATE`/`WIN_PRESENT`/`WIN_EVENT`.
 | Permessi in stile mobile | ✅ cartelle, dischi, fotocamera, microfono, posizione, rete (`just.permissions`) |
 | Programmi Linux (ELF) | ✅ statici e dinamici con la glibc di Debian, finestre Wayland, GTK 3, Firefox ESR (`kernel/src/linux`, `make test-linux`, `make test-gtk`) |
 | Programmi Windows (PE) | 🟡 Wine 10 per i programmi a 64 bit, console e finestre (`make wine-image`); `winrun` per quelli semplici |
-| Android (DEX/APK) | 🟡 `dalvik`, programmi semplici |
+| Android (DEX/APK) | 🟡 `dalvik`, programmi semplici; driver binder per il sistema Android vero (`kernel/src/linux/binder.rs`) |
 | JustScript con IDE (JustStudio) | ✅ |
 
 **Il browser, onestamente.** Un motore moderno (Chromium/Blink, WebKit,

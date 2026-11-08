@@ -3,7 +3,8 @@
 # memory maps and sockets: one in C (musl), one in Rust and one in Go, all
 # static, and one in C linked dynamically against glibc (the image carries
 # Debian's glibc, see tools/linux/debroot.py), built here from
-# scripts/linux/. Each is skipped (and noted) when its compiler is missing. A web server on this machine answers their
+# scripts/linux/. Another one checks the binder driver (Android's IPC)
+# with two processes. Each is skipped (and noted) when its compiler is missing. A web server on this machine answers their
 # requests at 10.0.2.2.
 #
 # EXTRA=<folder> also copies the programs in it (for example ripgrep, fd,
@@ -27,12 +28,15 @@ PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); pr
 mkdir www && echo "hello from the host" > www/hello.txt
 (cd www && exec python3 -m http.server "$PORT" --bind 127.0.0.1 >/dev/null 2>&1) & PID=$!
 
-C=0; R=0; G=0; D=0
+C=0; R=0; G=0; D=0; B=0
 if command -v musl-gcc >/dev/null 2>&1 && musl-gcc -static -O2 -o ct "$HERE/linux/threads-net.c" -lpthread 2>/dev/null; then
     strip ct; put ct ct && C=1
 fi
 if command -v gcc >/dev/null 2>&1 && gcc -O2 -o dt "$HERE/linux/dyn-test.c" 2>/dev/null; then
     strip dt; put dt dt && D=1
+fi
+if command -v gcc >/dev/null 2>&1 && gcc -O2 -o bt "$HERE/linux/binder-test.c" 2>/dev/null; then
+    strip bt; put bt bt && B=1
 fi
 if command -v cargo >/dev/null 2>&1 && rustup target list --installed 2>/dev/null | grep -q x86_64-unknown-linux-musl; then
     mkdir -p rt/src && cp "$HERE/linux/rust-test.rs" rt/src/main.rs
@@ -55,6 +59,7 @@ fi
     [ $R = 1 ] && { echo "./rtest 10.0.2.2:$PORT"; echo '@sleep 4'; }
     [ $G = 1 ] && { echo "./gtest http://10.0.2.2:$PORT/hello.txt"; echo '@sleep 8'; }
     [ $D = 1 ] && { echo "./dt"; echo '@sleep 6'; }
+    [ $B = 1 ] && { echo "./bt"; echo '@sleep 3'; }
     if [ -n "${EXTRA:-}" ]; then
         for f in "$EXTRA"/*; do
             n=$(basename "$f"); put "$f" "$n"; echo "./$n --version"; echo '@sleep 3'
@@ -91,6 +96,11 @@ fi
         'dt: ns more=0 pid=1 ppid=0 child=2 nspid=1 host=0,dt-sandbox net=101 abstract=111' \
         'dt: ns waited=1 gone=1 ended=12' \
         'dt: prompt wake pipe=1 unix=1 futex=1'
+    [ $B = 1 ] && printf '%s\n' 'bt: version 8 nowrite=1' 'bt: ping ping pid=1 euid=1 e=0 busy=1' \
+        'bt: register handle=1 type=1 increfs=1 acquire=1 e=0' 'bt: nested reply=via-nested-ok/0 e=0' \
+        'bt: fd got=via binder fd n=13 new=1 cloexec=1 e=0' 'bt: oneway sum=6 order=123 e=0' \
+        'bt: sg got=scatter-gather len=15 inarea=1 e=0' 'bt: home type=binder ptr=0x1234 cookie=0x5678 e=0' \
+        'bt: dead cookie=0xdead clear=1 spawn=1' 'bt: done deadcall=-1 exit=0'
 } > expect.txt
 
 STEP_WAIT=${STEP_WAIT:-2} "$HERE/test.sh" justos.img session.txt > out.txt 2>&1
@@ -103,5 +113,5 @@ done < expect.txt
 grep -q "unimplemented syscall\|stopped:" out.txt && grep "unimplemented syscall\|stopped:" out.txt | sed 's/^/  /' | head -5
 [ $STATUS -ne 0 ] && { echo "  the kernel stopped"; FAILED=1; }
 [ "${VERBOSE:-0}" = 1 ] && cat out.txt
-[ $FAILED = 0 ] && echo "  ok    linux ($(grep -c . expect.txt) checks, c=$C rust=$R go=$G glibc=$D)"
+[ $FAILED = 0 ] && echo "  ok    linux ($(grep -c . expect.txt) checks, c=$C rust=$R go=$G glibc=$D binder=$B)"
 exit $FAILED

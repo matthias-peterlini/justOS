@@ -276,12 +276,23 @@ pub fn sys_mmap(addr: u64, len: u64, prot: u32, flags: u32, fd: i32, off: u64) -
     let (backing, off) = if flags & MAP_ANONYMOUS != 0 {
         (if shared { Backing::Shm(super::shm::anonymous(len), true) } else { Backing::Anon }, 0)
     } else {
-        let memfd = match super::fd::get(fd) {
-            Some(d) => match &d.kind {
-                super::fd::Kind::Memfd { shm, .. } => Some(shm.clone()),
-                _ => None,
-            },
-            None => return -err::EBADF,
+        let Some(d) = super::fd::get(fd) else { return -err::EBADF };
+        let memfd = match &d.kind {
+            super::fd::Kind::Memfd { shm, .. } => Some(shm.clone()),
+            super::fd::Kind::Binder(b) => {
+                // The area where transactions arrive: the driver writes,
+                // the process reads.
+                let shm = match super::binder::area(b, len, prot) {
+                    Ok(s) => s,
+                    Err(e) => return e,
+                };
+                let at = map(addr, len, prot, flags, Backing::Shm(shm, true), 0);
+                if at >= 0 {
+                    super::binder::mapped(b, at as u64);
+                }
+                return at;
+            }
+            _ => None,
         };
         match memfd {
             Some(shm) => (Backing::Shm(shm, shared), off),

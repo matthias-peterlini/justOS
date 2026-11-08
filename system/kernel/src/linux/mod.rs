@@ -22,6 +22,7 @@
 //! namespaces ([`ns`]), capabilities and chroot give sandboxes a view of
 //! their own.
 
+mod binder;
 pub mod fd;
 mod inotify;
 pub mod mm;
@@ -68,6 +69,7 @@ pub mod err {
     pub const ENOMEM: i64 = 12;
     pub const EACCES: i64 = 13;
     pub const EFAULT: i64 = 14;
+    pub const EBUSY: i64 = 16;
     pub const EEXIST: i64 = 17;
     pub const ENOTDIR: i64 = 20;
     pub const EISDIR: i64 = 21;
@@ -417,7 +419,7 @@ pub fn show_path(path: &Path) -> String {
 }
 
 pub fn user_bytes<'a>(ptr: u64, len: u64) -> Result<&'a mut [u8], i64> {
-    user::user_slice(ptr, len).map_err(errno)
+    user::user_slice(ptr, len).map_err(|e| -errno(e))
 }
 
 // ----------------------------------------------------------------------------
