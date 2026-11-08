@@ -258,6 +258,32 @@ scrollbar slider:hover { background-color: rgba(255, 255, 255, 0.55); }
 
 notebook > header tab, notebook > header tab:backdrop { border-radius: 999px; color: #c9c6ce; }
 notebook > header tab:checked, notebook > header tab:backdrop:checked { background-color: rgba(255, 255, 255, 0.14); color: #ffffff; }
+/* Adwaita marks the tab in front with a blue line on the side of the pages
+ * (and a grey one under the pointer); here the pill's fill does. */
+notebook > header.top > tabs > tab,
+notebook > header.top > tabs > tab:hover,
+notebook > header.top > tabs > tab:checked,
+notebook > header.top > tabs > tab:checked:hover,
+notebook > header.top > tabs > tab:backdrop,
+notebook > header.top > tabs > tab:backdrop:checked,
+notebook > header.bottom > tabs > tab,
+notebook > header.bottom > tabs > tab:hover,
+notebook > header.bottom > tabs > tab:checked,
+notebook > header.bottom > tabs > tab:checked:hover,
+notebook > header.bottom > tabs > tab:backdrop,
+notebook > header.bottom > tabs > tab:backdrop:checked,
+notebook > header.left > tabs > tab,
+notebook > header.left > tabs > tab:hover,
+notebook > header.left > tabs > tab:checked,
+notebook > header.left > tabs > tab:checked:hover,
+notebook > header.left > tabs > tab:backdrop,
+notebook > header.left > tabs > tab:backdrop:checked,
+notebook > header.right > tabs > tab,
+notebook > header.right > tabs > tab:hover,
+notebook > header.right > tabs > tab:checked,
+notebook > header.right > tabs > tab:checked:hover,
+notebook > header.right > tabs > tab:backdrop,
+notebook > header.right > tabs > tab:backdrop:checked { box-shadow: none; }
 notebook, frame > border, frame > border:backdrop, .frame, .frame:backdrop { border-color: rgba(255, 255, 255, 0.10); }
 
 separator, separator:backdrop { background-color: rgba(255, 255, 255, 0.09); }
