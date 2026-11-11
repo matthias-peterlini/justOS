@@ -29,6 +29,12 @@ pub enum Font {
     Display = 7,
     /// Small bold capitals, spaced out ("OGGI", "SPAZI").
     Caps = 8,
+    /// Large plain text in the regular weight, 16 to 30 units (the control
+    /// centre, after the justOS design).
+    Text16 = 9,
+    Text20 = 10,
+    Text24 = 11,
+    Text30 = 12,
 }
 
 #[derive(Clone, Copy)]

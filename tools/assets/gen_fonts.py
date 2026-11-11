@@ -47,6 +47,10 @@ FONTS = [
     (DEJAVU, 14, TEXT, None),               # 6 terminal
     (SANS, 22, TEXT, 500),                  # 7 logo / buttons
     (SANS, 11, TEXT, 600),                  # 8 spaced capitals ("OGGI")
+    (SANS, 16, TEXT, 400),                  # 9 to 12: large plain text, regular
+    (SANS, 20, TEXT, 400),                  #   (the control centre)
+    (SANS, 24, TEXT, 400),
+    (SANS, 30, TEXT, 400),
 ]
 
 

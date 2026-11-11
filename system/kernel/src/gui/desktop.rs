@@ -57,14 +57,19 @@ const SEP_W: i32 = 19;
 /// the system menu), and the room between the dock's pills and its icons.
 const MARK_W: i32 = 64;
 const PILL_GAP: i32 = 12;
-/// The control centre: its width, the account row above the panel, the
-/// sliders' width and the height of the switches' column.
-const CC_W: i32 = 380;
-const CC_HEAD: i32 = 64;
-const CC_SLIDER: i32 = 64;
-const CC_COL: i32 = 200;
-/// The blue of a switch that is on (the network).
-const BLUE: u32 = 0xFF2F_7BEF;
+/// The control centre is drawn from the justOS design, a frame of 1440 x
+/// 1024: the measures of the control centre are the design's pixels, scaled
+/// to the screen by `Desktop::cc`. The panel, its corners and its distance
+/// from the bottom of the screen; the account's photo and the gap under it.
+const CC_W: i32 = 860;
+const CC_H: i32 = 418;
+const CC_RAD: i32 = 10;
+const CC_BOTTOM: i32 = 26;
+const CC_PHOTO: i32 = 109;
+const CC_GAP: i32 = 29;
+/// The blue of a switch that is on, the green of the battery.
+const BLUE: u32 = 0xFF00_77FF;
+const CC_GREEN: u32 = 0xFF3C_B33D;
 
 /// "16:02" and "Gio 13 Ott".
 fn clock_strings() -> (String, String) {
@@ -126,7 +131,7 @@ enum PopupKind {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tile {
     Network,
-    Sound,
+    Bluetooth,
     Quiet,
 }
 
@@ -1460,56 +1465,78 @@ impl Desktop {
     }
 
     // The control centre, as in the justOS design: the account on the
-    // darkened wallpaper, then a panel of grey glass with the switches, two
-    // tall sliders (volume, brightness) and the power buttons. It opens
-    // above the status at the right end of the dock.
+    // darkened wallpaper, then a panel of light grey glass with three
+    // switches, two tall sliders (volume, brightness), power off, lock,
+    // restart and the battery. It sits at the bottom of the screen, in the
+    // middle, over the dock (which hides while it is open).
 
-    fn control_rect(&self) -> Rect {
-        let dock = self.dock_rest();
-        let status = self.status_pill(dock);
-        let h = CC_HEAD + 12 + 14 + CC_COL + 14 + 56 + 14;
-        let x = (status.right() + 6 - CC_W).clamp(12, (self.w - CC_W - 12).max(12));
-        Rect::new(x, dock.y - 14 - h, CC_W, h)
+    /// A length of the design, in units: the design's frame (1440 x 1024)
+    /// fitted to the screen, at 0.6 to 1 times its size.
+    fn cc(&self, px: i32) -> i32 {
+        let k = (self.w * 1000 / 1440).min(self.h * 1000 / 1024).clamp(600, 1000);
+        (px * k + 500) / 1000
     }
 
-    /// The account row and the panel under it.
-    fn control_parts(&self) -> (Rect, Rect) {
-        let r = self.control_rect();
-        (Rect::new(r.x, r.y, r.w, CC_HEAD), Rect::new(r.x, r.y + CC_HEAD + 12, r.w, r.h - CC_HEAD - 12))
+    /// The panel.
+    fn control_panel(&self) -> Rect {
+        let (w, h) = (self.cc(CC_W), self.cc(CC_H));
+        Rect::new((self.w - w) / 2, self.h - self.cc(CC_BOTTOM) - h, w, h)
+    }
+
+    /// A part of the panel, in the design's pixels from its corner.
+    fn cc_rect(&self, x: i32, y: i32, w: i32, h: i32) -> Rect {
+        let p = self.control_panel();
+        Rect::new(p.x + self.cc(x), p.y + self.cc(y), self.cc(w), self.cc(h))
+    }
+
+    /// The account's photo, above the left end of the panel.
+    fn control_photo(&self) -> Rect {
+        let p = self.control_panel();
+        let d = self.cc(CC_PHOTO);
+        Rect::new(p.x - self.cc(2), p.y - self.cc(CC_GAP) - d, d, d)
+    }
+
+    /// All of the control centre: the account row and the panel.
+    fn control_rect(&self) -> Rect {
+        let p = self.control_panel();
+        let photo = self.control_photo();
+        Rect::new(photo.x, photo.y, p.right() - photo.x, p.bottom() - photo.y)
     }
 
     /// The switches, one above the other at the left of the panel.
     fn control_tiles(&self) -> [(Tile, Rect); 3] {
-        let (_, p) = self.control_parts();
-        let w = p.w - 28 - 2 * CC_SLIDER - 20;
-        let at = |row: i32| Rect::new(p.x + 14, p.y + 14 + row * 70, w, 60);
-        [(Tile::Network, at(0)), (Tile::Sound, at(1)), (Tile::Quiet, at(2))]
+        let at = |row: i32| self.cc_rect(37, 35 + row * 122, 257, 108);
+        [(Tile::Network, at(0)), (Tile::Bluetooth, at(1)), (Tile::Quiet, at(2))]
     }
 
-    /// The sliders: volume and brightness, side by side at the right.
+    /// The sliders: volume and brightness, side by side in the middle.
     fn control_sliders(&self) -> [Rect; 2] {
-        let (_, p) = self.control_parts();
-        let x = p.right() - 14 - 2 * CC_SLIDER - 10;
-        [Rect::new(x, p.y + 14, CC_SLIDER, CC_COL), Rect::new(x + CC_SLIDER + 10, p.y + 14, CC_SLIDER, CC_COL)]
+        [self.cc_rect(315, 34, 106, 353), self.cc_rect(442, 34, 106, 353)]
     }
 
-    /// The bottom row: power off (wide), lock, restart and, on a laptop, the
-    /// battery's charge.
+    /// The bar inside a slider: all of it is 100.
+    fn slider_bar(&self, s: Rect) -> Rect {
+        let w = self.cc(14).max(4);
+        let top = s.y + self.cc(44);
+        Rect::new(s.x + (s.w - w) / 2, top, w, s.bottom() - self.cc(75) - top)
+    }
+
+    /// The right column: power off (wide), lock and restart under it, and
+    /// the battery at the bottom.
     fn control_buttons(&self) -> [Rect; 4] {
-        let (_, p) = self.control_parts();
-        let y = p.y + 14 + CC_COL + 14;
-        let bat = if self.battery.is_some() { 104 } else { 0 };
-        let right = p.right() - 14 - if bat > 0 { bat + 10 } else { 0 };
-        let restart = Rect::new(right - 56, y, 56, 56);
-        let lock = Rect::new(restart.x - 10 - 56, y, 56, 56);
-        let off = Rect::new(p.x + 14, y, lock.x - 10 - (p.x + 14), 56);
-        [off, lock, restart, Rect::new(p.right() - 14 - bat, y, bat, 56)]
+        [
+            self.cc_rect(573, 35, 257, 108),
+            self.cc_rect(573, 157, 137, 108),
+            self.cc_rect(722, 157, 108, 108),
+            self.cc_rect(585, 273, 233, 112),
+        ]
     }
 
-    /// The round settings button at the right of the account row.
+    /// The settings, at the right of the account row.
     fn settings_btn(&self) -> Rect {
-        let (head, _) = self.control_parts();
-        Rect::new(head.right() - 50, head.y + (head.h - 46) / 2, 46, 46)
+        let (p, photo) = (self.control_panel(), self.control_photo());
+        let d = self.cc(48);
+        Rect::new(p.right() - self.cc(56) - d / 2, photo.y + (photo.h - d) / 2, d, d)
     }
 
     fn control_hit(&self, x: i32, y: i32) -> Option<ControlHit> {
@@ -1524,41 +1551,51 @@ impl Desktop {
             return Some(ControlHit::Brightness);
         }
         let [off, lock, restart, _] = self.control_buttons();
-        let (head, _) = self.control_parts();
+        let photo = self.control_photo();
+        let sb = self.settings_btn();
+        let account = Rect::new(photo.x, photo.y, sb.x - self.cc(16) - photo.x, photo.h);
         if off.contains(x, y) {
             Some(ControlHit::PowerOff)
         } else if lock.contains(x, y) {
             Some(ControlHit::Lock)
         } else if restart.contains(x, y) {
             Some(ControlHit::Restart)
-        } else if self.settings_btn().contains(x, y) {
+        } else if sb.contains(x, y) {
             Some(ControlHit::Settings)
-        } else if head.contains(x, y) {
+        } else if account.contains(x, y) {
             Some(ControlHit::Account)
         } else {
             None
         }
     }
 
+    /// Is `y` on the symbol at the foot of the slider `s`, under its bar?
+    fn on_slider_foot(&self, s: Rect, y: i32) -> bool {
+        y > self.slider_bar(s).bottom() + self.cc(12)
+    }
+
     fn control_press(&mut self, l: &mut Looper, hit: ControlHit, y: i32) {
+        let [vol, bri] = self.control_sliders();
         match hit {
+            ControlHit::Volume if self.on_slider_foot(vol, y) => {
+                // The speaker: the sound off, or back on.
+                let v = if crate::dev::audio::volume() == 0 { 60 } else { 0 };
+                super::change_volume(v);
+                l.damage(ui::with_shadow(self.control_rect()));
+            }
             ControlHit::Volume => {
                 self.drag = Some(Drag::Volume);
                 self.set_volume_at(l, y);
             }
             ControlHit::Brightness => {
-                self.drag = Some(Drag::Brightness);
-                self.set_brightness_at(l, y);
+                if !self.on_slider_foot(bri, y) {
+                    self.drag = Some(Drag::Brightness);
+                    self.set_brightness_at(l, y);
+                }
             }
-            ControlHit::Tile(Tile::Network) | ControlHit::Settings | ControlHit::Account => {
+            ControlHit::Tile(Tile::Network | Tile::Bluetooth) | ControlHit::Settings | ControlHit::Account => {
                 self.close_popup(l);
                 self.open_id(l, "settings");
-            }
-            ControlHit::Tile(Tile::Sound) => {
-                let v = if crate::dev::audio::volume() == 0 { 60 } else { 0 };
-                super::change_volume(v);
-                l.damage(ui::with_shadow(self.control_rect()));
-                l.damage(self.dock_zone());
             }
             ControlHit::Tile(Tile::Quiet) => {
                 self.quiet = !self.quiet;
@@ -1582,13 +1619,13 @@ impl Desktop {
     }
 
     fn set_volume_at(&mut self, l: &mut Looper, y: i32) {
-        super::change_volume(Self::tall_value(self.control_sliders()[0], y));
+        super::change_volume(Self::tall_value(self.slider_bar(self.control_sliders()[0]), y));
         l.damage(ui::with_shadow(self.control_rect()));
         l.damage(self.dock_zone());
     }
 
     fn set_brightness_at(&mut self, l: &mut Looper, y: i32) {
-        super::set_brightness(Self::tall_value(self.control_sliders()[1], y).max(20));
+        super::set_brightness(Self::tall_value(self.slider_bar(self.control_sliders()[1]), y).max(20));
         l.damage(self.screen());
     }
 
@@ -2513,97 +2550,123 @@ impl Desktop {
     }
 
     fn draw_control(&self, c: &mut Canvas) {
-        let (head, panel) = self.control_parts();
+        const BLACK: u32 = 0xFF00_0000;
+        const WHITE: u32 = 0xFFFF_FFFF;
+        const PRESSED: u32 = 0xFFEE_EEEE;
         let hover = self.control_hit(self.mouse.0, self.mouse.1);
         let lit = |h: ControlHit| hover == Some(h);
-        // Who uses this computer, on the darkened wallpaper, and the settings.
+        let icon = self.cc(25);
+        // Who uses this computer, on the darkened wallpaper: the photo, the
+        // name and the account; the settings at the right.
+        let photo = self.control_photo();
+        c.fill_circle(photo.x + photo.w / 2, photo.y + photo.h / 2, photo.w / 2, WHITE);
         let name = settings::get().name;
         let name = if name.is_empty() { String::from("Utente") } else { name };
-        let initials: String = name.chars().take(1).flat_map(|ch| ch.to_uppercase()).collect();
-        let mail = String::from("Account locale");
         let sb = self.settings_btn();
-        if lit(ControlHit::Account) {
-            c.fill_round(Rect::new(head.x, head.y + 4, sb.x - 8 - head.x, head.h - 8), (head.h - 8) / 2, 0x1FFF_FFFF);
+        let tx = photo.right() + self.cc(27);
+        let tw = sb.x - self.cc(16) - tx;
+        let (nf, _) = font_near(self.cc(30));
+        let (mf, _) = font_near(self.cc(18));
+        text_on(c, nf, tx, photo.y + self.cc(45), &text::fit(nf, &name, tw), TEXT);
+        text_on(c, mf, tx, photo.y + self.cc(73), &text::fit(mf, "Account locale", tw), TEXT);
+        if lit(ControlHit::Settings) {
+            c.fill_circle(sb.x + sb.w / 2, sb.y + sb.h / 2, sb.w / 2, 0x2EFF_FFFF);
         }
-        let (acx, acy, ar) = (head.x + 6 + 26, head.y + head.h / 2, 26);
-        c.fill_circle(acx, acy, ar, 0xFFF4_F2F5);
-        let (hh, _) = text::metrics(Font::Heading);
-        text::draw_centered(c, Font::Heading, acx, acy - hh / 2, &initials, ui::INK);
-        let tx = acx + ar + 14;
-        let tw = sb.x - tx - 10;
-        text::draw(c, Font::Heading, tx, acy - hh + 1, &text::fit(Font::Heading, &name, tw), TEXT);
-        text::draw(c, Font::Small, tx, acy + 3, &text::fit(Font::Small, &mail, tw), TEXT_DIM);
-        ui::glass(c, &self.blur, sb, sb.h / 2, if lit(ControlHit::Settings) { 0xD95A_5860 } else { 0xB33A_383F });
-        draw_gear(c, sb.x + sb.w / 2, sb.y + sb.h / 2, 11, TEXT);
+        ui::glyph(c, "l-gear", icon, sb.x + (sb.w - icon) / 2, sb.y + (sb.h - icon) / 2, TEXT);
 
-        // The panel of grey glass.
-        ui::card(c, &self.blur, panel, 32, 0xB85C_5961);
-        // The switches: a round symbol, the name and the state; the network
-        // turns blue when it is on, the others white.
+        // The panel: light grey glass, nearly opaque.
+        let panel = self.control_panel();
+        let rad = self.cc(CC_RAD);
+        c.blit_round(&self.blur, panel, rad, 0);
+        c.fill_round_grad(panel, rad, 0xEBD0_CFCC, 0xEBC3_C3C3);
+
+        // The switches: white pills, blue when on; a line symbol, the name
+        // and the state.
         let online = crate::net::online();
-        let vol = crate::dev::audio::volume();
         for (tile, r) in self.control_tiles() {
-            let (on, title, state) = match tile {
+            let (on, title, state, symbol) = match tile {
                 Tile::Network => match crate::net::address() {
-                    Some(a) if online => (true, "Rete", format!("{a}")),
-                    _ => (false, "Rete", String::from("Assente")),
+                    Some(a) if online => (true, "Rete", format!("{a}"), "l-wifi"),
+                    _ => (false, "Rete", String::from("Non connessa"), "l-wifi"),
                 },
-                Tile::Sound => (vol > 0, "Suono", String::from(if vol > 0 { "Attivo" } else { "Muto" })),
-                Tile::Quiet => (self.quiet, "Non disturbare", String::from(if self.quiet { "Attivo" } else { "Spento" })),
+                Tile::Bluetooth => (false, "Bluetooth", String::from("Non disponibile"), "l-bluetooth"),
+                Tile::Quiet => (self.quiet, "Non Disturbare", String::from(if self.quiet { "Attivo" } else { "Spento" }), "l-moon"),
             };
             let hot = lit(ControlHit::Tile(tile));
-            let (bg, knob, fg, dim) = match (on, tile) {
-                (true, Tile::Network) => (if hot { 0xFF4A_8DF5 } else { BLUE }, 0xFF5C_9AF7, TEXT, 0xE0FF_FFFF),
-                (true, _) => (if hot { 0xFFFF_FFFF } else { 0xFFF4_F2F5 }, 0xFFE2_E0E6, ui::INK, ui::INK_DIM),
-                (false, _) => (if hot { 0x40FF_FFFF } else { 0x29FF_FFFF }, 0xFF6E_6B74, TEXT, TEXT_DIM),
+            let (bg, dim) = match (on, hot) {
+                (true, false) => (BLUE, 0xFF00_358D),
+                (true, true) => (0xFF1F_88FF, 0xFF00_358D),
+                (false, false) => (WHITE, 0xFF66_6666),
+                (false, true) => (PRESSED, 0xFF66_6666),
             };
-            c.fill_round(r, 22, bg);
-            let (cx, cy, rad) = (r.x + 10 + 20, r.y + r.h / 2, 20);
-            c.fill_circle(cx, cy, rad, knob);
-            match tile {
-                Tile::Network => ui::glyph(c, "g-wifi", 20, cx - 10, cy - 10, fg),
-                Tile::Sound => ui::glyph(c, if vol > 0 { "g-volume" } else { "g-mute" }, 20, cx - 10, cy - 10, fg),
-                Tile::Quiet => ui::glyph(c, "g-moon", 20, cx - 10, cy - 10, fg),
-            }
-            let tx = cx + rad + 10;
-            let tw = r.right() - tx - 10;
-            text::draw(c, Font::Strong, tx, r.y + 11, &text::fit(Font::Strong, title, tw), fg);
-            text::draw(c, Font::Small, tx, r.y + 31, &text::fit(Font::Small, &state, tw), dim);
+            c.fill_round(r, r.h / 2, bg);
+            ui::glyph(c, symbol, icon, r.x + self.cc(50) - icon / 2, r.y + (r.h - icon) / 2, BLACK);
+            let tx = r.x + self.cc(92);
+            let tw = r.right() - self.cc(20) - tx;
+            let (tf, _) = font_fitting(self.cc(24), title, tw);
+            let (sf, _) = font_near(self.cc(16));
+            text_on(c, tf, tx, r.y + self.cc(52), title, BLACK);
+            text_on(c, sf, tx, r.y + self.cc(73), &text::fit(sf, &state, tw), dim);
         }
-        // Volume and brightness: tall dark pills filled with white from the
-        // bottom, their symbol at the foot.
+
+        // Volume and brightness: tall white pills with a black bar that
+        // fills from the bottom, their symbol at the foot.
+        let vol = crate::dev::audio::volume();
         for (i, s) in self.control_sliders().iter().enumerate() {
             let v = if i == 0 { vol } else { super::brightness() };
-            c.fill_round(*s, s.w / 2, 0xF214_1316);
-            let fill = (s.h * v.min(100) as i32 / 100).max(s.w);
-            c.fill_round(Rect::new(s.x, s.bottom() - fill, s.w, fill), s.w / 2, 0xFFF4_F2F5);
-            let (gx, gy) = (s.x + (s.w - 24) / 2, s.bottom() - s.w / 2 - 12);
-            if i == 0 {
-                ui::glyph(c, if vol == 0 { "g-mute" } else { "g-volume" }, 24, gx, gy, ui::INK);
-            } else {
-                ui::glyph(c, "g-sun", 24, gx, gy, ui::INK);
+            c.fill_round(*s, s.w / 2, WHITE);
+            let bar = self.slider_bar(*s);
+            c.fill_round(bar, bar.w / 2, 0xFFDD_DDDD);
+            if v > 0 {
+                let fill = (bar.h * v.min(100) as i32 / 100).max(bar.w);
+                c.fill_round(Rect::new(bar.x, bar.bottom() - fill, bar.w, fill), bar.w / 2, BLACK);
             }
+            let symbol = match (i, vol) {
+                (0, 0) => "l-mute",
+                (0, _) => "l-volume",
+                _ => "l-sun",
+            };
+            ui::glyph(c, symbol, icon, s.x + (s.w - icon) / 2, s.bottom() - self.cc(46) - icon / 2, BLACK);
         }
-        // Power off on a wide white pill; lock and restart; the battery.
+
+        // Power off on a wide white pill, lock and restart under it.
         let [off, lock, restart, bat] = self.control_buttons();
-        c.fill_round(off, off.h / 2, if lit(ControlHit::PowerOff) { 0xFFFF_FFFF } else { 0xFFF4_F2F5 });
-        let (sh, _) = text::metrics(Font::Strong);
-        let gx = off.x + (off.w - 22 - 10 - text::width(Font::Strong, "Spegni")) / 2;
-        ui::glyph(c, "g-power", 22, gx, off.y + (off.h - 22) / 2, ui::INK);
-        text::draw(c, Font::Strong, gx + 32, off.y + (off.h - sh) / 2, "Spegni", ui::INK);
-        for (r, h) in [(lock, ControlHit::Lock), (restart, ControlHit::Restart)] {
-            let (cx, cy) = (r.x + r.w / 2, r.y + r.h / 2);
-            c.fill_circle(cx, cy, r.w / 2, if lit(h) { 0x40FF_FFFF } else { 0x29FF_FFFF });
-            if h == ControlHit::Lock {
-                ui::glyph(c, "g-lock", 22, cx - 11, cy - 11, TEXT);
-            } else {
-                ui::glyph(c, "g-reload", 22, cx - 11, cy - 11, TEXT);
-            }
+        c.fill_round(off, off.h / 2, if lit(ControlHit::PowerOff) { PRESSED } else { WHITE });
+        ui::glyph(c, "l-power", icon, off.x + self.cc(60) - icon / 2, off.y + (off.h - icon) / 2, BLACK);
+        let (bf, size) = font_near(self.cc(24));
+        text_on(c, bf, off.x + self.cc(111), off.y + off.h / 2 + size * 7 / 20, "Spegni", BLACK);
+        for (r, h, symbol) in [(lock, ControlHit::Lock, "l-lock"), (restart, ControlHit::Restart, "l-restart")] {
+            c.fill_round(r, r.h / 2, if lit(h) { PRESSED } else { WHITE });
+            ui::glyph(c, symbol, icon, r.x + (r.w - icon) / 2, r.y + (r.h - icon) / 2, BLACK);
         }
-        if let Some((pct, charging)) = self.battery {
-            c.fill_round(bat, bat.h / 2, 0x29FF_FFFF);
-            draw_battery_ring(c, bat.x + 28, bat.y + bat.h / 2, 15, 4, pct, charging, 0x33FF_FFFF, TEXT);
-            text::draw(c, Font::Strong, bat.x + 52, bat.y + (bat.h - sh) / 2, &format!("{pct} %"), TEXT);
+
+        // The battery: a green ring round its charge (red when low); a
+        // computer without one runs on its power supply.
+        let thick = self.cc(20).max(4);
+        let (pct, label, ring, charging) = match self.battery {
+            Some((pct, charging)) => {
+                let ring = if pct <= 10 && !charging { ui::RED } else { CC_GREEN };
+                (u32::from(pct.min(100)), format!("{pct} %"), ring, charging)
+            }
+            None => (100, String::from("Alimentatore"), CC_GREEN, false),
+        };
+        if pct < 100 {
+            c.stroke_round(bat, bat.h / 2, thick, 0x2E00_0000);
+        }
+        stroke_pill_part(c, bat, thick, pct * 10, ring);
+        let room = bat.w - 2 * thick - self.cc(24);
+        let (lf, size) = font_fitting(self.cc(24), &label, room);
+        let (_, ascent) = text::metrics(lf);
+        let (cx, base) = (bat.x + bat.w / 2, bat.y + bat.h / 2 + size * 7 / 20);
+        text::draw_centered(c, lf, cx, base - ascent, &label, BLACK);
+        if charging {
+            // A bolt before the charge.
+            let h = size * 7 / 10;
+            let x = cx - text::width(lf, &label) / 2 - self.cc(10).max(6);
+            let pts = [(x + 2, base - h), (x - 3, base - h / 2 + 1), (x + 2, base - h / 2 - 1), (x - 2, base)];
+            for i in 0..3 {
+                c.line(pts[i].0, pts[i].1, pts[i + 1].0, pts[i + 1].1, 2, BLACK);
+            }
         }
     }
 
@@ -2801,12 +2864,73 @@ fn capitalize(s: &str) -> String {
 }
 
 /// A gear `2 * r` wide: a ring with eight teeth.
-fn draw_gear(c: &mut Canvas, cx: i32, cy: i32, r: i32, color: u32) {
-    c.arc(cx, cy, r * 3 / 4, (r * 3 / 10).max(2), 1000, color);
-    // The diagonals at 0.707 ~ 7/10.
-    for (ux, uy) in [(10, 0), (-10, 0), (0, 10), (0, -10), (7, 7), (-7, 7), (7, -7), (-7, -7)] {
-        let a = r * 6 / 10;
-        c.line(cx + a * ux / 10, cy + a * uy / 10, cx + r * ux / 10, cy + r * uy / 10, (r / 4).max(2), color);
+/// The regular fonts of the interface and their sizes in units, smallest
+/// first (the control centre picks among them for its scale).
+const FONT_SIZES: [(Font, i32); 6] =
+    [(Font::Small, 12), (Font::Body, 14), (Font::Text16, 16), (Font::Text20, 20), (Font::Text24, 24), (Font::Text30, 30)];
+
+/// The font nearest to `px` units, and its size.
+fn font_near(px: i32) -> (Font, i32) {
+    FONT_SIZES.iter().copied().min_by_key(|&(_, s)| (s - px).abs()).unwrap_or((Font::Body, 14))
+}
+
+/// The font nearest to `px` units in which `s` fits in `max` units (or the
+/// smallest), and its size.
+fn font_fitting(px: i32, s: &str, max: i32) -> (Font, i32) {
+    let (_, near) = font_near(px);
+    FONT_SIZES.iter().rev().copied().filter(|&(_, size)| size <= near).find(|&(f, _)| text::width(f, s) <= max).unwrap_or(FONT_SIZES[0])
+}
+
+/// Draws `s` with its baseline at `base`.
+fn text_on(c: &mut Canvas, font: Font, x: i32, base: i32, s: &str, color: u32) {
+    let (_, ascent) = text::metrics(font);
+    text::draw(c, font, x, base - ascent, s, color);
+}
+
+/// The outline of the pill `r`, `thick` wide, from the middle of its top
+/// clockwise for `permille` of its length.
+fn stroke_pill_part(c: &mut Canvas, r: Rect, thick: i32, permille: u32, color: u32) {
+    if permille >= 1000 {
+        c.stroke_round(r, r.h / 2, thick, color);
+        return;
+    }
+    let rad = r.h / 2;
+    let (lc, rc, mid) = (r.x + rad, r.right() - rad, r.x + r.w / 2);
+    let straight = rc - lc;
+    // Half a turn along the middle of the stroke.
+    let bend = (314 * (2 * rad - thick) / 200).max(1);
+    let mut left = (2 * straight + 2 * bend) * permille as i32 / 1000;
+    let saved = c.clip();
+    // The top, from the middle to the right end.
+    let n = left.min(rc - mid);
+    if n > 0 {
+        c.fill(Rect::new(mid, r.y, n, thick), color);
+    }
+    left -= rc - mid;
+    if left > 0 {
+        // The right end, from the top down.
+        c.set_clip(saved.intersect(&Rect::new(rc, r.y, r.right() - rc, r.h)));
+        c.arc(rc, r.y + rad, rad, thick, (left.min(bend) * 500 / bend) as u32, color);
+        c.set_clip(saved);
+        left -= bend;
+    }
+    if left > 0 {
+        // The bottom, right to left.
+        let n = left.min(straight);
+        c.fill(Rect::new(rc - n, r.bottom() - thick, n, thick), color);
+        left -= straight;
+    }
+    if left > 0 {
+        // The left end, from the bottom up: the turn from the top, of which
+        // only the left half shows.
+        c.set_clip(saved.intersect(&Rect::new(r.x, r.y, lc - r.x, r.h)));
+        c.arc(lc, r.y + rad, rad, thick, 500 + (left.min(bend) * 500 / bend) as u32, color);
+        c.set_clip(saved);
+        left -= bend;
+    }
+    if left > 0 {
+        // The top, from the left end to the middle.
+        c.fill(Rect::new(lc, r.y, left.min(mid - lc), thick), color);
     }
 }
 
@@ -3250,7 +3374,9 @@ impl Desktop {
             let a = 0xC8 * p.anim.out() / 1000;
             c.fill_round_grad(self.screen(), 0, 0, a << 24);
         }
-        if self.dock_shown() && r.overlaps(&self.dock_zone()) {
+        // The control centre covers the dock, as in the design.
+        let control = self.popup.as_ref().is_some_and(|p| p.kind == PopupKind::Control);
+        if self.dock_shown() && !control && r.overlaps(&self.dock_zone()) {
             self.draw_dock(c);
         }
         if !clock_under && r.overlaps(&self.clock_zone()) {

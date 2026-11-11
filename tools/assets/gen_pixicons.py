@@ -621,6 +621,163 @@ G_PREV = g(*mirror(hcat(tri_right(9), tri_right(9))))
 
 
 # ----------------------------------------------------------------------------
+# Line symbols of the control centre: thin strokes on a grid of 24 units,
+# drawn as vectors (not on the pixel grid), as in the justOS design.
+
+LU = BIG / 24      # one unit of the 24 grid, in drawing pixels
+LINE = 2.0         # the stroke, in units
+
+
+def line_symbol(*parts):
+    """A white symbol drawn by `parts` (functions of an ImageDraw on a mask)."""
+    def draw():
+        mask = Image.new("L", (BIG, BIG), 0)
+        d = ImageDraw.Draw(mask)
+        for part in parts:
+            part(d)
+        img = Image.new("RGBA", (BIG, BIG), WHITE)
+        img.putalpha(mask)
+        return img
+    return draw
+
+
+def _p(x, y):
+    return (x * LU, y * LU)
+
+
+def l_dot(x, y, r):
+    return lambda d: d.ellipse([(x - r) * LU, (y - r) * LU, (x + r) * LU, (y + r) * LU], fill=255)
+
+
+def l_path(pts, w=LINE, closed=False, round_ends=True):
+    """A polyline with round joins; round ends unless `round_ends` is off
+    (then they are cut square to the last segment)."""
+    def part(d):
+        q = [_p(x, y) for x, y in pts]
+        if closed:
+            q = q + q[:2]
+        d.line(q, fill=255, width=round(w * LU), joint="curve")
+        if closed or round_ends:
+            ends = pts[:1] if closed else (pts[0], pts[-1])
+            for x, y in ends:
+                l_dot(x, y, w / 2)(d)
+    return part
+
+
+def l_ring(cx, cy, r, w=LINE):
+    """A circle of radius `r` (to the middle of the stroke)."""
+    o = r + w / 2
+    return lambda d: d.ellipse([(cx - o) * LU, (cy - o) * LU, (cx + o) * LU, (cy + o) * LU],
+                               outline=255, width=round(w * LU))
+
+
+def l_box(x0, y0, x1, y1, rad, w=LINE):
+    """A rounded rectangle; the box is the middle of the stroke."""
+    h = w / 2
+    return lambda d: d.rounded_rectangle([(x0 - h) * LU, (y0 - h) * LU, (x1 + h) * LU, (y1 + h) * LU],
+                                         radius=(rad + h) * LU, outline=255, width=round(w * LU))
+
+
+def l_fill(pts):
+    return lambda d: d.polygon([_p(x, y) for x, y in pts], fill=255)
+
+
+def arc_pts(cx, cy, r, a0, a1, n=64):
+    """Points on a circle from angle `a0` to `a1` (degrees, 0 = right,
+    counter-clockwise as on paper)."""
+    out = []
+    for i in range(n + 1):
+        a = math.radians(a0 + (a1 - a0) * i / n)
+        out.append((cx + r * math.cos(a), cy - r * math.sin(a)))
+    return out
+
+
+def circles_meet(c0, r0, c1, r1):
+    """The two points where two circles cross."""
+    (x0, y0), (x1, y1) = c0, c1
+    dx, dy = x1 - x0, y1 - y0
+    dist = math.hypot(dx, dy)
+    a = (r0 * r0 - r1 * r1 + dist * dist) / (2 * dist)
+    h = math.sqrt(max(0.0, r0 * r0 - a * a))
+    mx, my = x0 + a * dx / dist, y0 + a * dy / dist
+    return (mx + h * dy / dist, my - h * dx / dist), (mx - h * dy / dist, my + h * dx / dist)
+
+
+def angle_of(c, p):
+    return math.degrees(math.atan2(-(p[1] - c[1]), p[0] - c[0])) % 360
+
+
+def moon_outline():
+    # A crescent: the circle O less the circle K, open towards the top right.
+    oc, orad = (12.0, 12.6), 8.4
+    kc, krad = (17.6, 6.6), 6.3
+    p, q = circles_meet(oc, orad, kc, krad)
+    # p and q in order: the horn at the top first.
+    top, right = (p, q) if p[1] < q[1] else (q, p)
+    a_top, a_right = angle_of(oc, top), angle_of(oc, right)
+    # The outer edge: from the top horn round the left and the bottom.
+    if a_right < a_top:
+        a_right += 360
+    outer = arc_pts(*oc, orad, a_top, a_right, 96)
+    # The inner edge: K's arc that faces O's centre, back to the top horn.
+    k_right, k_top = angle_of(kc, right), angle_of(kc, top)
+    if k_top < k_right:
+        k_top += 360
+    face = angle_of(kc, oc)
+    if not (k_right <= face <= k_top or k_right <= face + 360 <= k_top):
+        k_top -= 360
+    inner = arc_pts(*kc, krad, k_right, k_top, 64)
+    return l_path(outer + inner[1:], closed=True)
+
+
+def gear_outline():
+    pts = []
+    for i in range(240):
+        a = 2 * math.pi * i / 240
+        r = 8.1 + 1.25 * math.cos(6 * a)
+        pts.append((12 + r * math.sin(a), 12 - r * math.cos(a)))
+    return l_path(pts, closed=True)
+
+
+SPEAKER = [(3.4, 9.4), (6.8, 9.4), (11.0, 5.6), (11.0, 18.4), (6.8, 14.6), (3.4, 14.6)]
+L_WIFI = line_symbol(
+    l_dot(12, 19.3, 1.9),
+    *(l_fill(arc_pts(12, 19.3, r + 1.2, 50, 130) + arc_pts(12, 19.3, r - 1.2, 130, 50)) for r in (5.3, 9.5, 13.7)),
+)
+L_MOON = line_symbol(moon_outline())
+L_VOLUME = line_symbol(
+    l_path(SPEAKER, closed=True),
+    l_path(arc_pts(11.6, 12, 4.6, -42, 42, 32)),
+    l_path(arc_pts(11.6, 12, 8.4, -48, 48, 48)),
+)
+L_MUTE = line_symbol(
+    l_path(SPEAKER, closed=True),
+    l_path([(15.2, 9.4), (20.4, 14.6)]),
+    l_path([(20.4, 9.4), (15.2, 14.6)]),
+)
+L_SUN = line_symbol(
+    l_ring(12, 12, 4.0),
+    *(l_path([(12 + 7.2 * math.cos(math.radians(a)), 12 - 7.2 * math.sin(math.radians(a))),
+              (12 + 10.2 * math.cos(math.radians(a)), 12 - 10.2 * math.sin(math.radians(a)))],
+             round_ends=False) for a in range(0, 360, 45)),
+)
+L_POWER = line_symbol(l_ring(12, 12, 9.0), l_box(9.0, 9.0, 15.0, 15.0, 0.8))
+L_GEAR = line_symbol(gear_outline(), l_ring(12, 12, 3.1))
+L_LOCK = line_symbol(
+    l_box(5.6, 10.6, 18.4, 20.6, 2.2),
+    l_path([(8.4, 10.6)] + arc_pts(12, 7.4, 3.6, 180, 0, 32) + [(15.6, 10.6)], round_ends=False),
+    l_dot(12, 15.6, 1.6),
+)
+L_RESTART = line_symbol(
+    l_path(arc_pts(12, 12.4, 7.4, 45, 345, 96)),
+    l_path([(14.6, 9.6), (19.4, 9.6), (19.4, 4.8)]),
+)
+L_BLUETOOTH = line_symbol(
+    l_path([(6.6, 7.4), (16.8, 16.8), (12.0, 21.4), (12.0, 2.6), (16.8, 7.2), (6.6, 16.6)]),
+)
+
+
+# ----------------------------------------------------------------------------
 # The atlas
 
 ICONS = [
@@ -711,6 +868,16 @@ ICONS = [
     ("g-plane", lambda: glyph(G_PLANE)),
     ("g-lock", lambda: glyph(G_LOCK)),
     ("g-bell", lambda: glyph(G_BELL)),
+    ("l-wifi", L_WIFI),
+    ("l-moon", L_MOON),
+    ("l-volume", L_VOLUME),
+    ("l-mute", L_MUTE),
+    ("l-sun", L_SUN),
+    ("l-power", L_POWER),
+    ("l-gear", L_GEAR),
+    ("l-lock", L_LOCK),
+    ("l-restart", L_RESTART),
+    ("l-bluetooth", L_BLUETOOTH),
 ]
 
 
