@@ -402,3 +402,53 @@ pub fn sys_futex(addr: u64, op: u64, val: u64, ts: u64, addr2: u64, val3: u64) -
         _ => -err::ENOSYS,
     }
 }
+
+/// set_thread_area: one of the calling thread's own segment descriptors
+/// (three, as on Linux: selectors 0x63, 0x6b and 0x73), from a `user_desc`.
+/// An entry number of -1 asks for a free one, and the number is written
+/// back. Only 32-bit data segments are made, as Linux allows.
+pub fn sys_set_thread_area(ptr: u64) -> i64 {
+    use crate::arch::{cpu, gdt};
+    let b = match user_bytes(ptr, 16) {
+        Ok(b) => b,
+        Err(e) => return e,
+    };
+    let word = |i: usize| u32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
+    let (entry, base, limit, flags) = (word(0) as i32, word(1) as u64, word(2) as u64, word(3));
+    let (seg_32bit, contents, read_only) = (flags & 1 != 0, flags >> 1 & 3, flags & 8 != 0);
+    let (in_pages, not_present, useable) = (flags & 0x10 != 0, flags & 0x20 != 0, flags & 0x40 != 0);
+    // Linux's two ways to say "no segment".
+    let empty = base == 0 && limit == 0 && (flags & 0x7f == 0 || flags & 0x7f == 0x28);
+    if !empty && (!seg_32bit || contents > 1 || not_present) {
+        return -err::EINVAL;
+    }
+    let descriptor = if empty {
+        0
+    } else {
+        // Present, ring 3, data, already marked accessed.
+        let access = 0xF1 | (!read_only as u64) << 1 | ((contents & 1) as u64) << 2;
+        let size = (useable as u64) | 1 << 2 | (in_pages as u64) << 3;
+        (limit & 0xFFFF) | (base & 0xFF_FFFF) << 16 | access << 40 | (limit >> 16 & 0xF) << 48 | size << 52 | (base >> 24 & 0xFF) << 56
+    };
+    let on = cpu::irq_save();
+    let tls = gdt::segments().tls;
+    let index = match entry {
+        -1 => tls.iter().position(|&d| d == 0),
+        e if (gdt::TLS_FIRST as i32..(gdt::TLS_FIRST + gdt::TLS_COUNT) as i32).contains(&e) => Some(e as usize - gdt::TLS_FIRST),
+        _ => None,
+    };
+    if let Some(i) = index {
+        gdt::set_tls(i, descriptor);
+    }
+    cpu::irq_restore(on);
+    match index {
+        Some(i) => {
+            if entry == -1 {
+                b[..4].copy_from_slice(&((gdt::TLS_FIRST + i) as u32).to_le_bytes());
+            }
+            0
+        }
+        None if entry == -1 => -err::ESRCH,
+        None => -err::EINVAL,
+    }
+}

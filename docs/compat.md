@@ -185,7 +185,7 @@ Com'è fatto: `system/apps/winrun/src/pe.rs` (il caricatore),
 `winrun` basta ai programmi piccoli. I programmi Windows veri (controlli
 comuni, registro, processi, installatori) li esegue **Wine 10** di Debian,
 senza modifiche, sopra lo strato Linux. `make wine-image` costruisce
-`build/justos-wine.img` (3 GiB) con Wine dentro:
+`build/justos-wine.img` (5 GiB) con Wine dentro:
 
 ```
 cd sys:/usr/lib/wine
@@ -209,9 +209,30 @@ Google Sans Flex per l'interfaccia (menu, finestre di dialogo, messaggi) e
 DejaVu Sans Mono per i caratteri a larghezza fissa e il Blocco note.
 
 Provati: Blocco note, WordPad, Editor del Registro, winecfg, Task Manager,
-WineMine, `cmd`. Mancano ancora i programmi a 32 bit (servono i pacchetti
-i386 di Wine, che l'immagine non porta), Vulkan e DirectX accelerati,
-l'audio, gli appunti condivisi con justOS e le icone nell'area di notifica.
+WineMine, `cmd`. Mancano ancora Vulkan e DirectX accelerati, l'audio, gli
+appunti condivisi con justOS e le icone nell'area di notifica.
+
+**Programmi a 32 bit.** Wine li esegue nel suo modo "nuovo WoW64": il
+caricatore resta a 64 bit e passa al codice a 32 bit cambiando segmento,
+senza librerie Linux a 32 bit. Servono solo le DLL a 32 bit, che
+`tools/linux/debroot.py` prende dal pacchetto `libwine` per i386 della stessa
+versione (controllando lo SHA-256) e mette in
+`/usr/lib/x86_64-linux-gnu/wine/i386-windows`. Il kernel fa la sua parte
+con i selettori di Linux (0x23 codice a 32 bit, 0x2b dati, 0x33 codice a
+64 bit), tre descrittori TLS per thread (`set_thread_area`, anche da
+`int 0x80`) e i registri di segmento salvati a ogni cambio di thread
+(`arch/gdt.rs`, `linux/thread.rs`).
+
+```
+./wine64 C:\windows\syswow64\cmd.exe /c echo ciao     console, a 32 bit
+./wine64 C:\windows\syswow64\notepad.exe              con finestra, a 32 bit
+```
+
+Provati: `cmd` e il Blocco note a 32 bit. Un programma con licenza chiede
+l'accesso con l'account di chi lo usa, come su Windows: justOS non aggira
+nessun controllo. L'installatore web di AutoCAD 2027 parte ma si ferma dopo
+pochi secondi, prima di mostrare una finestra (un suo programma a 64 bit
+cade dentro Wine); AutoCAD recente non funziona con Wine nemmeno su Linux.
 
 ## Programmi Java e app Android
 
@@ -330,7 +351,7 @@ anche senza estensione) lo avvia nel Terminale.
   (`SIGSTOP`, `SIGTSTP`) non ci sono ancora. Le finestre si disegnano con il processore
   (niente OpenGL o Vulkan, niente `linux-dmabuf`) e non c'è un server X11:
   servono programmi che parlano Wayland.
-- **Windows a 32 bit**: non ancora.
+- **Windows a 32 bit**: solo con Wine (`make wine-image`); `winrun` esegue solo programmi a 64 bit.
 
 ## Provarlo
 

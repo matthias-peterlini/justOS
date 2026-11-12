@@ -360,6 +360,53 @@ def caches(out):
         print("debroot: made " + ", ".join(made))
 
 
+def wine32(a, pkgs, names):
+    """Wine's DLLs for 32-bit Windows programs. Debian keeps them in the
+    i386 build of libwine, next to 32-bit Linux libraries a 64-bit system
+    has no use for; Wine's 64-bit loader runs 32-bit programs with the DLLs
+    alone (its "new WoW64" mode), looking for them beside the 64-bit ones.
+    So only those files are taken, from the package of the same version."""
+    version = pkgs["libwine"]["Version"]
+    path = os.path.join(a.cache, f"{a.dist}-main-i386-Packages.xz")
+    if a.refresh or not os.path.exists(path):
+        print(f"debroot: index {a.dist}/main (i386)", file=sys.stderr)
+        fetch(f"{a.mirror}/dists/{a.dist}/main/binary-i386/Packages.xz", path)
+    fields = None
+    for block in lzma.open(path, "rt", encoding="utf-8", errors="replace").read().split("\n\n"):
+        if block.startswith("Package: libwine\n"):
+            f = dict(line.split(": ", 1) for line in block.splitlines() if ": " in line and not line.startswith(" "))
+            if f.get("Version") == version:
+                fields = f
+    if fields is None:
+        print(f"debroot: no i386 libwine {version}: 32-bit Windows programs will not run", file=sys.stderr)
+        return 0
+    deb = os.path.join(a.cache, "pool", os.path.basename(fields["Filename"]))
+    if not os.path.exists(deb) or sha256(deb) != fields["SHA256"]:
+        print(f"debroot: download libwine:i386 {version}", file=sys.stderr)
+        fetch(f"{a.mirror}/{fields['Filename']}", deb)
+        if sha256(deb) != fields["SHA256"]:
+            os.remove(deb)
+            raise SystemExit("debroot: libwine:i386: checksum mismatch")
+    src, dst = "usr/lib/i386-linux-gnu/wine/i386-windows/", "usr/lib/x86_64-linux-gnu/wine/i386-windows/"
+    files = 0
+    with data_tar(deb) as tar:
+        for m in tar.getmembers():
+            rel = usr_path(m.name)
+            if not m.isfile() or not rel.startswith(src) or "/" in rel[len(src):]:
+                continue
+            rel = names.place(dst + rel[len(src):], False)
+            if rel is None:
+                continue
+            dest = os.path.join(a.out, rel)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with tar.extractfile(m) as s, open(dest, "wb") as f:
+                shutil.copyfileobj(s, f)
+            os.chmod(dest, 0o644)
+            files += 1
+    print(f"debroot: {files} DLLs for 32-bit Windows programs (libwine:i386 {version})")
+    return files
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("packages", nargs="+")
@@ -397,6 +444,8 @@ def main():
                 os.remove(deb)
                 raise SystemExit(f"debroot: {n}: checksum mismatch")
         total += unpack(deb, a.out, a.keep_docs, names)
+    if "libwine" in chosen:
+        total += wine32(a, pkgs, names)
     # /bin/sh is dash, as Debian's install scripts would make it.
     sh = os.path.join(a.out, "usr", "bin", "sh")
     if os.path.exists(os.path.join(a.out, "usr", "bin", "dash")) and not os.path.lexists(sh):

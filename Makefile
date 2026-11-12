@@ -163,7 +163,7 @@ image: $(BUILD)/stage1.bin $(BUILD)/stage2.bin uefi system tools $(PACKAGES) roo
 # (docs/compat.md#wine). Its Linux tree is kept apart from the usual one.
 wine-image:
 	$(MAKE) image LINUX=$(BUILD)/winelinux ROOT=$(BUILD)/wineroot LIVE_ROOT=$(BUILD)/winelive \
-		IMAGE=$(BUILD)/justos-wine.img SIZE=3G LINUX_PKGS="$(LINUX_PKGS) $(WINE_PKGS)" LINUX_SKIP=$(WINE_SKIP)
+		IMAGE=$(BUILD)/justos-wine.img SIZE=5G LINUX_PKGS="$(LINUX_PKGS) $(WINE_PKGS)" LINUX_SKIP=$(WINE_SKIP)
 
 # This justOS as a system update (a slot image).
 $(BUILD)/justos-$(VERSION).slot: system tools $(PACKAGES)

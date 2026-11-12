@@ -847,6 +847,24 @@ fn traced_path(n: u64, a: &[u64; 6]) -> String {
     user::user_cstr(ptr, 200).map(|s| alloc::format!(" \"{s}\"")).unwrap_or_default()
 }
 
+/// `int 0x80` from a Linux program: the system calls of 32-bit Linux, by
+/// their numbers there and with 32-bit arguments. Only what a 64-bit
+/// program has a reason to ask this way is here: a descriptor for a 32-bit
+/// segment of its own (Wine's 32-bit thread block, found through FS).
+pub fn syscall32(frame: &mut TrapFrame) {
+    crate::arch::cpu::enable_irq();
+    let n = frame.rax as u32;
+    let ret = match n {
+        243 => thread::sys_set_thread_area(frame.rbx & 0xffff_ffff),
+        _ => {
+            crate::debug!("linux", "{}: unimplemented 32-bit syscall {n}", user::current_name());
+            -err::ENOSYS
+        }
+    };
+    frame.rax = ret as u64;
+    crate::arch::cpu::disable_irq();
+}
+
 pub fn syscall(frame: &mut TrapFrame) {
     crate::arch::cpu::enable_irq();
     let n = frame.rax;
@@ -1022,6 +1040,7 @@ fn dispatch(n: u64, a: [u64; 6]) -> i64 {
         147 => if matches!(a[0], 1 | 2) { 1 } else { 0 },  // sched_get_priority_min
         157 => sys_prctl(a[0], a[1], a[2], a[3], a[4]),
         158 => sys_arch_prctl(a[0], a[1]),
+        205 => thread::sys_set_thread_area(a[0]),
         160 => 0, // setrlimit
         161 => sys_chroot(a[0]),
         170 => ns::set_name(false, a[0], a[1]),

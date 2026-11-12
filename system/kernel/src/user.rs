@@ -336,7 +336,7 @@ pub(crate) fn fork(child: TrapFrame, fs: u64, share_vm: bool, share_fs: bool) ->
             job,
         },
     );
-    let arg = Box::into_raw(Box::new(ThreadStart { frame: child, fs }));
+    let arg = Box::into_raw(Box::new(ThreadStart { frame: child, fs, segs: own_segments() }));
     match task::spawn_suspended(&name, thread_start, arg as *mut c_void, child_cr3, pid) {
         Some(tid) => {
             if let Some(p) = PROCS.lock().get_mut(&pid) {
@@ -426,8 +426,12 @@ pub(crate) fn exec_address_space(name: &str, exe: &Path) -> Result<(), Error> {
 /// Starts the program just loaded by exec: user mode at `entry` with the
 /// stack at `rsp` and every other register cleared.
 pub(crate) fn start_loaded(entry: u64, rsp: u64) -> ! {
+    // A new program has none of the old one's segments.
+    let on = cpu::irq_save();
+    gdt::set_segments(&gdt::Segments::default());
     let (_, gs) = crate::arch::syscall::user_bases();
     crate::arch::syscall::set_user_bases(0, gs);
+    cpu::irq_restore(on);
     // SAFETY: the program was just loaded into this address space.
     unsafe { enter_user(entry, rsp, 0, 0) }
 }
@@ -707,6 +711,16 @@ pub(crate) fn main_thread() -> Option<Tid> {
 struct ThreadStart {
     frame: TrapFrame,
     fs: u64,
+    /// The segments of the thread that made it, which it starts with.
+    segs: gdt::Segments,
+}
+
+/// The calling thread's segments, for the thread or process it makes.
+fn own_segments() -> gdt::Segments {
+    let on = cpu::irq_save();
+    let s = gdt::segments();
+    cpu::irq_restore(on);
+    s
 }
 
 /// Starts another thread in the calling process, resuming user mode with
@@ -725,7 +739,7 @@ pub(crate) fn spawn_thread(frame: TrapFrame, fs: u64) -> Result<Tid, Error> {
     if PROCS.lock().get(&pid).map_or(0, |p| p.threads.len()) >= 512 {
         return Err(Error::NoMemory);
     }
-    let arg = Box::into_raw(Box::new(ThreadStart { frame, fs }));
+    let arg = Box::into_raw(Box::new(ThreadStart { frame, fs, segs: own_segments() }));
     match task::spawn_suspended(&name, thread_start, arg as *mut c_void, cr3, pid) {
         Some(tid) => {
             if let Some(p) = PROCS.lock().get_mut(&pid) {
@@ -745,8 +759,11 @@ unsafe extern "C" fn thread_start(arg: *mut c_void) {
     // SAFETY: the Box leaked by spawn_thread, used once.
     let start = unsafe { Box::from_raw(arg as *mut ThreadStart) };
     let frame = start.frame;
+    let on = cpu::irq_save();
+    gdt::set_segments(&start.segs);
     let (_, gs) = crate::arch::syscall::user_bases();
     crate::arch::syscall::set_user_bases(start.fs, gs);
+    cpu::irq_restore(on);
     drop(start);
     // SAFETY: the frame holds user-mode registers of this address space.
     unsafe { resume_user(&frame) }
@@ -1577,6 +1594,11 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
 pub fn syscall(frame: &mut TrapFrame) {
     if !frame.is_user() {
         frame.rax = (-(Error::Unknown as i64)) as u64;
+        return;
+    }
+    // In a Linux program `int 0x80` is Linux's 32-bit system call gate.
+    if crate::linux::try_state(|_| ()).is_some() {
+        crate::linux::syscall32(frame);
         return;
     }
     // System calls may block or take long: let interrupts in.

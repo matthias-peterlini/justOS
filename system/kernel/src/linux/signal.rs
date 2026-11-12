@@ -566,6 +566,10 @@ fn setup_frame(frame: &mut TrapFrame, p: &Pending, a: &Act, restore: u64, alt: A
     unsafe { core::arch::asm!("fxsave64 [{}]", in(reg) fp, options(nostack, preserves_flags)) };
     frame.rsp = base;
     frame.rip = a.handler;
+    // Handlers are 64-bit code, whatever was running (32-bit Windows code
+    // under Wine, say): rt_sigreturn goes back to the saved segment.
+    frame.cs = crate::arch::gdt::USER_CODE as u64;
+    frame.ss = crate::arch::gdt::USER_DATA as u64;
     frame.rdi = p.sig as u64;
     frame.rsi = base + INFO;
     frame.rdx = base + UC;
@@ -604,6 +608,10 @@ pub fn sys_rt_sigreturn(frame: &mut TrapFrame) {
     frame.rcx = r(14);
     frame.rsp = rsp;
     frame.rip = rip;
+    // The code segment it was in: 64-bit, or the 32-bit one.
+    let cs = u16::from_le_bytes(b[184..186].try_into().unwrap());
+    frame.cs = if cs == crate::arch::gdt::USER_CODE32 { cs } else { crate::arch::gdt::USER_CODE } as u64;
+    frame.ss = crate::arch::gdt::USER_DATA as u64;
     // Only the flags a program may change (arithmetic, direction, trap).
     const USER_FLAGS: u64 = 0x5_0DD5;
     frame.rflags = (frame.rflags & !USER_FLAGS) | (r(17) & USER_FLAGS);

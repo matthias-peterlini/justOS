@@ -96,6 +96,8 @@ struct Thread {
     /// User FS and GS bases, while the thread is not running.
     fs_base: u64,
     gs_base: u64,
+    /// Its data segment registers and own descriptors, likewise.
+    segs: gdt::Segments,
     /// x87/SSE registers, while the thread is not running.
     fpu: Box<FpuArea>,
     /// Running on a processor, or not yet handed over after it stopped:
@@ -127,6 +129,7 @@ impl Thread {
             pid: 0,
             fs_base: 0,
             gs_base: 0,
+            segs: gdt::Segments { tls: [0; gdt::TLS_COUNT], ds: 0, es: 0, fs: 0 },
             fpu: FpuArea::new(),
             on_cpu: false,
             wake_pending: false,
@@ -490,10 +493,12 @@ fn schedule() {
                 None
             } else {
                 let (new_rsp, top, cr3, fs, gs, has_stack, pid, holding) = (n.rsp, n.stack_top(), n.cr3, n.fs_base, n.gs_base, n.stack != 0, n.pid, n.holding);
+                let segs = n.segs;
                 FLAGS[me].store(n.flags, Ordering::Relaxed);
                 let new_fpu: *const FpuArea = &*n.fpu;
                 let c = s.threads.get_mut(&cur).unwrap();
                 (c.fs_base, c.gs_base) = syscall::user_bases();
+                c.segs = gdt::segments();
                 c.holding = HOLDING[me].swap(holding, Ordering::Relaxed);
                 // SAFETY: the area is this thread's own aligned buffer.
                 unsafe { fxsave(&mut *c.fpu) };
@@ -501,6 +506,8 @@ fn schedule() {
                 // kernel is soft-float, so nothing touches SSE before the
                 // switch completes and the new thread resumes.
                 unsafe { fxrstor(new_fpu) };
+                // The selectors first: loading FS replaces its base.
+                gdt::set_segments(&segs);
                 syscall::set_user_bases(fs, gs);
                 if has_stack {
                     gdt::set_kernel_stack(top);
