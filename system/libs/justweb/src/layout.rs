@@ -212,6 +212,12 @@ pub struct Ctx<'a> {
     /// Inline content gathered for the current block.
     inl: Vec<Inl>,
     last_space: bool,
+    /// Boxes taken out of the flow (position: absolute, fixed) that wait for
+    /// their containing block to be laid out, with their static position.
+    pending: Vec<(NodeId, f32, f32)>,
+    /// The lowest edge of the positioned boxes: the page scrolls to them.
+    abs_bottom: f32,
+    vw: f32,
 }
 
 const MAX_DEPTH: u32 = 90;
@@ -246,6 +252,9 @@ pub fn layout(dom: &Dom, st: &Styles, fonts: &WebFonts, pics: &dyn Pictures, vw:
         marker: None,
         inl: Vec::new(),
         last_space: true,
+        pending: Vec::new(),
+        abs_bottom: 0.0,
+        vw,
     };
     let html = dom.nodes[Dom::ROOT].children.iter().copied().find(|&n| dom.tag(n) == "html").unwrap_or(Dom::ROOT);
     let body = dom.element_children(html).find(|&n| dom.tag(n) == "body");
@@ -262,7 +271,10 @@ pub fn layout(dom: &Dom, st: &Styles, fonts: &WebFonts, pics: &dyn Pictures, vw:
     }
     let e = c.edges(html, vw);
     let h = c.block(html, e.m[3], e.m[0], vw, &mut floats, None, None, true);
-    let height = (h + e.m[0] + e.m[2]).max(floats.bottom()).cel() as i32;
+    // What nothing else holds is placed in the viewport.
+    let at = c.items.len();
+    c.place_positioned(0, (0.0, 0.0, vw, crate::style::VH.get()), at, true);
+    let height = (h + e.m[0] + e.m[2]).max(floats.bottom()).max(c.abs_bottom).cel() as i32;
     Layout { items: c.items, targets: c.targets, anchors: c.anchors, height, width: vw as i32, background, wanted: c.wanted }
 }
 
@@ -512,6 +524,8 @@ impl<'a> Ctx<'a> {
         let cy = y + e.b[0] + e.p[0];
         let cw = (w - e.h()).max(0.0);
         let mark = self.mark_items();
+        let pending = self.pending.len();
+        self.note_positioned(n, cx, cy);
         // Before what is inside, so deeper targets win.
         let block_target = self.targets.len();
         self.targets.push((Rect::new(0, 0, 0, 0), Target::Block(n)));
@@ -555,6 +569,10 @@ impl<'a> Ctx<'a> {
         let rect = r(x, y, w, bh);
         self.deco_end(&slots, rect);
         self.targets[block_target].0 = rect;
+        if s.position != Position::Static {
+            let cb = (x + e.b[3], y + e.b[0], w - e.b[1] - e.b[3], bh - e.b[0] - e.b[2]);
+            self.place_positioned(pending, cb, mark.0 + clip as usize, false);
+        }
         if clip {
             if let Item::ClipPush(cr) = &mut self.items[mark.0] {
                 *cr = r(x + e.b[3], y + e.b[0], w - e.b[1] - e.b[3], bh - e.b[0] - e.b[2]);
@@ -573,6 +591,110 @@ impl<'a> Ctx<'a> {
         }
         self.depth -= 1;
         bh
+    }
+
+    /// Notes the children of `n` that are out of the flow, for the box
+    /// that holds them; (x, y) is where they would have been (roughly: the
+    /// start of the parent's content).
+    fn note_positioned(&mut self, n: NodeId, x: f32, y: f32) {
+        if self.dom.tag(n) == "details" && self.dom.attr(n, "open").is_none() {
+            return;
+        }
+        for i in 0..self.dom.nodes[n].children.len() {
+            let k = self.dom.nodes[n].children[i];
+            let Some(s) = self.style(k) else { continue };
+            match s.display {
+                Display::None => {}
+                _ if s.position == Position::Absolute || s.position == Position::Fixed => self.pending.push((k, x, y)),
+                // Boxes that are not laid out as blocks pass theirs on.
+                Display::Contents | Display::Inline => self.note_positioned(k, x, y),
+                _ => {}
+            }
+        }
+    }
+
+    /// Lays out the boxes out of the flow noted since `from`, in the
+    /// containing block `cb` (a padding box: x, y, width, height). Their
+    /// items go on top of what was drawn so far, or at `under` for a
+    /// z-index below zero. Fixed boxes wait for the viewport (`last`).
+    fn place_positioned(&mut self, from: usize, cb: (f32, f32, f32, f32), under: usize, last: bool) {
+        if self.pending.len() <= from {
+            return;
+        }
+        let mut noted = self.pending.split_off(from);
+        if !last {
+            let fixed = |c: &Self, k: NodeId| c.style(k).is_some_and(|s| s.position == Position::Fixed);
+            let (wait, now): (Vec<_>, Vec<_>) = noted.into_iter().partition(|&(k, ..)| fixed(self, k));
+            self.pending.extend(wait);
+            noted = now;
+        }
+        let (cbx, cby, cbw, cbh) = cb;
+        for i in 0..noted.len() {
+            let (k, sx, sy) = noted[i];
+            // A box measured twice is noted twice: the last note counts.
+            if noted[i + 1..].iter().any(|n| n.0 == k) {
+                continue;
+            }
+            let Some(s) = self.style(k) else { continue };
+            let [top, right, bottom, left] = [0, 1, 2, 3].map(|i| s.inset[i].resolve(if i % 2 == 0 { cbh } else { cbw }));
+            // What sticks to the bottom of the window (banners) would land
+            // in the middle of the page: it is left out.
+            if s.position == Position::Fixed && top.is_none() && bottom.is_some() {
+                continue;
+            }
+            let e = self.edges(k, cbw);
+            let replaced = self.is_replaced(k);
+            let room = (cbw - left.unwrap_or(0.0) - right.unwrap_or(0.0) - e.mh()).max(0.0);
+            let w = match self.specified_width(s, &e, cbw) {
+                Some(w) => w,
+                None if replaced => self.replaced_size(k, s, cbw).0 + e.h(),
+                None if left.is_some() && right.is_some() => room,
+                None => self.shrink_to_fit(k, room + e.mh()).max(e.h()),
+            };
+            let w = self.clamp_width(s, &e, cbw, w);
+            let centred = s.margin[3].is_auto() && s.margin[1].is_auto();
+            let x = match (left, right) {
+                (Some(l), Some(rr)) if centred => cbx + l + ((cbw - l - rr - w) / 2.0).max(0.0),
+                (Some(l), _) => cbx + l + e.m[3],
+                (None, Some(rr)) => cbx + cbw - rr - e.m[1] - w,
+                (None, None) => sx + e.m[3],
+            };
+            let fh = match (top, bottom) {
+                (Some(t), Some(b)) if s.height.is_auto() && !replaced => Some((cbh - t - b - e.m[0] - e.m[2]).max(0.0)),
+                _ if s.height.has_pct() => s.height.resolve(cbh).map(|h| if s.border_box { h } else { h + e.v() }),
+                _ => None,
+            };
+            let y = match (top, bottom) {
+                (Some(t), _) => cby + t + e.m[0],
+                (None, Some(_)) => 0.0,
+                (None, None) => sy + e.m[0],
+            };
+            let mark = self.mark_items();
+            let saved_inl = core::mem::take(&mut self.inl);
+            let saved_marker = self.marker.take();
+            let bh = self.block(k, x, y, cbw, &mut Floats::default(), if replaced { None } else { Some(w) }, fh, true);
+            self.inl = saved_inl;
+            self.marker = saved_marker;
+            let mut dx = s.translate[0].resolve(w).unwrap_or(0.0);
+            let mut dy = s.translate[1].resolve(bh).unwrap_or(0.0);
+            if let (None, Some(b)) = (top, bottom) {
+                dy += cby + cbh - b - e.m[2] - bh;
+            }
+            // Far away is the way pages hide things.
+            if dx.abs() > 4000.0 || dy.abs() > 20000.0 {
+                dx = dx.clamp(-4000.0, 4000.0);
+                dy = dy.clamp(-20000.0, 20000.0);
+            }
+            self.shift(mark, dx, dy);
+            let (bx, by) = (x + dx, y + dy);
+            if s.visible && bh > 0.0 && bx < self.vw && bx + w > 0.0 && by + bh > 0.0 {
+                self.abs_bottom = self.abs_bottom.max(by + bh + e.m[2].max(0.0));
+            }
+            if s.z_below && under < mark.0 {
+                let made = self.items.len() - mark.0;
+                self.items[under..].rotate_right(made);
+            }
+        }
     }
 
     fn fade_from(&mut self, from: usize, o: f32) {

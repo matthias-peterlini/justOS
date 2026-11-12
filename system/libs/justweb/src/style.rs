@@ -239,6 +239,10 @@ pub struct Style {
     pub border_spacing: f32,
     pub collapse: bool,
     pub content_visibility_hidden: bool,
+    /// z-index below zero: behind the content of its containing block.
+    pub z_below: bool,
+    /// transform: translate(x, y); percentages are of the box itself.
+    pub translate: [Len; 2],
     pub object_fit_cover: bool,
     pub aspect_ratio: Option<f32>,
     pub cursor_pointer: bool,
@@ -308,6 +312,8 @@ impl Style {
             border_spacing: 0.0,
             collapse: false,
             content_visibility_hidden: false,
+            z_below: false,
+            translate: [Len::Auto, Len::Auto],
             object_fit_cover: false,
             aspect_ratio: None,
             cursor_pointer: false,
@@ -1375,6 +1381,33 @@ fn apply(s: &mut Style, k: &str, v: &str, parent: &Style) {
         }
         "list-style-position" => s.list_inside = vl == "inside",
         "visibility" => s.visible = vl != "hidden" && vl != "collapse",
+        "z-index" => s.z_below = vl.parse::<i32>().is_ok_and(|z| z < 0),
+        "translate" => {
+            let mut it = vl.split_whitespace().map(len);
+            s.translate = [it.next().flatten().unwrap_or(Len::Auto), it.next().flatten().unwrap_or(Len::Auto)];
+        }
+        "transform" | "-webkit-transform" => {
+            s.translate = [Len::Auto, Len::Auto];
+            let mut rest = vl.as_str();
+            while let Some(at) = rest.find("translate") {
+                rest = &rest[at + 9..];
+                let Some(open) = rest.find('(') else { break };
+                let Some(close) = rest.find(')') else { break };
+                if close < open {
+                    break;
+                }
+                let kind = rest[..open].trim();
+                let args: Vec<Option<Len>> = split_args(&rest[open + 1..close]).iter().map(|a| len(a.trim())).collect();
+                let arg = |i: usize| args.get(i).cloned().flatten().unwrap_or(Len::Auto);
+                match kind {
+                    "" | "3d" => s.translate = [arg(0), arg(1)],
+                    "x" => s.translate[0] = arg(0),
+                    "y" => s.translate[1] = arg(0),
+                    _ => {}
+                }
+                rest = &rest[close + 1..];
+            }
+        }
         "opacity" => {
             if let Ok(o) = vl.trim_end_matches('%').parse::<f32>() {
                 s.opacity = if vl.ends_with('%') { o / 100.0 } else { o }.clamp(0.0, 1.0);
