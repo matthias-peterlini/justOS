@@ -5,7 +5,8 @@
 ### Un sistema operativo per PC x86-64, scritto da zero in Rust.
 
 Boot loader, kernel, file system, driver, interfaccia grafica e linguaggio di
-programmazione: tutto progettato apposta, senza librerie esterne.
+programmazione: tutto progettato apposta. E sopra ci girano anche Firefox,
+i programmi Linux, quelli Windows e le app Android.
 
 [![Versione](https://img.shields.io/github/v/release/matthias-peterlini/justOS?label=versione&color=ff5a1f)](https://github.com/matthias-peterlini/justOS/releases/latest)
 [![Build](https://github.com/matthias-peterlini/justOS/actions/workflows/build.yml/badge.svg)](https://github.com/matthias-peterlini/justOS/actions/workflows/build.yml)
@@ -25,6 +26,15 @@ programmazione: tutto progettato apposta, senza librerie esterne.
 
 <sub>La scrivania: l'ora che fluttua sullo sfondo, il dock con il menu J▮ a sinistra e lo stato a destra.</sub>
 
+<br><br>
+
+[Perché](#perché-justos) ·
+[Com'è](#comè) ·
+[Le app degli altri sistemi](#le-app-degli-altri-sistemi) ·
+[Provarlo](#provarlo-in-un-minuto) ·
+[Cosa c'è](#cosa-cè) ·
+[Compilare](#compilare)
+
 </div>
 
 <br>
@@ -37,8 +47,8 @@ programmazione: tutto progettato apposta, senza librerie esterne.
 
 **Scritto da zero**
 
-Niente codice di Linux, Unix, DOS o Windows, nessuna crate di terze parti:
-solo il compilatore Rust, `core` e `alloc`.
+Nel sistema non c'è codice di Linux, Unix, DOS o Windows e nessuna crate di
+terze parti: solo il compilatore Rust, `core` e `alloc`.
 
 </td>
 <td width="33%" valign="top">
@@ -79,9 +89,8 @@ fotocamera e microfono, come su un telefono.
 
 **Esegue anche gli altri**
 
-Programmi Linux (statici o con la glibc di Debian), Windows x64 (anche
-con finestre), Java e app Android girano accanto alle app di justOS, senza
-modifiche.
+Firefox è già installato. Programmi Linux, Windows a 64 e a 32 bit, Java
+e app Android girano accanto alle app di justOS, senza modifiche.
 
 </td>
 </tr>
@@ -153,6 +162,22 @@ questi scritti da zero.
 </table>
 </details>
 
+## Le app degli altri sistemi
+
+justOS ha le sue app, ma non chiede di rinunciare a quelle che usi già. Ecco
+a che punto è ogni famiglia, senza giri di parole:
+
+| Da dove | Stato | Cosa gira |
+|---|---|---|
+| **Linux** | 🟢 funziona | programmi statici e dinamici con la glibc di Debian, GTK 3, Wayland (il compositor è nel kernel). **Firefox ESR è di serie** e le app Linux con un file `.desktop` compaiono in Applicazioni. Non c'è un server X11 né l'accelerazione 3D |
+| **Windows** | 🟡 in parte | `.exe` a 64 bit piccoli con `winrun`, scritto da zero. I programmi veri con **Wine 10** (`make wine-image`), a 64 e a 32 bit, con finestre di justOS. Mancano DirectX accelerato e l'audio; i programmi grandi e recenti spesso non partono ancora |
+| **Android** | 🟡 agli inizi | bytecode Dalvik (`.dex`, `.apk`, `.jar`) con un interprete scritto da zero e una piccola parte del framework. Il driver binder c'è; le app vere del Play Store non girano ancora |
+| **macOS** | 🔴 no | i pacchetti `.pkg` si aprono e si estraggono, ma i programmi Mach-O non si eseguono: servirebbero le librerie di Apple |
+
+I programmi con licenza chiedono l'accesso con il tuo account, come sul loro
+sistema: justOS non aggira nessun controllo. I dettagli sono in
+[docs/compat.md](docs/compat.md).
+
 ## Provarlo in un minuto
 
 1. **Scarica** [`justos.iso`](https://github.com/matthias-peterlini/justOS/releases/latest/download/justos.iso), il CD live (circa 70 MiB).
@@ -187,7 +212,7 @@ Secure Boot va disattivato.
 
 | | |
 |---|---|
-| **Di serie** | Browser, File, Editor di testo, Note, Promemoria, Calendario, Orologio, Calcolatrice, Foto, Musica, Anteprima, Terminale, Monitor attività, Impostazioni, Info sistema, JustStudio |
+| **Di serie** | Firefox, Browser (il motore web di justOS), File, Editor di testo, Note, Promemoria, Calendario, Orologio, Calcolatrice, Foto, Musica, Anteprima, Terminale, Monitor attività, Impostazioni, Info sistema, JustStudio |
 | **Nel Negozio** | 2048, Campo minato, Serpente, Sudoku, Tris e Disegno; BusyBox e Lua per il Terminale; programmi Linux e Windows da GitHub. Le app si aggiornano da sole, da un indice firmato |
 | **Doppio clic** | un programma parte; un pacchetto `.deb`, `.tar.gz`, `.zip` o `.pkg` si installa da solo |
 
@@ -204,7 +229,7 @@ Secure Boot va disattivato.
 | **Interfaccia** | splash, configurazione guidata, scrivania con dock, Applicazioni, centro di controllo, notifiche, ricerca globale, desktop virtuali, snap delle finestre, trascinamento dei file, HiDPI, animazioni | [gui](docs/gui.md) |
 | **Sicurezza** | identità delle app, sandbox, permessi, password con sale e blocco automatico | [roadmap](docs/roadmap.md#le-basi-comuni) |
 | **Programmi** | in modalità utente, ognuno nel suo spazio di indirizzi, a riga di comando o con finestre proprie (`justui`) | [programmi](docs/programmi.md) |
-| **Compatibilità** | eseguibili ELF Linux (statici o dinamici con la glibc; GTK 3 e Firefox su Wayland), `.exe` Windows x64 (console e finestre, anche con Wine 10), programmi Java e app Android (`.dex`, `.apk`) | [compatibilità](docs/compat.md) |
+| **Compatibilità** | eseguibili ELF Linux (statici o dinamici con la glibc; GTK 3 e Firefox su Wayland), `.exe` Windows (console e finestre; con Wine 10 anche a 32 bit), programmi Java e app Android (`.dex`, `.apk`) | [compatibilità](docs/compat.md) |
 | **JustScript** | il linguaggio di justOS: sorgenti `.jt`, che `justc` compila in pacchetti `.jpk` (o in `.exe` autonomi per Windows, `-t windows`) e `just` esegue (`just main.jt`); JustStudio è l'IDE con anteprima dal vivo | [JustScript](docs/justscript.md#juststudio) |
 | **Rete** | ARP, IPv4, ICMP, UDP, TCP, DHCP, DNS; TLS 1.3 con certificati verificati e HTTP(S) | |
 | **Web** | `justweb` (HTML, CSS con flexbox, grid, tabelle e media query; PNG, JPEG e GIF) e `justjs` (JavaScript con il DOM, gli eventi, i timer e `fetch`) | [gui](docs/gui.md#il-motore-web) |
@@ -235,8 +260,7 @@ ordine arriverà è nella [roadmap](docs/roadmap.md).
 
 Prima di provarlo su un PC vero:
 
-- il kernel usa tutti i processori (fino a 16) per i suoi thread, ma i
-  programmi girano ancora tutti sul primo;
+- il kernel e i programmi usano tutti i processori (fino a 16);
 - sulle schede video vere lo schermo resta nella risoluzione scelta dal
   firmware (il loader UEFI ne sceglie una grande);
 - molti driver sono scritti dalla documentazione dei chip e provati in
@@ -284,8 +308,10 @@ make iso        # il CD live build/justos.iso
 make run        # avvia justOS in QEMU (anche run-uefi, run-q35, run-nvme, run-iso)
 ```
 
-`make SIZE=1G` cambia la dimensione dell'immagine, `make MEMORY=2G` la
-memoria della macchina virtuale.
+L'immagine è da 1 GiB perché porta Firefox; `make SIZE=2G` ne cambia la
+dimensione, `make run MEMORY=1G` dà più memoria alla macchina virtuale
+(Firefox vuole almeno 1 GiB). `make wine-image` costruisce
+`build/justos-wine.img`, con Wine per i programmi Windows.
 
 <details>
 <summary><b>I test</b>: girano tutti in QEMU, senza schermo</summary>
@@ -300,6 +326,9 @@ make test-acpi      # pulsante di accensione, batteria, sospensione e risveglio
 make test-update    # aggiornamento nell'altro slot, prova, conferma, ritorno indietro
 SLEEP=1 make test-drivers  # gli stessi, dopo una sospensione (anche test-audio)
 make test-compat    # programmi Linux, Windows (anche con finestre), Java e Android
+make test-linux     # lo strato Linux: processi, segnali, socket, binder
+make test-wayland   # il compositor Wayland
+make test-gtk       # un programma GTK 3 con il tema di justOS
 make test-justscript # programmi JustScript
 make shots          # usa l'interfaccia (ogni app, il Negozio) e salva le schermate
 make check          # test delle librerie e dello strumento host
