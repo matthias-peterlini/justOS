@@ -385,8 +385,8 @@ impl Store {
         let check = Self::check_btn(area);
         if appupdate::checking() {
             let t = ((crate::time::uptime_ms() / 2) % 1000) as u32;
-            c.arc(check.x + 20, check.y + 17, 10, 3, 1000, 0x26FF_FFFF);
-            c.arc(check.x + 20, check.y + 17, 10, 3, 250 + t / 4, 0xFFFF_FFFF);
+            c.arc(check.x + 20, check.y + 17, 10, 3, 1000, ui::cell());
+            c.arc(check.x + 20, check.y + 17, 10, 3, 250 + t / 4, ui::text());
             text::draw(c, Font::Body, check.x + 40, check.y + 7, "Controllo…", ui::text_dim());
         } else {
             ui::button(c, check, "Controlla ora", false, self.hover == Some(check));
@@ -519,8 +519,8 @@ impl Store {
             Remote::Idle | Remote::Busy => {
                 text::draw(c, Font::Title, ct.x + 60, ct.y + 10, "GitHub", ui::text());
                 let t = ((crate::time::uptime_ms() / 2) % 1000) as u32;
-                c.arc(ct.x + ct.w / 2, ct.y + 180, 18, 3, 1000, 0x26FF_FFFF);
-                c.arc(ct.x + ct.w / 2, ct.y + 180, 18, 3, 250 + t / 4, 0xFFFF_FFFF);
+                c.arc(ct.x + ct.w / 2, ct.y + 180, 18, 3, 1000, ui::cell());
+                c.arc(ct.x + ct.w / 2, ct.y + 180, 18, 3, 250 + t / 4, ui::text());
                 text::draw_centered(c, Font::Body, ct.x + ct.w / 2, ct.y + 214, "Cerco su GitHub…", ui::text_dim());
             }
             Remote::Failed(e) => {
@@ -593,7 +593,7 @@ impl Store {
             let h = self.hover == Some(remove);
             c.fill_round(remove, remove.h / 2, if h { 0x40FF_5A4E } else { 0x26FF_5A4E });
             let (lh, _) = text::metrics(Font::Strong);
-            text::draw_centered(c, Font::Strong, remove.x + remove.w / 2, remove.y + (remove.h - lh) / 2, "Rimuovi", 0xFFFF_8A80);
+            text::draw_centered(c, Font::Strong, remove.x + remove.w / 2, remove.y + (remove.h - lh) / 2, "Rimuovi", ui::RED);
         }
         if let Some(j) = store::job(it.id()).filter(|j| j.result.is_none()) {
             let what = match j.total {
@@ -678,9 +678,9 @@ fn draw_ring(c: &mut Canvas, r: Rect, done: u64, total: Option<u64>) {
         Some(t) if t > 0 => (done * 1000 / t) as u32,
         _ => ((crate::time::uptime_ms() / 3) % 1000) as u32,
     };
-    c.arc(cx, cy, 14, 3, 1000, 0x33FF_FFFF);
-    c.arc(cx, cy, 14, 3, frac.max(30), 0xFFFF_FFFF);
-    c.fill_round(Rect::new(cx - 4, cy - 4, 8, 8), 2, 0xFFFF_FFFF);
+    c.arc(cx, cy, 14, 3, 1000, ui::cell());
+    c.arc(cx, cy, 14, 3, frac.max(30), ui::text());
+    c.fill_round(Rect::new(cx - 4, cy - 4, 8, 8), 2, ui::text());
 }
 
 /// A tile in a colour with initials (an app with no picture yet).
@@ -759,7 +759,11 @@ impl App for Store {
             } else if self.hover == Some(r) {
                 c.fill_round(r, 12, ui::pane());
             }
-            res::draw_icon(c, icon, 20, r.x + 10, r.y + 8);
+            if icon.starts_with("g-") {
+                ui::glyph(c, icon, 20, r.x + 10, r.y + 8, ui::text());
+            } else {
+                res::draw_icon(c, icon, 20, r.x + 10, r.y + 8);
+            }
             text::draw(c, if i == self.section { Font::Strong } else { Font::Body }, r.x + 40, r.y + 9, name, ui::text());
             let n = if i == UPDATES { appupdate::pending_count() } else { 0 };
             if n > 0 {
@@ -802,10 +806,14 @@ impl App for Store {
             let b = Self::banner(area);
             if let Some(fi) = self.featured() {
                 let it = self.items[fi].clone();
-                c.fill_round_grad(b, 22, 0xFF2A_1712, 0xFF14_0D0B);
-                c.glow_round(b, 22, b.x + b.w / 5, b.y, b.w * 2 / 3, ui::GLOW, 170);
+                if ui::theme() == ui::Theme::Light {
+                    c.fill_round_grad(b, 22, 0xFFFF_F3EC, 0xFFFF_E2D2);
+                } else {
+                    c.fill_round_grad(b, 22, 0xFF2A_1712, 0xFF14_0D0B);
+                    c.glow_round(b, 22, b.x + b.w / 5, b.y, b.w * 2 / 3, ui::GLOW, 170);
+                }
                 c.stroke_round(b, 22, 1, ui::line());
-                ui::caps(c, b.x + 28, b.y + 24, "In evidenza", 0xCCFF_FFFF);
+                ui::caps(c, b.x + 28, b.y + 24, "In evidenza", ui::text_dim());
                 text::draw(c, Font::Title, b.x + 28, b.y + 44, it.name(), ui::text());
                 for (k, l) in text::wrap(Font::Body, it.about(), b.w - 260).iter().take(2).enumerate() {
                     text::draw(c, Font::Body, b.x + 28, b.y + 88 + k as i32 * 22, l, ui::text_dim());
@@ -837,7 +845,7 @@ impl App for Store {
             let g = self.github_row(area);
             if g.y < ct.bottom() {
                 c.fill_round(g, 18, if self.hover == Some(g) { ui::hover() } else { ui::pane() });
-                res::draw_icon(c, "g-search", 20, g.x + 18, g.y + 18);
+                ui::glyph(c, "g-search", 20, g.x + 18, g.y + 18, ui::text_dim());
                 text::draw(c, Font::Strong, g.x + 50, g.y + 10, &text::fit(Font::Strong, &format!("Cerca «{}» su GitHub", self.search), g.w - 80), ui::text());
                 text::draw(c, Font::Small, g.x + 50, g.y + 32, "Programmi Linux e Windows dai progetti open source", ui::text_dim());
             }

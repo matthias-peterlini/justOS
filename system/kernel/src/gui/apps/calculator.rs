@@ -346,6 +346,7 @@ impl App for Calculator {
             .unwrap_or(Font::Heading);
         let (lh, _) = text::metrics(font);
         text::draw_right(c, font, area.right() - 22, area.y + 112 - lh, &shown, ui::text());
+        let light = ui::theme() == ui::Theme::Light;
         for (r, row) in KEYS.iter().enumerate() {
             for (col, (label, k)) in row.iter().enumerate() {
                 if r == 4 && col == 1 {
@@ -356,19 +357,26 @@ impl App for Calculator {
                 let (mut bg, fg) = match k {
                     K::Op(_) | K::Equals if active_op => (0xFFFF_FFFF, ui::ORANGE),
                     K::Op(_) | K::Equals => (ui::ORANGE, 0xFFFF_FFFF),
+                    K::Clear | K::Sign | K::Percent if light => (0xFFD9_D9DF, 0xFF1D_1D1F),
                     K::Clear | K::Sign | K::Percent => (0xFFA5_A5AA, 0xFF1C_1C1E),
+                    _ if light => (0xFFFF_FFFF, 0xFF1D_1D1F),
                     _ => (0xFF4A_4A50, 0xFFFF_FFFF),
                 };
+                // Hover and the press flash go towards black on light keys.
+                let towards = if light { 0xFF00_0000 } else { 0xFFFF_FFFF };
                 let label = if *k == K::Clear && !self.entry.is_empty() { "C" } else { label };
                 if self.hover == Some((r, col)) {
-                    bg = crate::gui::gfx::blend(bg, 0xFFFF_FFFF, 40);
+                    bg = crate::gui::gfx::blend(bg, towards, if light { 14 } else { 40 });
                 }
                 if let Some((at, a)) = &self.flash {
                     if *at == (r, col) {
-                        bg = crate::gui::gfx::blend(bg, 0xFFFF_FFFF, 140 - a.t() * 140 / 1000);
+                        bg = crate::gui::gfx::blend(bg, towards, (if light { 50 } else { 140 }) - a.t() * (if light { 50 } else { 140 }) / 1000);
                     }
                 }
                 c.fill_round(rect, rect.h / 2, bg);
+                if light && !matches!(k, K::Op(_) | K::Equals) {
+                    c.stroke_round(rect, rect.h / 2, 1, ui::line());
+                }
                 let (lh, _) = text::metrics(Font::Heading);
                 if r == 4 && col == 0 {
                     text::draw(c, Font::Heading, rect.x + rect.h / 2 - 6, rect.y + (rect.h - lh) / 2, label, fg);

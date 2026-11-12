@@ -119,9 +119,9 @@ fn push(v: &mut Vec<u32>, x: u32) {
 }
 
 fn draw_graph(c: &mut Canvas, g: Rect, data: &[u32], color: u32) {
-    c.fill_round(g, 12, 0x33_00_00_00);
+    ui::well_pane(c, g, 18);
     for k in 1..4 {
-        c.fill(Rect::new(g.x + 8, g.y + g.h * k / 4, g.w - 16, 1), 0x14FF_FFFF);
+        c.fill(Rect::new(g.x + 8, g.y + g.h * k / 4, g.w - 16, 1), ui::line());
     }
     let inner = g.grow(-8);
     let n = HISTORY as i32;
@@ -159,7 +159,7 @@ impl App for Monitor {
         let stop = Self::stop_btn(area);
         let can_stop = self.selected.and_then(|i| self.rows.get(i)).is_some_and(|r| r.pid.is_some());
         if can_stop {
-            ui::button_color(c, stop, "Termina", 0x66FF_453A, 0xFFFF_6961);
+            ui::button_color(c, stop, "Termina", 0x66FF_453A, if ui::theme() == ui::Theme::Light { 0xFFD0_2A1E } else { 0xFFFF_6961 });
         }
         let t = Self::table(area);
         let cols = [t.x + 14, t.right() - 300, t.right() - 190, t.right() - 90];
@@ -181,7 +181,7 @@ impl App for Monitor {
             if self.selected == Some(i) {
                 c.fill_round(row, 8, ui::sel());
             } else if k % 2 == 1 {
-                c.fill(row, 0x0CFF_FFFF);
+                c.fill(row, ui::pane());
             }
             text::draw(c, Font::Body, cols[0], y + 5, &text::fit(Font::Body, &r.name, cols[1] - cols[0] - 20), ui::text());
             let v = if self.tab == 0 {
@@ -197,7 +197,7 @@ impl App for Monitor {
         // History and totals.
         let g = Self::graph(area);
         let side = Rect::new(g.right() + 12, g.y, area.right() - 12 - g.right() - 12, g.h);
-        c.fill_round(side, 12, 0x33_00_00_00);
+        ui::well_pane(c, side, 18);
         if self.tab == 0 {
             draw_graph(c, g, &self.cpu_history, ui::GREEN);
             let now = self.cpu_history.last().copied().unwrap_or(0);

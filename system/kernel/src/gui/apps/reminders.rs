@@ -143,10 +143,10 @@ impl App for Reminders {
                 c.line(cx - 5, cy, cx - 1, cy + 4, 2, 0xFFFF_FFFF);
                 c.line(cx - 1, cy + 4, cx + 5, cy - 4, 2, 0xFFFF_FFFF);
             } else {
-                c.fill_circle(cx, cy, 11, 0x80FF_FFFF);
-                c.fill_circle(cx, cy, 9, 0xFF2A_2234);
+                c.fill_circle(cx, cy, 11, ui::text_faint());
+                c.fill_circle(cx, cy, 9, ui::well());
             }
-            let color = if it.done { (fade.min(150) << 24) | 0xF5_F2F8 } else { ui::text() };
+            let color = if it.done { (fade.min(150) << 24) | (ui::text_dim() & 0xFF_FFFF) } else { ui::text() };
             let label = text::fit(Font::Body, &it.text, r.w - 60);
             let w = text::draw(c, Font::Body, r.x + 46, r.y + 12, &label, color);
             if it.done {
@@ -156,7 +156,7 @@ impl App for Reminders {
         }
         c.set_clip(saved);
         let ir = Self::input_rect(area);
-        c.fill_round(ir, 12, 0x26FF_FFFF);
+        ui::well_pane(c, ir, 12);
         c.fill_circle(ir.x + 22, ir.y + ir.h / 2, 11, ui::ORANGE);
         c.fill(Rect::new(ir.x + 17, ir.y + ir.h / 2 - 1, 11, 2), 0xFFFF_FFFF);
         c.fill(Rect::new(ir.x + 21, ir.y + ir.h / 2 - 5, 2, 11), 0xFFFF_FFFF);

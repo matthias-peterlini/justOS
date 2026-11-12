@@ -55,6 +55,23 @@ pub struct Clock {
     last_sec: u64,
 }
 
+/// A status colour for the dark theme, or a deeper one for the light.
+fn pick(dark: u32, light: u32) -> u32 {
+    if ui::theme() == ui::Theme::Light {
+        light
+    } else {
+        dark
+    }
+}
+
+/// A round control button: grey, a little lighter under the pointer.
+fn round_btn(c: &mut Canvas, l: Rect, hover: bool) {
+    c.fill_circle(l.x + 40, l.y + 40, 40, ui::cell());
+    if hover {
+        c.fill_circle(l.x + 40, l.y + 40, 40, ui::hover());
+    }
+}
+
 fn fmt_ms(ms: u64) -> String {
     format!("{:02}:{:02},{:02}", ms / 60_000, ms / 1000 % 60, ms / 10 % 100)
 }
@@ -70,11 +87,12 @@ fn fmt_left(ms: u64) -> String {
 
 /// An analogue face with hands for `h:m:s`.
 fn draw_face(c: &mut Canvas, cx: i32, cy: i32, r: i32, h: u64, m: u64, s: Option<u64>) {
-    c.fill_circle(cx, cy, r + 3, 0x40_00_00_00);
-    c.fill_circle(cx, cy, r, 0xFFF5_F5F7);
+    c.fill_circle(cx, cy, r + 3, ui::shadow_strength(64) << 24);
+    c.fill_circle(cx, cy, r + 1, ui::line());
+    c.fill_circle(cx, cy, r, ui::well());
     for i in 0..60 {
         let (dx, dy) = dial(i);
-        let (r0, w, col) = if i % 5 == 0 { (r - 14, 3, 0xFF1C_1C1E) } else { (r - 7, 1, 0xFF8E_8E93) };
+        let (r0, w, col) = if i % 5 == 0 { (r - 14, 3, ui::text()) } else { (r - 7, 1, ui::text_dim()) };
         let (x0, y0) = (cx + dx * r0 / 1000, cy + dy * r0 / 1000);
         let (x1, y1) = (cx + dx * (r - 4) / 1000, cy + dy * (r - 4) / 1000);
         c.line(x0, y0, x1, y1, w, col);
@@ -84,15 +102,15 @@ fn draw_face(c: &mut Canvas, cx: i32, cy: i32, r: i32, h: u64, m: u64, s: Option
             let (dx, dy) = dial(n * 5);
             let (lh, _) = text::metrics(Font::Strong);
             let rr = r - 30;
-            text::draw_centered(c, Font::Strong, cx + dx * rr / 1000, cy + dy * rr / 1000 - lh / 2, &format!("{n}"), 0xFF1C_1C1E);
+            text::draw_centered(c, Font::Strong, cx + dx * rr / 1000, cy + dy * rr / 1000 - lh / 2, &format!("{n}"), ui::text());
         }
     }
     let hand = |c: &mut Canvas, step: i32, len: i32, w: i32, col: u32| {
         let (dx, dy) = dial(step);
         c.line(cx, cy, cx + dx * len / 1000, cy + dy * len / 1000, w, col);
     };
-    hand(c, ((h % 12) * 5 + m / 12) as i32, r * 50 / 100, (r / 20).max(3), 0xFF1C_1C1E);
-    hand(c, m as i32, r * 75 / 100, (r / 28).max(2), 0xFF1C_1C1E);
+    hand(c, ((h % 12) * 5 + m / 12) as i32, r * 50 / 100, (r / 20).max(3), ui::text());
+    hand(c, m as i32, r * 75 / 100, (r / 28).max(2), ui::text());
     if let Some(s) = s {
         hand(c, s as i32, r * 85 / 100, 1, ui::ORANGE);
     }
@@ -217,11 +235,11 @@ impl App for Clock {
                 let [l, r] = Self::controls(area);
                 let running = self.sw_start.is_some();
                 let left = if running { "Giro" } else { "Azzera" };
-                c.fill_circle(l.x + 40, l.y + 40, 40, if self.hover == Some(l) { 0x60FF_FFFF } else { 0x40FF_FFFF });
+                round_btn(c, l, self.hover == Some(l));
                 text::draw_centered(c, Font::Strong, l.x + 40, l.y + 30, left, ui::text());
                 let (bg, label) = if running { (0x66FF_453A, "Stop") } else { (0x6630_D158, "Avvia") };
                 c.fill_circle(r.x + 40, r.y + 40, 40, bg);
-                text::draw_centered(c, Font::Strong, r.x + 40, r.y + 30, label, if running { 0xFFFF_6961 } else { 0xFF5D_E28A });
+                text::draw_centered(c, Font::Strong, r.x + 40, r.y + 30, label, if running { pick(0xFFFF_6961, 0xFFD0_2A1E) } else { pick(0xFF5D_E28A, 0xFF1B_8A46) });
                 let mut y = area.y + 190;
                 let mut prev = 0;
                 let laps: Vec<(usize, u64)> = self.laps.iter().copied().enumerate().collect();
@@ -239,7 +257,7 @@ impl App for Clock {
                 let left = self.timer_remaining();
                 let total = self.timer_len.max(1);
                 let (rx, ry, rr) = (cx, area.y + 260, 110);
-                c.arc(rx, ry, rr, 8, 1000, 0x30FF_FFFF);
+                c.arc(rx, ry, rr, 8, 1000, ui::cell());
                 let share = (left * 1000 / total) as u32;
                 if share > 0 {
                     c.arc(rx, ry, rr, 8, share.max(1), ui::ORANGE);
@@ -249,8 +267,8 @@ impl App for Clock {
                 if self.timer_end.is_none() && self.timer_left.is_none() {
                     for (r, ms) in Self::presets(area) {
                         let sel = ms == self.timer_len;
-                        c.fill_round(r, 17, if sel { ui::ORANGE } else if self.hover == Some(r) { 0x40FF_FFFF } else { 0x26FF_FFFF });
-                        text::draw_centered(c, Font::Strong, r.x + r.w / 2, r.y + 8, &format!("{} min", ms / 60_000), ui::text());
+                        c.fill_round(r, 17, if sel { ui::ORANGE } else if self.hover == Some(r) { ui::sel() } else { ui::cell() });
+                        text::draw_centered(c, Font::Strong, r.x + r.w / 2, r.y + 8, &format!("{} min", ms / 60_000), if sel { ui::WHITE } else { ui::text() });
                     }
                 } else {
                     text::draw_centered(c, Font::Body, cx, area.y + 88, &format!("Timer di {} minuti", self.timer_len / 60_000), ui::text_dim());
@@ -259,15 +277,15 @@ impl App for Clock {
                     text::draw_centered(c, Font::Strong, cx, ry + 40, "Tempo scaduto!", ui::ORANGE);
                 }
                 let [l, r] = Self::controls(area);
-                c.fill_circle(l.x + 40, l.y + 40, 40, if self.hover == Some(l) { 0x60FF_FFFF } else { 0x40FF_FFFF });
+                round_btn(c, l, self.hover == Some(l));
                 text::draw_centered(c, Font::Strong, l.x + 40, l.y + 30, "Annulla", ui::text());
                 let running = self.timer_end.is_some();
                 let (bg, label, fg) = if running {
-                    (0x66FF_9F0A, "Pausa", 0xFFFF_B340)
+                    (0x66FF_9F0A, "Pausa", pick(0xFFFF_B340, 0xFFA8_5C00))
                 } else if self.timer_left.is_some() {
-                    (0x6630_D158, "Riprendi", 0xFF5D_E28A)
+                    (0x6630_D158, "Riprendi", pick(0xFF5D_E28A, 0xFF1B_8A46))
                 } else {
-                    (0x6630_D158, "Avvia", 0xFF5D_E28A)
+                    (0x6630_D158, "Avvia", pick(0xFF5D_E28A, 0xFF1B_8A46))
                 };
                 c.fill_circle(r.x + 40, r.y + 40, 40, bg);
                 text::draw_centered(c, Font::Strong, r.x + 40, r.y + 30, label, fg);

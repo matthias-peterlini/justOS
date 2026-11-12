@@ -188,8 +188,24 @@ fn find_project(path: &str) -> Option<(String, String)> {
     None
 }
 
-/// Colours of the syntax, on the editor's dark field.
+/// Colours of the syntax: one set for the dark field, one for the white one.
 fn syntax_color(k: HighlightKind) -> u32 {
+    if ui::theme() == ui::Theme::Light {
+        return match k {
+            HighlightKind::Keyword => 0xFFAF_00DB,
+            HighlightKind::UiPrimitive => 0xFF00_70C1,
+            HighlightKind::Attribute => 0xFF00_1080,
+            HighlightKind::Identifier => ui::text(),
+            HighlightKind::Function => 0xFF79_5E26,
+            HighlightKind::Builtin => 0xFF26_7F99,
+            HighlightKind::Number => 0xFF09_8658,
+            HighlightKind::String => 0xFFA3_1515,
+            HighlightKind::Constant => 0xFF00_00FF,
+            HighlightKind::Operator => ui::text(),
+            HighlightKind::Punctuation => 0xFF6E_6E73,
+            HighlightKind::Comment => 0xFF00_8000,
+        };
+    }
     match k {
         HighlightKind::Keyword => 0xFFC5_86C0,
         HighlightKind::UiPrimitive => 0xFF4F_C1FF,
@@ -418,7 +434,7 @@ impl JustStudio {
             }
             colors.push(match spans.get(k) {
                 Some(s) if s.span.start <= b => syntax_color(s.kind),
-                _ => 0xFFD4_D4D4,
+                _ => ui::text(),
             });
         }
         self.area.colors = colors;
@@ -678,7 +694,7 @@ impl JustStudio {
 
     fn draw_bottom(&self, c: &mut Canvas, area: Rect) {
         let b = self.bottom_rect(area);
-        c.fill_round(b, 14, 0xF214_1018);
+        ui::well_pane(c, b, 14);
         let errors = self.problems.iter().filter(|p| p.error).count();
         let label = format!("Problemi ({})", self.problems.len());
         ui::segmented(c, self.tabs_rect(area), &["Console", &label], self.tab);
@@ -706,7 +722,7 @@ impl JustStudio {
         if self.tab == 0 {
             let (lh, _) = text::metrics(Font::Mono);
             let out = self.out.borrow();
-            let mut lines: Vec<(&str, u32)> = out.iter().map(|l| (l.as_str(), 0xFFE6_E1E5)).collect();
+            let mut lines: Vec<(&str, u32)> = out.iter().map(|l| (l.as_str(), ui::text())).collect();
             if let Some(e) = &self.run_error {
                 lines.push((e.as_str(), ui::RED));
             }
@@ -741,7 +757,7 @@ impl JustStudio {
 
     fn draw_preview(&mut self, c: &mut Canvas, area: Rect) {
         let r = self.preview_rect(area);
-        c.fill_round(r, 14, 0xF20E_0C12);
+        ui::well_pane(c, r, 14);
         ui::caps(c, r.x + 16, r.y + 14, "Anteprima dal vivo", ui::text_faint());
         let inner = Rect::new(r.x + 12, r.y + 38, r.w - 24, r.h - 46);
         self.hits.clear();
@@ -780,7 +796,7 @@ impl JustStudio {
         if self.stale {
             let band = Rect::new(r.x + 12, r.bottom() - 40, r.w - 24, 30);
             c.fill_round(band, 10, 0xE07A_2222);
-            text::draw_centered(c, Font::Small, band.x + band.w / 2, band.y + 7, "Errori nel codice: l'anteprima è dell'ultima versione buona", ui::text());
+            text::draw_centered(c, Font::Small, band.x + band.w / 2, band.y + 7, "Errori nel codice: l'anteprima è dell'ultima versione buona", ui::WHITE);
         }
         self.hits = cx.hits.into_iter().filter(|(h, _)| h.intersect(&inner).w > 0).collect();
     }
@@ -873,7 +889,7 @@ impl App for JustStudio {
         self.draw_toolbar(c, area);
         let tr = self.editor_rect(area);
         self.tr = tr;
-        c.fill_round(tr, 14, 0xF21C_1622);
+        ui::well_pane(c, tr, 14);
         self.area.draw(c, tr, focused && self.focus.is_none());
         if self.show_preview(area) {
             self.draw_preview(c, area);

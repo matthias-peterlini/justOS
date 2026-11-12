@@ -242,15 +242,15 @@ impl App for Calendar {
             if is_today {
                 let lw = text::width(Font::Strong, &label);
                 c.fill_circle(lx - lw / 2, ly + 10, 13, ui::ORANGE);
-                text::draw_right(c, Font::Strong, lx, ly, &label, 0xFFFF_FFFF);
+                text::draw_right(c, Font::Strong, lx, ly, &label, ui::WHITE);
             } else {
-                let color = if hol.is_some() || slot % 7 == 6 { 0xFFFF_6961 } else if slot % 7 == 5 { ui::text_dim() } else { ui::text() };
+                let color = if hol.is_some() || slot % 7 == 6 { red() } else if slot % 7 == 5 { ui::text_dim() } else { ui::text() };
                 text::draw_right(c, Font::Strong, lx, ly, &label, color);
             }
             let mut y = r.y + 30;
             if let Some(h) = hol {
                 if r.h > 50 {
-                    text::draw(c, Font::Small, r.x + 6, y, &text::fit(Font::Small, h, r.w - 10), 0xFFFF_6961);
+                    text::draw(c, Font::Small, r.x + 6, y, &text::fit(Font::Small, h, r.w - 10), red());
                     y += 16;
                 }
             }
@@ -265,13 +265,13 @@ impl App for Calendar {
         }
         // The selected day.
         let side = Rect::new(area.right() - SIDE - 6, area.y + 6, SIDE, area.h - 12);
-        c.fill_round(side, 18, 0x22_00_00_00);
+        ui::well_pane(c, side, 18);
         let (y, m, d) = self.selected;
         text::draw(c, Font::Body, side.x + 16, side.y + 16, WEEKDAYS[weekday(y, m, d)], ui::ORANGE);
         text::draw(c, Font::Title, side.x + 16, side.y + 36, &format!("{d} {}", MONTHS[(m as usize + 11) % 12]), ui::text());
         let mut ey = side.y + 92;
         if let Some(h) = holiday(y, m, d) {
-            text::draw(c, Font::Strong, side.x + 16, ey, h, 0xFFFF_6961);
+            text::draw(c, Font::Strong, side.x + 16, ey, h, red());
             ey += 30;
         }
         let list = self.events_on(self.selected);
@@ -289,7 +289,8 @@ impl App for Calendar {
             ey += 48;
         }
         let ir = Self::input_rect(area);
-        c.fill_round(ir, 12, 0x26FF_FFFF);
+        c.fill_round(ir, 12, ui::pane());
+        c.stroke_round(ir, 12, 1, ui::line());
         let (lh, _) = text::metrics(Font::Body);
         let ty = ir.y + (ir.h - lh) / 2;
         if self.input.is_empty() {
@@ -390,5 +391,14 @@ impl App for Calendar {
             return true;
         }
         false
+    }
+}
+
+/// The red of weekends and holidays, deeper in the light theme.
+fn red() -> u32 {
+    if ui::theme() == ui::Theme::Light {
+        0xFFD0_2A1E
+    } else {
+        0xFFFF_6961
     }
 }

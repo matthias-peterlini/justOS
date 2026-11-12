@@ -268,7 +268,7 @@ impl App for Music {
         c.set_clip(saved);
         // The player.
         let b = Self::bar(area);
-        c.fill_round(b, 16, 0x33_00_00_00);
+        ui::well_pane(c, b, 18);
         let art = Rect::new(b.x + 14, b.y + 14, 68, 68);
         c.fill_round_grad(art, 12, 0xFFFF_5E7E, 0xFFB0_2BD9);
         res::draw_icon(c, "g-note", 36, art.x + 16, art.y + 16);
@@ -282,8 +282,8 @@ impl App for Music {
         let [prev, play, next] = Self::controls(area);
         ui::icon_button(c, prev, "g-prev", false);
         let playing = state.is_some_and(|s| s.2);
-        c.fill_circle(play.x + play.w / 2, play.y + play.h / 2, play.w / 2, 0xFFFF_FFFF);
-        res::draw_icon(c, if playing { "g-pause-dark" } else { "g-play-dark" }, 24, play.x + 12, play.y + 12);
+        ui::tile(c, play, play.w / 2, ui::ORANGE_GRAD);
+        ui::glyph(c, if playing { "g-pause-dark" } else { "g-play-dark" }, 24, play.x + 12, play.y + 12, ui::WHITE);
         ui::icon_button(c, next, "g-next", false);
         let sr = Self::seek_rect(area);
         let (pos, len, rate) = state.map_or((0, 1, 1), |s| (s.0, s.1.max(1), s.3.max(1) as u64));
@@ -291,7 +291,7 @@ impl App for Music {
         text::draw_right(c, Font::Small, sr.x - 12, sr.y - 3, &mmss(pos / rate), ui::text_dim());
         text::draw(c, Font::Small, sr.right() + 12, sr.y - 3, &mmss(len / rate), ui::text_dim());
         let vr = Self::volume_rect(area);
-        res::draw_icon(c, "g-volume", 16, vr.x - 26, vr.y + 2);
+        ui::glyph(c, "g-volume", 16, vr.x - 26, vr.y + 2, ui::text_dim());
         ui::slider(c, vr, audio::volume() * 10);
         if !self.note.is_empty() {
             text::draw_right(c, Font::Small, b.right() - 14, b.y + 12, &text::fit(Font::Small, &self.note, b.w / 3), ui::ORANGE);

@@ -213,7 +213,7 @@ impl App for About {
                     let ro = if v.read_only() { " · sola lettura" } else { "" };
                     text::draw_right(c, Font::Small, r.right() - 14, r.y + 12, &format!("{} liberi su {}{ro}", Size(free), Size(total)), ui::text_dim());
                     let bar = Rect::new(r.x + 66, r.y + 42, r.w - 82, 10);
-                    c.fill_round(bar, 5, 0x30FF_FFFF);
+                    c.fill_round(bar, 5, ui::cell());
                     let used = total.saturating_sub(free);
                     let w = (bar.w as u64 * used / total.max(1)) as i32;
                     c.fill_round(Rect::new(bar.x, bar.y, w.max(10), bar.h), 5, ui::ACCENT);

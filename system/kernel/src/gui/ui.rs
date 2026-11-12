@@ -73,8 +73,8 @@ pub struct Palette {
 }
 
 pub const DARK: Palette = Palette {
-    panel_top: 0xF723_2326,
-    panel_bottom: 0xF719_191B,
+    panel_top: 0xFF23_2326,
+    panel_bottom: 0xFF19_191B,
     well: 0xFF0F_0F10,
     text: 0xFFF5_F5F7,
     text_dim: 0xFFA1_A1A6,
@@ -92,8 +92,8 @@ pub const DARK: Palette = Palette {
 };
 
 pub const LIGHT: Palette = Palette {
-    panel_top: 0xF7FA_FAFC,
-    panel_bottom: 0xF7EC_ECF0,
+    panel_top: 0xFFFA_FAFC,
+    panel_bottom: 0xFFEC_ECF0,
     well: 0xFFFF_FFFF,
     text: 0xFF1D_1D1F,
     text_dim: 0xFF6E_6E73,

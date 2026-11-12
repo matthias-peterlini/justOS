@@ -9,7 +9,6 @@
 use crate::dev::input::{Key, KeyEvent};
 use crate::fs;
 use crate::gui::gfx::{Canvas, Rect};
-use crate::gui::res;
 use crate::gui::text::{self, Font};
 use crate::gui::ui;
 use crate::gui::wm::{Action, App};
@@ -931,11 +930,11 @@ impl Browser {
             let (cx, cy) = (r.x + 18, r.y + 16);
             if t.loading {
                 let a = (self.ticks % 8) as i32;
-                c.fill_circle(cx, cy, 9, 0x26FF_FFFF);
+                c.fill_circle(cx, cy, 9, ui::sel());
                 let (dx, dy) = [(0, -6), (4, -4), (6, 0), (4, 4), (0, 6), (-4, 4), (-6, 0), (-4, -4)][a as usize];
                 c.fill_circle(cx + dx, cy + dy, 3, ui::ACCENT);
             } else {
-                c.fill_circle(cx, cy, 9, 0x24FF_FFFF);
+                c.fill_circle(cx, cy, 9, ui::sel());
                 let letter: String = t.title.chars().next().map(|ch| ch.to_lowercase().collect()).unwrap_or_else(|| String::from("n"));
                 let (lh, _) = text::metrics(Font::Small);
                 text::draw_centered(c, Font::Small, cx, cy - lh / 2, &letter, ui::text_dim());
@@ -947,34 +946,34 @@ impl Browser {
             if active || self.hover == Some(Self::tab_close(*r)) || r.w > 120 {
                 let x = Self::tab_close(*r);
                 if self.hover == Some(x) {
-                    c.fill_circle(x.x + 10, x.y + 10, 10, 0x26FF_FFFF);
+                    c.fill_circle(x.x + 10, x.y + 10, 10, ui::sel());
                 }
-                res::draw_icon(c, "g-close", 10, x.x + 5, x.y + 5);
+                ui::glyph(c, "g-close", 10, x.x + 5, x.y + 5, ui::text_dim());
             }
         }
         let nt = self.new_tab_rect(area);
         if self.hover == Some(nt) {
-            c.fill_circle(nt.x + 15, nt.y + 15, 15, 0x1FFF_FFFF);
+            c.fill_circle(nt.x + 15, nt.y + 15, 15, ui::sel());
         }
-        res::draw_icon(c, "g-plus", 16, nt.x + 7, nt.y + 7);
+        ui::glyph(c, "g-plus", 16, nt.x + 7, nt.y + 7, ui::text());
         // Toolbar.
         let t = &self.tabs[self.cur];
         let enabled = [t.at > 0, t.at + 1 < t.history.len(), true, true];
         for (i, (r, glyph)) in Self::tool_buttons(area).iter().zip(["g-back", "g-forward", if t.loading { "g-close" } else { "g-reload" }, "g-home"]).enumerate() {
             if self.hover == Some(*r) && enabled[i] {
-                c.fill_circle(r.x + 17, r.y + 17, 17, 0x1FFF_FFFF);
+                c.fill_circle(r.x + 17, r.y + 17, 17, ui::sel());
             }
             let s = if i == 2 && t.loading { 13 } else { 17 };
             if enabled[i] {
-                res::draw_icon(c, glyph, s, r.x + (34 - s) / 2, r.y + (34 - s) / 2);
+                ui::glyph(c, glyph, s, r.x + (34 - s) / 2, r.y + (34 - s) / 2, ui::text());
             } else {
-                res::draw_icon_faded(c, glyph, s, r.x + (34 - s) / 2, r.y + (34 - s) / 2, 90);
+                ui::glyph(c, glyph, s, r.x + (34 - s) / 2, r.y + (34 - s) / 2, ui::text_faint());
             }
         }
         let ar = Self::address_rect(area);
         let editing = focused && self.focus == Focus::Address;
         c.fill_round(ar, ar.h / 2, ui::well());
-        c.stroke_round(ar, ar.h / 2, 1, if editing { 0x59FF_FFFF } else { 0x26FF_FFFF });
+        c.stroke_round(ar, ar.h / 2, 1, if editing { 0xB3FF_5A1F } else { ui::line() });
         let secure = t.url.starts_with("https://");
         if t.page.is_some() && !editing {
             // A padlock for secure pages.
@@ -983,7 +982,7 @@ impl Browser {
             c.stroke_round(Rect::new(lx + 2, ly - 1, 8, 9), 4, 2, col);
             c.fill_round(Rect::new(lx, ly + 4, 12, 9), 2, col);
         } else {
-            res::draw_icon(c, "g-search", 14, ar.x + 16, ar.y + 12);
+            ui::glyph(c, "g-search", 14, ar.x + 16, ar.y + 12, ui::text_dim());
         }
         let (lh, _) = text::metrics(Font::Body);
         let ty = ar.y + (ar.h - lh) / 2;
@@ -1014,7 +1013,7 @@ impl Browser {
         // Tab counter and menu.
         let cr = Self::counter_rect(area);
         if self.hover == Some(cr) {
-            c.fill_circle(cr.x + 14, cr.y + 14, 17, 0x1FFF_FFFF);
+            c.fill_circle(cr.x + 14, cr.y + 14, 17, ui::sel());
         }
         c.stroke_round(cr.grow(-3), 5, 2, ui::text());
         let n = format!("{}", self.tabs.len());
@@ -1022,9 +1021,9 @@ impl Browser {
         text::draw_centered(c, Font::Strong, cr.x + 14, cr.y + (28 - sh) / 2, &n, ui::text());
         let mb = Self::menu_button(area);
         if self.hover == Some(mb) || self.menu {
-            c.fill_circle(mb.x + 17, mb.y + 17, 17, 0x1FFF_FFFF);
+            c.fill_circle(mb.x + 17, mb.y + 17, 17, ui::sel());
         }
-        res::draw_icon(c, "g-more", 18, mb.x + 8, mb.y + 8);
+        ui::glyph(c, "g-more", 18, mb.x + 8, mb.y + 8, ui::text());
         // Loading progress under the toolbar.
         if t.loading {
             let (done, all) = t.progress;
@@ -1036,7 +1035,7 @@ impl Browser {
     fn draw_start(&mut self, c: &mut Canvas, blur: &Canvas, area: Rect, focused: bool) {
         let r = Self::start_card(area);
         ui::card(c, blur, r, 22, ui::GLASS_STRONG);
-        crate::gui::splash::draw_mark(c, r.x + r.w / 2, r.y + 54, 34, 0xFFF2_EFE6);
+        crate::gui::splash::draw_mark(c, r.x + r.w / 2, r.y + 54, 34, ui::knob_glyph());
         text::draw_centered(c, Font::Title, r.x + r.w / 2, r.y + 84, "Dove vuoi andare?", ui::text());
         let sr = Self::start_search(area);
         ui::text_field(c, sr, &text::fit(Font::Heading, &self.search, sr.w - 40), "Cerca con DuckDuckGo o scrivi un indirizzo", focused && self.focus == Focus::Search && self.caret_on);
@@ -1048,7 +1047,7 @@ impl Browser {
             c.fill_round(*t, 14, if hover { ui::hover() } else { ui::pane() });
             c.stroke_round(*t, 14, 1, ui::line());
             let badge = Rect::new(t.x + 14, t.y + 16, 32, 32);
-            c.fill_round(badge, 9, 0x1FFF_FFFF);
+            c.fill_round(badge, 9, ui::sel());
             let (lh, _) = text::metrics(Font::Strong);
             let letter: String = name.chars().take(1).collect();
             text::draw_centered(c, Font::Strong, badge.x + 16, badge.y + (32 - lh) / 2, &letter, ui::text());
@@ -1103,7 +1102,7 @@ impl Browser {
                 if let Some(e) = &t.error {
                     let card = Rect::new(content.x + (content.w - 520) / 2, content.y + 90, 520, 220);
                     ui::card(c, blur, card, 22, ui::GLASS_STRONG);
-                    crate::gui::splash::draw_mark(c, card.x + 50, card.y + 40, 24, 0xFFF2_EFE6);
+                    crate::gui::splash::draw_mark(c, card.x + 50, card.y + 40, 24, ui::knob_glyph());
                     text::draw(c, Font::Heading, card.x + 32, card.y + 72, "Impossibile aprire la pagina", ui::text());
                     let msg = net_error(e);
                     for (i, l) in text::wrap(Font::Body, &msg, card.w - 64).iter().take(3).enumerate() {
@@ -1137,7 +1136,7 @@ impl Browser {
             let s = text::fit(Font::Small, link, content.w / 2);
             let w = text::width(Font::Small, &s) + 24;
             let r = Rect::new(content.x + 8, content.bottom() - 34, w, 26);
-            c.fill_round(r, 13, 0xE614_1011);
+            c.fill_round(r, 13, ui::well());
             c.stroke_round(r, 13, 1, ui::line());
             text::draw(c, Font::Small, r.x + 12, r.y + 6, &s, ui::text_dim());
         }

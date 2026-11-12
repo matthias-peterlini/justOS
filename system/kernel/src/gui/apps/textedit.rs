@@ -134,7 +134,7 @@ impl App for TextEdit {
         }
         let tr = Self::text_rect(area);
         self.tr = tr;
-        c.fill_round(tr, 14, 0xF21C_1622);
+        ui::well_pane(c, tr, 14);
         self.area.draw(c, tr, focused && self.picker.is_none());
         let (words, chars) = self.area.counts();
         let status = format!("{words} parole · {chars} caratteri");

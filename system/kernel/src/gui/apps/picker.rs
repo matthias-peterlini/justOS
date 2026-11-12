@@ -107,11 +107,10 @@ impl Picker {
     }
 
     pub fn draw(&mut self, c: &mut Canvas, area: Rect) {
-        c.fill(area, 0x6610_0A16);
+        c.fill(area, 0x6610_0A16); // scrim over the window, the same in both themes
         let s = Self::sheet(area);
         c.shadow(s, 18, 16, 90);
-        c.fill_round(s, 18, 0xF62A_2234);
-        c.stroke_round(s, 18, 1, ui::line());
+        ui::panel(c, s, 18);
         ui::icon_button(c, Self::back(s), "g-back", self.hover == Some(Self::back(s)));
         let title = match self.dir.name() {
             "" => format!("{}:", self.dir.volume),
@@ -131,7 +130,7 @@ impl Picker {
             ui::text_field(c, Self::field(s), &self.name, "Nome del file", true);
         }
         let list = Self::list(s, self.saving);
-        c.fill_round(list, 10, 0x33_00_00_00);
+        ui::well_pane(c, list, 10);
         let saved = c.clip();
         c.set_clip(saved.intersect(&list));
         if self.items.is_empty() {

@@ -186,10 +186,10 @@ impl App for Photos {
                 None => c.fill_round(t, 8, ui::pane()),
             }
             if self.hover == Some(i) {
-                c.fill_round(t, 8, 0x26FF_FFFF);
+                c.fill_round(t, 8, 0x26FF_FFFF); // over the picture
                 let label = text::fit(Font::Small, &self.photos[i].name, t.w - 16);
                 c.fill_round(Rect::new(t.x + 6, t.bottom() - 28, t.w - 12, 22), 8, 0x99_00_00_00);
-                text::draw(c, Font::Small, t.x + 12, t.bottom() - 26, &label, ui::text());
+                text::draw(c, Font::Small, t.x + 12, t.bottom() - 26, &label, ui::WHITE);
             }
         }
         c.set_clip(saved);

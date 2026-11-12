@@ -528,7 +528,7 @@ impl App for Files {
             let (rects, plus) = self.tab_rects(area);
             for (i, r) in rects.iter().enumerate() {
                 let on = i == self.tab;
-                c.fill_round(*r, 10, if on { crate::gui::ui::sel() } else { 0x14FF_FFFF });
+                c.fill_round(*r, 10, if on { crate::gui::ui::sel() } else { ui::hover() });
                 if self.drop_at == Some(Target::Tab(i)) {
                     c.fill_round(*r, 10, DROP_FILL);
                     c.stroke_round(*r, 10, 2, DROP_EDGE);
@@ -540,14 +540,13 @@ impl App for Files {
                 let x = tab_close(*r);
                 text::draw_centered(c, Font::Small, x.x + x.w / 2, x.y + (x.h - sh) / 2, "×", ui::text_dim());
             }
-            c.fill_circle(plus.x + 13, plus.y + 13, 13, 0x1FFF_FFFF);
+            ui::well_pane(c, Rect::new(plus.x, plus.y, 26, 26), 13);
             text::draw_centered(c, Font::Heading, plus.x + 13, plus.y + (26 - hh) / 2, "+", ui::text());
         }
         // The folder.
         let content = self.content(area);
         let back = Rect::new(content.x + 12, content.y + 12, 28, 28);
-        c.fill_circle(back.x + 14, back.y + 14, 14, 0x26FF_FFFF);
-        res::draw_icon(c, "g-back", 14, back.x + 7, back.y + 7);
+        ui::icon_button(c, back, "g-back", false);
         let nt = self.new_tab_btn(area);
         let title = text::fit(Font::Heading, &self.title_of(), nt.x - content.x - 64);
         text::draw(c, Font::Heading, content.x + 52, content.y + 14, &title, ui::text());
@@ -555,7 +554,7 @@ impl App for Files {
         let cw = text::width(Font::Small, &count);
         text::draw(c, Font::Small, content.right() - cw - 16, content.y + 20, &count, ui::text_dim());
         if !self.trash {
-            c.fill_circle(nt.x + 14, nt.y + 14, 14, 0x26FF_FFFF);
+            ui::well_pane(c, Rect::new(nt.x, nt.y, 28, 28), 14);
             text::draw_centered(c, Font::Heading, nt.x + 14, nt.y + (28 - hh) / 2, "+", ui::text());
         }
         let (grid, cols) = self.grid(area);
@@ -571,7 +570,7 @@ impl App for Files {
                 continue;
             }
             if self.selection.contains(&i) {
-                c.fill_round(t.grow(-4), 14, 0x33FF_FFFF);
+                c.fill_round(t.grow(-4), 14, ui::sel());
             }
             if self.drop_at == Some(Target::Item(i)) {
                 c.fill_round(t.grow(-4), 14, DROP_FILL);
@@ -582,8 +581,8 @@ impl App for Files {
                 Some((k, name)) if *k == i => {
                     let w = (text::width(Font::Small, name) + 14).clamp(40, TILE_W + 20);
                     let f = Rect::new(t.x + TILE_W / 2 - w / 2, t.y + 68, w, 22);
-                    c.fill_round(f, 6, 0xFFFF_FFFF);
-                    let tw = text::draw(c, Font::Small, f.x + 7, f.y + 2, &text::fit(Font::Small, name, f.w - 12), 0xFF1C_1C1E);
+                    ui::well_pane(c, f, 6);
+                    let tw = text::draw(c, Font::Small, f.x + 7, f.y + 2, &text::fit(Font::Small, name, f.w - 12), ui::text());
                     c.fill(Rect::new(f.x + 8 + tw, f.y + 4, 1, 14), crate::gui::ui::ACCENT);
                 }
                 _ => {
@@ -599,9 +598,8 @@ impl App for Files {
         }
         self.grid_at = grid;
         if let Some((r, items)) = &self.menu {
-            c.shadow(*r, 12, 12, 80);
-            c.fill_round(*r, 12, 0xF52A_2234);
-            c.stroke_round(*r, 12, 1, crate::gui::ui::line());
+            ui::drop_shadow(c, *r, 14, 12, 80);
+            ui::panel(c, *r, 14);
             for (k, (label, act)) in items.iter().enumerate() {
                 let row = Rect::new(r.x + 5, r.y + 5 + k as i32 * MENU_ROW, r.w - 10, MENU_ROW - 2);
                 if self.hover_menu == Some(k) {

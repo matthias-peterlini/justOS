@@ -195,7 +195,7 @@ impl View for Setup {
         let mut y = card.y + 44;
         match self.step {
             0 => {
-                draw_logo(c, cx, y + 40, 35, 0xFFF2_EFE6);
+                draw_logo(c, cx, y + 40, 35, ui::knob_glyph());
                 y += 110;
                 text::draw_centered(c, Font::Title, cx, y, "Benvenuto in justOS", ui::text());
                 text::draw_centered(c, Font::Body, cx, y + 56, "Prepariamo il computer in pochi passi.", ui::text_dim());
@@ -230,7 +230,7 @@ impl View for Setup {
                 for (i, o) in lay.options.iter().enumerate() {
                     let sel = i == self.wall;
                     if sel {
-                        c.stroke_round(o.grow(4), 18, 3, 0xFFFF_FFFF);
+                        c.stroke_round(o.grow(4), 18, 3, ui::ACCENT);
                     }
                     draw_thumb(c, &self.thumbs[i], *o, 14);
                     text::draw_centered(
@@ -244,7 +244,7 @@ impl View for Setup {
                 }
             }
             _ => {
-                draw_logo(c, cx, y + 40, 35, 0xFFF2_EFE6);
+                draw_logo(c, cx, y + 40, 35, ui::knob_glyph());
                 y += 110;
                 let title = format!("Tutto pronto, {}!", self.name.trim());
                 text::draw_centered(c, Font::Title, cx, y, &text::fit(Font::Title, &title, card.w - 60), ui::text());
@@ -259,7 +259,7 @@ impl View for Setup {
         if enabled {
             ui::button(c, lay.primary, self.primary_label(), true, lay.primary.contains(mx, my));
         } else {
-            c.fill_round(lay.primary, lay.primary.h / 2, 0x40FF_FFFF);
+            c.fill_round(lay.primary, lay.primary.h / 2, ui::cell());
             let (lh, _) = text::metrics(Font::Strong);
             text::draw_centered(
                 c,
@@ -267,7 +267,7 @@ impl View for Setup {
                 lay.primary.x + lay.primary.w / 2,
                 lay.primary.y + (lay.primary.h - lh) / 2,
                 self.primary_label(),
-                0x80FF_FFFF,
+                ui::text_faint(),
             );
         }
         // Where we are: a dot per step, the current one wider.
@@ -276,20 +276,20 @@ impl View for Setup {
         for i in 0..STEPS {
             let wide = i == self.step;
             let w = if wide { 26 } else { 8 };
-            c.fill_round(Rect::new(dx, card.bottom() - 30, w, 8), 4, if wide { 0xFFFF_FFFF } else { 0x55FF_FFFF });
+            c.fill_round(Rect::new(dx, card.bottom() - 30, w, 8), 4, if wide { ui::ACCENT } else { ui::cell() });
             dx += w + 6;
         }
     }
 }
 
 fn option_tile(c: &mut Canvas, r: Rect, title: &str, sub: &str, selected: bool) {
-    c.fill_round(r, 18, if selected { 0x40FF_FFFF } else { 0x1AFF_FFFF });
-    c.stroke_round(r, 18, if selected { 2 } else { 1 }, if selected { 0xFFFF_FFFF } else { ui::line() });
+    c.fill_round(r, 18, if selected { ui::sel() } else { ui::pane() });
+    c.stroke_round(r, 18, if selected { 2 } else { 1 }, if selected { ui::ACCENT } else { ui::line() });
     text::draw(c, Font::Heading, r.x + 20, r.y + 14, title, ui::text());
     text::draw(c, Font::Small, r.x + 20, r.y + 42, sub, ui::text_dim());
     if selected {
-        c.fill_circle(r.right() - 26, r.y + r.h / 2, 11, 0xFFFF_FFFF);
-        c.fill_circle(r.right() - 26, r.y + r.h / 2, 5, 0xFF2F_7BEF);
+        c.fill_circle(r.right() - 26, r.y + r.h / 2, 11, ui::ACCENT);
+        c.fill_circle(r.right() - 26, r.y + r.h / 2, 5, ui::WHITE);
     }
 }
 

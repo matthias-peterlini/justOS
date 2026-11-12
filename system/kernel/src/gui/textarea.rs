@@ -412,7 +412,7 @@ impl TextArea {
             let total = self.lines.len() as i32 * lh;
             let bh = (inner.h * inner.h / total).max(24);
             let by = r.y + 4 + (r.h - 8 - bh) * self.scroll / max_scroll;
-            c.fill_round(Rect::new(r.right() - 7, by, 4, bh), 2, 0x66FF_FFFF);
+            c.fill_round(Rect::new(r.right() - 7, by, 4, bh), 2, ui::text_faint());
         }
         c.set_clip(saved);
     }
