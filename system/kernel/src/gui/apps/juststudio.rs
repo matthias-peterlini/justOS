@@ -14,7 +14,7 @@ use crate::fs;
 use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::text::{self, Font};
 use crate::gui::textarea::TextArea;
-use crate::gui::ui::{self, TEXT, TEXT_DIM, TEXT_FAINT};
+use crate::gui::ui;
 use crate::gui::wm::{Action, App, GAP};
 use alloc::boxed::Box;
 use alloc::format;
@@ -636,22 +636,22 @@ impl JustStudio {
     // Drawing.
 
     fn draw_sidebar(&self, c: &mut Canvas, area: Rect) {
-        ui::caps(c, area.x + 18, area.y + 18, "Esplora", TEXT_DIM);
+        ui::caps(c, area.x + 18, area.y + 18, "Esplora", ui::text_dim());
         let max = ((Self::new_button(area).y - area.y - 52) / ROW_H).max(0) as usize;
         for (i, row) in self.rows.iter().take(max).enumerate() {
             let r = Self::row_rect(area, i);
             let current = row.path == self.path || (row.dir && row.path == self.root);
             if row.path == self.path {
-                c.fill_round(r, 8, ui::SELECTED);
+                c.fill_round(r, 8, ui::sel());
             }
             let x = r.x + 10 + row.depth * 16;
             let (lh, _) = text::metrics(Font::Body);
             let ty = r.y + (r.h - lh) / 2;
             let mark = if row.dir { if row.path == self.root { "−" } else { "+" } } else { "·" };
-            text::draw(c, Font::Strong, x, ty, mark, TEXT_FAINT);
+            text::draw(c, Font::Strong, x, ty, mark, ui::text_faint());
             let font = if row.dir { Font::Strong } else { Font::Body };
             let name = text::fit(font, &row.name, r.right() - x - 22);
-            text::draw(c, font, x + 16, ty, &name, if current { TEXT } else { TEXT_DIM });
+            text::draw(c, font, x + 16, ty, &name, if current { ui::text() } else { ui::text_dim() });
         }
         ui::button(c, Self::new_button(area), "+ Nuovo file", false, self.hover == Some(10));
     }
@@ -672,7 +672,7 @@ impl JustStudio {
         }
         let m = Self::main(area);
         if !self.note.is_empty() {
-            text::draw_right(c, Font::Small, Self::buttons(area)[4].x - 16, m.y + 20, &self.note, TEXT_DIM);
+            text::draw_right(c, Font::Small, Self::buttons(area)[4].x - 16, m.y + 20, &self.note, ui::text_dim());
         }
     }
 
@@ -688,7 +688,7 @@ impl JustStudio {
         let (lh, _) = text::metrics(Font::Small);
         let sy = b.y + 8 + (30 - lh) / 2;
         let w = text::width(Font::Small, &pos);
-        text::draw_right(c, Font::Small, b.right() - 16, sy, &pos, TEXT_FAINT);
+        text::draw_right(c, Font::Small, b.right() - 16, sy, &pos, ui::text_faint());
         let (status, color) = if errors > 0 {
             (if errors == 1 { String::from("1 errore") } else { format!("{errors} errori") }, ui::RED)
         } else if self.run_error.is_some() {
@@ -712,7 +712,7 @@ impl JustStudio {
             }
             if lines.is_empty() {
                 let hint = if self.vm.is_some() { "Il programma non ha scritto niente con print()." } else { "L'output di print() compare qui." };
-                text::draw(c, Font::Small, body.x + 4, body.y + 2, hint, TEXT_FAINT);
+                text::draw(c, Font::Small, body.x + 4, body.y + 2, hint, ui::text_faint());
             }
             let fit = (body.h / lh).max(1) as usize;
             let skip = lines.len().saturating_sub(fit);
@@ -721,7 +721,7 @@ impl JustStudio {
             }
         } else {
             if self.problems.is_empty() {
-                text::draw(c, Font::Small, body.x + 4, body.y + 2, "Nessun problema nel progetto.", TEXT_FAINT);
+                text::draw(c, Font::Small, body.x + 4, body.y + 2, "Nessun problema nel progetto.", ui::text_faint());
             }
             for (i, p) in self.problems.iter().enumerate() {
                 let y = body.y + i as i32 * 26;
@@ -731,9 +731,9 @@ impl JustStudio {
                 let (mark, color) = if p.error { ("×", ui::RED) } else { ("!", ui::ORANGE) };
                 text::draw(c, Font::Strong, body.x + 6, y + 2, mark, color);
                 let at = format!("{}:{}:{}", p.file, p.line, p.col);
-                let w = text::draw(c, Font::Small, body.x + 24, y + 4, &at, TEXT_FAINT);
+                let w = text::draw(c, Font::Small, body.x + 24, y + 4, &at, ui::text_faint());
                 let msg = text::fit(Font::Body, &p.message, body.right() - body.x - 40 - w);
-                text::draw(c, Font::Body, body.x + 36 + w, y + 2, &msg, TEXT);
+                text::draw(c, Font::Body, body.x + 36 + w, y + 2, &msg, ui::text());
             }
         }
         c.set_clip(saved);
@@ -742,7 +742,7 @@ impl JustStudio {
     fn draw_preview(&mut self, c: &mut Canvas, area: Rect) {
         let r = self.preview_rect(area);
         c.fill_round(r, 14, 0xF20E_0C12);
-        ui::caps(c, r.x + 16, r.y + 14, "Anteprima dal vivo", TEXT_FAINT);
+        ui::caps(c, r.x + 16, r.y + 14, "Anteprima dal vivo", ui::text_faint());
         let inner = Rect::new(r.x + 12, r.y + 38, r.w - 24, r.h - 46);
         self.hits.clear();
         if self.view.is_empty() {
@@ -756,7 +756,7 @@ impl JustStudio {
             };
             let (lh, _) = text::metrics(Font::Body);
             for (i, l) in text::wrap(Font::Body, &msg, inner.w - 16).iter().enumerate() {
-                text::draw(c, Font::Body, inner.x + 8, inner.y + 8 + i as i32 * lh, l, TEXT_DIM);
+                text::draw(c, Font::Body, inner.x + 8, inner.y + 8 + i as i32 * lh, l, ui::text_dim());
             }
             return;
         }
@@ -780,7 +780,7 @@ impl JustStudio {
         if self.stale {
             let band = Rect::new(r.x + 12, r.bottom() - 40, r.w - 24, 30);
             c.fill_round(band, 10, 0xE07A_2222);
-            text::draw_centered(c, Font::Small, band.x + band.w / 2, band.y + 7, "Errori nel codice: l'anteprima è dell'ultima versione buona", TEXT);
+            text::draw_centered(c, Font::Small, band.x + band.w / 2, band.y + 7, "Errori nel codice: l'anteprima è dell'ultima versione buona", ui::text());
         }
         self.hits = cx.hits.into_iter().filter(|(h, _)| h.intersect(&inner).w > 0).collect();
     }

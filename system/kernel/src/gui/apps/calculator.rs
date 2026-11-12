@@ -5,7 +5,7 @@
 use crate::dev::input::{Key, KeyEvent};
 use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::text::{self, Font};
-use crate::gui::ui::{self, Anim, TEXT};
+use crate::gui::ui::{self, Anim};
 use crate::gui::wm::{Action, App};
 use alloc::string::String;
 
@@ -337,7 +337,7 @@ impl App for Calculator {
                 Op::Div => "÷",
             };
             let s = alloc::format!("{} {sym}", format(a, 12));
-            text::draw_right(c, Font::Body, area.right() - 22, area.y + 18, &s, ui::TEXT_DIM);
+            text::draw_right(c, Font::Body, area.right() - 22, area.y + 18, &s, ui::text_dim());
         }
         let shown = self.display();
         let font = [Font::Display, Font::Clock, Font::Title, Font::Heading]
@@ -345,7 +345,7 @@ impl App for Calculator {
             .find(|&f| text::width(f, &shown) <= area.w - 44)
             .unwrap_or(Font::Heading);
         let (lh, _) = text::metrics(font);
-        text::draw_right(c, font, area.right() - 22, area.y + 112 - lh, &shown, TEXT);
+        text::draw_right(c, font, area.right() - 22, area.y + 112 - lh, &shown, ui::text());
         for (r, row) in KEYS.iter().enumerate() {
             for (col, (label, k)) in row.iter().enumerate() {
                 if r == 4 && col == 1 {

@@ -9,7 +9,7 @@ use crate::dev::input::{Key, KeyEvent};
 use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::res;
 use crate::gui::text::{self, Font};
-use crate::gui::ui::{self, TEXT, TEXT_DIM, TEXT_FAINT};
+use crate::gui::ui;
 use crate::gui::wm::{Action, App};
 use crate::store::{self, Asset, CatalogApp, GhRepo, PackageInfo, Platform};
 use crate::sync::IrqLock;
@@ -379,7 +379,7 @@ impl Store {
 
     fn draw_updates(&mut self, c: &mut Canvas, area: Rect) {
         let ct = Self::content(area);
-        text::draw(c, Font::Title, ct.x + 14, ct.y + 8, "Aggiornamenti", TEXT);
+        text::draw(c, Font::Title, ct.x + 14, ct.y + 8, "Aggiornamenti", ui::text());
         let list = appupdate::list();
         let open = list.iter().filter(|u| u.state != appupdate::State::Installed).count();
         let check = Self::check_btn(area);
@@ -387,7 +387,7 @@ impl Store {
             let t = ((crate::time::uptime_ms() / 2) % 1000) as u32;
             c.arc(check.x + 20, check.y + 17, 10, 3, 1000, 0x26FF_FFFF);
             c.arc(check.x + 20, check.y + 17, 10, 3, 250 + t / 4, 0xFFFF_FFFF);
-            text::draw(c, Font::Body, check.x + 40, check.y + 7, "Controllo…", TEXT_DIM);
+            text::draw(c, Font::Body, check.x + 40, check.y + 7, "Controllo…", ui::text_dim());
         } else {
             ui::button(c, check, "Controlla ora", false, self.hover == Some(check));
         }
@@ -399,14 +399,14 @@ impl Store {
         if let Some(e) = appupdate::last_error() {
             line.push_str(&format!(" · {e}"));
         }
-        text::draw(c, Font::Small, ct.x + 16, ct.y + 56, &text::fit(Font::Small, &line, ct.w - 40), TEXT_FAINT);
+        text::draw(c, Font::Small, ct.x + 16, ct.y + 56, &text::fit(Font::Small, &line, ct.w - 40), ui::text_faint());
         let row = Self::auto_row(area);
-        c.fill_round(row, 16, ui::PANEL);
-        text::draw(c, Font::Strong, row.x + 18, row.y + 11, "Aggiorna le app automaticamente", TEXT);
-        text::draw(c, Font::Small, row.x + 18, row.y + 33, "Una volta al giorno; un'app aperta si aggiorna quando la chiudi", TEXT_DIM);
+        c.fill_round(row, 16, ui::pane());
+        text::draw(c, Font::Strong, row.x + 18, row.y + 11, "Aggiorna le app automaticamente", ui::text());
+        text::draw(c, Font::Small, row.x + 18, row.y + 33, "Una volta al giorno; un'app aperta si aggiorna quando la chiudi", ui::text_dim());
         ui::toggle(c, Self::auto_toggle(area), appupdate::auto());
         if list.is_empty() {
-            text::draw_centered(c, Font::Body, ct.x + ct.w / 2, ct.y + 200, "Le tue app sono aggiornate", TEXT_FAINT);
+            text::draw_centered(c, Font::Body, ct.x + ct.w / 2, ct.y + 200, "Le tue app sono aggiornate", ui::text_faint());
         }
         let saved = c.clip();
         c.set_clip(saved.intersect(&Rect::new(ct.x, ct.y + 152, ct.w, ct.h - 152)));
@@ -414,13 +414,13 @@ impl Store {
             if r.bottom() < ct.y + 152 || r.y > ct.bottom() {
                 continue;
             }
-            c.fill_round(r, 18, ui::PANEL);
+            c.fill_round(r, 18, ui::pane());
             match store::icon(&u.id) {
                 Some(icon) => res::draw_icon(c, &icon, 58, r.x + 14, r.y + 14),
                 None => res::draw_icon(c, "window", 58, r.x + 14, r.y + 14),
             }
-            text::draw(c, Font::Strong, r.x + 86, r.y + 14, &text::fit(Font::Strong, &u.name, r.w - 240), TEXT);
-            text::draw(c, Font::Small, r.x + 86, r.y + 38, &format!("Versione {} (prima {})", u.version, u.current), TEXT_DIM);
+            text::draw(c, Font::Strong, r.x + 86, r.y + 14, &text::fit(Font::Strong, &u.name, r.w - 240), ui::text());
+            text::draw(c, Font::Small, r.x + 86, r.y + 38, &format!("Versione {} (prima {})", u.version, u.current), ui::text_dim());
             let note = if !u.new_permissions.is_empty() && u.state != appupdate::State::Installed {
                 let what: Vec<String> = u.new_permissions.iter().map(|p| crate::sandbox::describe(p)).collect();
                 format!("Chiede anche: {}", what.join(", "))
@@ -434,7 +434,7 @@ impl Store {
                     appupdate::State::Available => String::new(),
                 }
             };
-            text::draw(c, Font::Small, r.x + 86, r.y + 58, &text::fit(Font::Small, &note, r.w - 220), TEXT_FAINT);
+            text::draw(c, Font::Small, r.x + 86, r.y + 58, &text::fit(Font::Small, &note, r.w - 220), ui::text_faint());
             let btn = Self::get_btn(r);
             match &u.state {
                 appupdate::State::Downloading { done, total } => draw_ring(c, btn, *done, *total),
@@ -517,52 +517,52 @@ impl Store {
         let state = REMOTE.lock().clone();
         match state {
             Remote::Idle | Remote::Busy => {
-                text::draw(c, Font::Title, ct.x + 60, ct.y + 10, "GitHub", TEXT);
+                text::draw(c, Font::Title, ct.x + 60, ct.y + 10, "GitHub", ui::text());
                 let t = ((crate::time::uptime_ms() / 2) % 1000) as u32;
                 c.arc(ct.x + ct.w / 2, ct.y + 180, 18, 3, 1000, 0x26FF_FFFF);
                 c.arc(ct.x + ct.w / 2, ct.y + 180, 18, 3, 250 + t / 4, 0xFFFF_FFFF);
-                text::draw_centered(c, Font::Body, ct.x + ct.w / 2, ct.y + 214, "Cerco su GitHub…", TEXT_DIM);
+                text::draw_centered(c, Font::Body, ct.x + ct.w / 2, ct.y + 214, "Cerco su GitHub…", ui::text_dim());
             }
             Remote::Failed(e) => {
-                text::draw(c, Font::Title, ct.x + 60, ct.y + 10, "GitHub", TEXT);
-                text::draw_centered(c, Font::Body, ct.x + ct.w / 2, ct.y + 180, &text::fit(Font::Body, &e, ct.w - 40), TEXT_DIM);
+                text::draw(c, Font::Title, ct.x + 60, ct.y + 10, "GitHub", ui::text());
+                text::draw_centered(c, Font::Body, ct.x + ct.w / 2, ct.y + 180, &text::fit(Font::Body, &e, ct.w - 40), ui::text_dim());
             }
             Remote::Repos(q, repos) => {
-                text::draw(c, Font::Title, ct.x + 60, ct.y + 10, &text::fit(Font::Title, &format!("«{q}» su GitHub"), ct.w - 80), TEXT);
+                text::draw(c, Font::Title, ct.x + 60, ct.y + 10, &text::fit(Font::Title, &format!("«{q}» su GitHub"), ct.w - 80), ui::text());
                 if repos.is_empty() {
-                    text::draw_centered(c, Font::Body, ct.x + ct.w / 2, ct.y + 180, "Nessun progetto trovato", TEXT_FAINT);
+                    text::draw_centered(c, Font::Body, ct.x + ct.w / 2, ct.y + 180, "Nessun progetto trovato", ui::text_faint());
                 }
                 for (r, repo) in Self::repo_rows(area, repos.len(), self.scroll).into_iter().zip(repos.iter()) {
                     if r.bottom() < ct.y + 56 || r.y > ct.bottom() {
                         continue;
                     }
-                    c.fill_round(r, 14, if self.hover == Some(r) { ui::PANEL_HOVER } else { ui::PANEL });
+                    c.fill_round(r, 14, if self.hover == Some(r) { ui::hover() } else { ui::pane() });
                     let name = repo.full_name.rsplit('/').next().unwrap_or("");
                     draw_tile(c, Rect::new(r.x + 10, r.y + 9, 44, 44), name, 0xFF3B_4252, Platform::Linux);
-                    text::draw(c, Font::Strong, r.x + 66, r.y + 12, &text::fit(Font::Strong, &repo.full_name, r.w - 200), TEXT);
-                    text::draw(c, Font::Small, r.x + 66, r.y + 34, &text::fit(Font::Small, &repo.description, r.w - 200), TEXT_DIM);
-                    text::draw_right(c, Font::Small, r.right() - 16, r.y + 23, &format!("★ {}", repo.stars), TEXT_FAINT);
+                    text::draw(c, Font::Strong, r.x + 66, r.y + 12, &text::fit(Font::Strong, &repo.full_name, r.w - 200), ui::text());
+                    text::draw(c, Font::Small, r.x + 66, r.y + 34, &text::fit(Font::Small, &repo.description, r.w - 200), ui::text_dim());
+                    text::draw_right(c, Font::Small, r.right() - 16, r.y + 23, &format!("★ {}", repo.stars), ui::text_faint());
                 }
             }
             Remote::Release(repo, tag, assets) => {
-                text::draw(c, Font::Title, ct.x + 60, ct.y + 10, &text::fit(Font::Title, &repo.full_name, ct.w - 80), TEXT);
-                text::draw(c, Font::Body, ct.x + 14, ct.y + 62, &text::fit(Font::Body, &repo.description, ct.w - 30), TEXT_DIM);
-                ui::caps(c, ct.x + 14, ct.y + 98, &format!("Ultima versione {tag}"), TEXT_FAINT);
+                text::draw(c, Font::Title, ct.x + 60, ct.y + 10, &text::fit(Font::Title, &repo.full_name, ct.w - 80), ui::text());
+                text::draw(c, Font::Body, ct.x + 14, ct.y + 62, &text::fit(Font::Body, &repo.description, ct.w - 30), ui::text_dim());
+                ui::caps(c, ct.x + 14, ct.y + 98, &format!("Ultima versione {tag}"), ui::text_faint());
                 if assets.is_empty() {
-                    text::draw(c, Font::Body, ct.x + 14, ct.y + 130, "Nessuna versione per justOS (Linux statico o Windows x64) in questa release.", TEXT_DIM);
+                    text::draw(c, Font::Body, ct.x + 14, ct.y + 130, "Nessuna versione per justOS (Linux statico o Windows x64) in questa release.", ui::text_dim());
                 }
                 for (r, a) in Self::repo_rows(area, assets.len(), 0).into_iter().map(|r| r.offset(0, 64)).zip(assets.iter()) {
                     if r.y > ct.bottom() {
                         break;
                     }
-                    c.fill_round(r, 14, ui::PANEL);
+                    c.fill_round(r, 14, ui::pane());
                     platform_chip(c, r.x + 14, r.y + 19, a.platform);
-                    text::draw(c, Font::Strong, r.x + 96, r.y + 12, &text::fit(Font::Strong, &a.name, r.w - 240), TEXT);
-                    text::draw(c, Font::Small, r.x + 96, r.y + 34, &format!("{}", Size(a.size)), TEXT_DIM);
+                    text::draw(c, Font::Strong, r.x + 96, r.y + 12, &text::fit(Font::Strong, &a.name, r.w - 240), ui::text());
+                    text::draw(c, Font::Small, r.x + 96, r.y + 34, &format!("{}", Size(a.size)), ui::text_dim());
                     let it = Item::Remote(self.asset_app(&repo, a));
                     self.draw_button(c, Self::get_btn(r), &it);
                 }
-                text::draw(c, Font::Small, ct.x + 14, ct.bottom() - 26, "Le app di GitHub non sono verificate da justOS: installa solo progetti di cui ti fidi.", TEXT_FAINT);
+                text::draw(c, Font::Small, ct.x + 14, ct.bottom() - 26, "Le app di GitHub non sono verificate da justOS: installa solo progetti di cui ti fidi.", ui::text_faint());
             }
         }
     }
@@ -584,8 +584,8 @@ impl Store {
         let back = Self::back_btn(area);
         ui::icon_button(c, back, "g-back", self.hover == Some(back));
         Self::draw_icon(c, it, 128, ct.x + 20, ct.y + 58);
-        text::draw(c, Font::Title, ct.x + 170, ct.y + 60, &text::fit(Font::Title, it.name(), ct.w - 190), TEXT);
-        text::draw(c, Font::Body, ct.x + 170, ct.y + 102, &text::fit(Font::Body, &format!("{} · {}", it.developer(), it.category()), ct.w - 300), TEXT_DIM);
+        text::draw(c, Font::Title, ct.x + 170, ct.y + 60, &text::fit(Font::Title, it.name(), ct.w - 190), ui::text());
+        text::draw(c, Font::Body, ct.x + 170, ct.y + 102, &text::fit(Font::Body, &format!("{} · {}", it.developer(), it.category()), ct.w - 300), ui::text_dim());
         platform_chip(c, ct.x + 170, ct.y + 124, it.platform());
         let [get, remove] = Self::page_btns(area);
         self.draw_button(c, get, it);
@@ -601,9 +601,9 @@ impl Store {
                 None if j.done > 0 => format!("{} · {}", j.phase, Size(j.done)),
                 None => String::from(j.phase),
             };
-            text::draw(c, Font::Small, get.right() + 16, get.y + 10, &what, TEXT_DIM);
+            text::draw(c, Font::Small, get.right() + 16, get.y + 10, &what, ui::text_dim());
         }
-        c.fill(Rect::new(ct.x + 16, ct.y + 206, ct.w - 32, 1), ui::SEPARATOR);
+        c.fill(Rect::new(ct.x + 16, ct.y + 206, ct.w - 32, 1), ui::line());
         let installed = it.installed();
         let (version, size, license, kind) = match it {
             Item::Local(p) => (
@@ -621,14 +621,14 @@ impl Store {
         for (k, (label, value)) in facts.iter().enumerate() {
             let x = ct.x + 16 + k as i32 * fw + fw / 2;
             let lw = ui::caps_width(label);
-            ui::caps(c, x - lw / 2, ct.y + 222, label, TEXT_FAINT);
-            text::draw_centered(c, Font::Strong, x, ct.y + 242, &text::fit(Font::Strong, value, fw - 10), TEXT_DIM);
+            ui::caps(c, x - lw / 2, ct.y + 222, label, ui::text_faint());
+            text::draw_centered(c, Font::Strong, x, ct.y + 242, &text::fit(Font::Strong, value, fw - 10), ui::text_dim());
             if k > 0 {
-                c.fill(Rect::new(ct.x + 16 + k as i32 * fw, ct.y + 222, 1, 36), ui::SEPARATOR);
+                c.fill(Rect::new(ct.x + 16 + k as i32 * fw, ct.y + 222, 1, 36), ui::line());
             }
         }
-        c.fill(Rect::new(ct.x + 16, ct.y + 276, ct.w - 32, 1), ui::SEPARATOR);
-        text::draw(c, Font::Heading, ct.x + 16, ct.y + 292, "Descrizione", TEXT);
+        c.fill(Rect::new(ct.x + 16, ct.y + 276, ct.w - 32, 1), ui::line());
+        text::draw(c, Font::Heading, ct.x + 16, ct.y + 292, "Descrizione", ui::text());
         let details = match it {
             Item::Local(p) => p.details.replace("\\n", "\n"),
             Item::Remote(a) => a.details.clone(),
@@ -661,7 +661,7 @@ impl Store {
                 if y > ct.bottom() - 20 {
                     break;
                 }
-                text::draw(c, Font::Body, ct.x + 16, y, &line, TEXT_DIM);
+                text::draw(c, Font::Body, ct.x + 16, y, &line, ui::text_dim());
                 y += 22;
             }
             if para.is_empty() {
@@ -721,7 +721,7 @@ fn platform_chip(c: &mut Canvas, x: i32, y: i32, p: Platform) {
         Platform::Justos => 0x33E0_662E,
     };
     c.fill_round(r, 11, bg);
-    ui::caps(c, x + 9, y + 6, label, TEXT);
+    ui::caps(c, x + 9, y + 6, label, ui::text());
 }
 
 impl App for Store {
@@ -751,16 +751,16 @@ impl App for Store {
 
     fn draw(&mut self, c: &mut Canvas, area: Rect, _blur: &Canvas, focused: bool) {
         ui::search_field(c, Self::search_rect(area), &self.search, "Cerca app", self.searching && focused);
-        ui::caps(c, area.x + 26, area.y + 74, "Categorie", TEXT_FAINT);
+        ui::caps(c, area.x + 26, area.y + 74, "Categorie", ui::text_faint());
         for (i, (name, icon)) in SECTIONS.iter().enumerate() {
             let r = Self::place(area, i);
             if i == self.section && self.search.is_empty() && matches!(self.view, View::List) {
-                c.fill_round(r, 12, ui::SELECTED);
+                c.fill_round(r, 12, ui::sel());
             } else if self.hover == Some(r) {
-                c.fill_round(r, 12, ui::PANEL);
+                c.fill_round(r, 12, ui::pane());
             }
             res::draw_icon(c, icon, 20, r.x + 10, r.y + 8);
-            text::draw(c, if i == self.section { Font::Strong } else { Font::Body }, r.x + 40, r.y + 9, name, TEXT);
+            text::draw(c, if i == self.section { Font::Strong } else { Font::Body }, r.x + 40, r.y + 9, name, ui::text());
             let n = if i == UPDATES { appupdate::pending_count() } else { 0 };
             if n > 0 {
                 let label = format!("{n}");
@@ -793,9 +793,9 @@ impl App for Store {
             return;
         }
         let title = if self.search.is_empty() { SECTIONS[self.section].0 } else { "Risultati" };
-        text::draw(c, Font::Title, ct.x + 14, ct.y + 8, title, TEXT);
+        text::draw(c, Font::Title, ct.x + 14, ct.y + 8, title, ui::text());
         if !self.note.is_empty() {
-            text::draw_right(c, Font::Small, ct.right() - 16, ct.y + 22, &self.note, TEXT_FAINT);
+            text::draw_right(c, Font::Small, ct.right() - 16, ct.y + 22, &self.note, ui::text_faint());
         }
         let shown = self.shown();
         if self.show_banner() {
@@ -804,21 +804,21 @@ impl App for Store {
                 let it = self.items[fi].clone();
                 c.fill_round_grad(b, 22, 0xFF2A_1712, 0xFF14_0D0B);
                 c.glow_round(b, 22, b.x + b.w / 5, b.y, b.w * 2 / 3, ui::GLOW, 170);
-                c.stroke_round(b, 22, 1, ui::BORDER);
+                c.stroke_round(b, 22, 1, ui::line());
                 ui::caps(c, b.x + 28, b.y + 24, "In evidenza", 0xCCFF_FFFF);
-                text::draw(c, Font::Title, b.x + 28, b.y + 44, it.name(), TEXT);
+                text::draw(c, Font::Title, b.x + 28, b.y + 44, it.name(), ui::text());
                 for (k, l) in text::wrap(Font::Body, it.about(), b.w - 260).iter().take(2).enumerate() {
-                    text::draw(c, Font::Body, b.x + 28, b.y + 88 + k as i32 * 22, l, TEXT_DIM);
+                    text::draw(c, Font::Body, b.x + 28, b.y + 88 + k as i32 * 22, l, ui::text_dim());
                 }
                 Self::draw_icon(c, &it, 112, b.right() - 150, b.y + 28);
                 let btn = Rect::new(b.x + 28, b.bottom() - 48, 100, 34);
                 self.draw_button(c, btn, &it);
             }
-            text::draw(c, Font::Heading, ct.x + 14, b.bottom() + 14, "Tutte le app", TEXT);
+            text::draw(c, Font::Heading, ct.x + 14, b.bottom() + 14, "Tutte le app", ui::text());
         }
         if shown.is_empty() && self.search.is_empty() {
             let msg = if self.section == 7 { "Nessuna app installata dal Negozio" } else { "Nessuna app" };
-            text::draw_centered(c, Font::Body, ct.x + ct.w / 2, self.grid_top(area) + 30, msg, TEXT_FAINT);
+            text::draw_centered(c, Font::Body, ct.x + ct.w / 2, self.grid_top(area) + 30, msg, ui::text_faint());
         }
         for (k, &i) in shown.iter().enumerate() {
             let r = self.card(area, k);
@@ -826,20 +826,20 @@ impl App for Store {
                 continue;
             }
             let it = self.items[i].clone();
-            c.fill_round(r, 18, if self.hover == Some(r) { ui::PANEL_HOVER } else { ui::PANEL });
+            c.fill_round(r, 18, if self.hover == Some(r) { ui::hover() } else { ui::pane() });
             Self::draw_icon(c, &it, 58, r.x + 14, r.y + 14);
-            text::draw(c, Font::Strong, r.x + 86, r.y + 14, &text::fit(Font::Strong, it.name(), r.w - 210), TEXT);
+            text::draw(c, Font::Strong, r.x + 86, r.y + 14, &text::fit(Font::Strong, it.name(), r.w - 210), ui::text());
             platform_chip(c, r.x + 86, r.y + 36, it.platform());
-            text::draw(c, Font::Small, r.x + 86, r.y + 62, &text::fit(Font::Small, it.about(), r.w - 210), TEXT_FAINT);
+            text::draw(c, Font::Small, r.x + 86, r.y + 62, &text::fit(Font::Small, it.about(), r.w - 210), ui::text_faint());
             self.draw_button(c, Self::get_btn(r), &it);
         }
         if !self.search.is_empty() {
             let g = self.github_row(area);
             if g.y < ct.bottom() {
-                c.fill_round(g, 18, if self.hover == Some(g) { ui::PANEL_HOVER } else { ui::PANEL });
+                c.fill_round(g, 18, if self.hover == Some(g) { ui::hover() } else { ui::pane() });
                 res::draw_icon(c, "g-search", 20, g.x + 18, g.y + 18);
-                text::draw(c, Font::Strong, g.x + 50, g.y + 10, &text::fit(Font::Strong, &format!("Cerca «{}» su GitHub", self.search), g.w - 80), TEXT);
-                text::draw(c, Font::Small, g.x + 50, g.y + 32, "Programmi Linux e Windows dai progetti open source", TEXT_DIM);
+                text::draw(c, Font::Strong, g.x + 50, g.y + 10, &text::fit(Font::Strong, &format!("Cerca «{}» su GitHub", self.search), g.w - 80), ui::text());
+                text::draw(c, Font::Small, g.x + 50, g.y + 32, "Programmi Linux e Windows dai progetti open source", ui::text_dim());
             }
         }
         c.set_clip(saved);

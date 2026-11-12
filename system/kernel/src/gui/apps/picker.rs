@@ -6,7 +6,7 @@ use crate::fs::{self, Path};
 use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::res;
 use crate::gui::text::{self, Font};
-use crate::gui::ui::{self, TEXT, TEXT_DIM, TEXT_FAINT};
+use crate::gui::ui;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -111,23 +111,23 @@ impl Picker {
         let s = Self::sheet(area);
         c.shadow(s, 18, 16, 90);
         c.fill_round(s, 18, 0xF62A_2234);
-        c.stroke_round(s, 18, 1, ui::BORDER);
+        c.stroke_round(s, 18, 1, ui::line());
         ui::icon_button(c, Self::back(s), "g-back", self.hover == Some(Self::back(s)));
         let title = match self.dir.name() {
             "" => format!("{}:", self.dir.volume),
             n => String::from(n),
         };
-        text::draw(c, Font::Strong, s.x + 56, s.y + 18, &text::fit(Font::Strong, &title, s.w - 80), TEXT);
+        text::draw(c, Font::Strong, s.x + 56, s.y + 18, &text::fit(Font::Strong, &title, s.w - 80), ui::text());
         for (i, (name, path)) in PLACES.iter().enumerate() {
             let r = Self::place(s, i);
             if fs::abs(path).is_ok_and(|p| p == self.dir) {
-                c.fill_round(r, 8, ui::PANEL_HOVER);
+                c.fill_round(r, 8, ui::hover());
             }
             res::draw_icon(c, super::files::icon_for(name, true), 18, r.x + 8, r.y + 6);
-            text::draw(c, Font::Body, r.x + 34, r.y + 6, name, TEXT);
+            text::draw(c, Font::Body, r.x + 34, r.y + 6, name, ui::text());
         }
         if self.saving {
-            text::draw(c, Font::Small, s.x + 160, s.y + 34, "Salva come", TEXT_DIM);
+            text::draw(c, Font::Small, s.x + 160, s.y + 34, "Salva come", ui::text_dim());
             ui::text_field(c, Self::field(s), &self.name, "Nome del file", true);
         }
         let list = Self::list(s, self.saving);
@@ -135,7 +135,7 @@ impl Picker {
         let saved = c.clip();
         c.set_clip(saved.intersect(&list));
         if self.items.is_empty() {
-            text::draw_centered(c, Font::Small, list.x + list.w / 2, list.y + 20, "Nessun file", TEXT_FAINT);
+            text::draw_centered(c, Font::Small, list.x + list.w / 2, list.y + 20, "Nessun file", ui::text_faint());
         }
         for (i, (name, dir)) in self.items.iter().enumerate() {
             let r = Rect::new(list.x + 4, list.y + 4 + i as i32 * ROW - self.scroll, list.w - 8, ROW - 2);
@@ -143,10 +143,10 @@ impl Picker {
                 continue;
             }
             if self.selected == Some(i) {
-                c.fill_round(r, 6, ui::SELECTED);
+                c.fill_round(r, 6, ui::sel());
             }
             res::draw_icon(c, super::files::icon_for(name, *dir), 20, r.x + 6, r.y + 4);
-            let color = if *dir || !self.saving { TEXT } else { TEXT_FAINT };
+            let color = if *dir || !self.saving { ui::text() } else { ui::text_faint() };
             text::draw(c, Font::Body, r.x + 34, r.y + 5, &text::fit(Font::Body, name, r.w - 44), color);
         }
         c.set_clip(saved);

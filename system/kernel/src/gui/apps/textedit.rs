@@ -8,7 +8,7 @@ use crate::fs;
 use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::text::{self, Font};
 use crate::gui::textarea::TextArea;
-use crate::gui::ui::{self, TEXT_DIM};
+use crate::gui::ui;
 use crate::gui::wm::{Action, App};
 use alloc::format;
 use alloc::string::String;
@@ -130,7 +130,7 @@ impl App for TextEdit {
             ui::button(c, *b, label, false, self.hover == Some(i));
         }
         if !self.note.is_empty() {
-            text::draw_right(c, Font::Small, area.right() - 18, area.y + 18, &self.note, TEXT_DIM);
+            text::draw_right(c, Font::Small, area.right() - 18, area.y + 18, &self.note, ui::text_dim());
         }
         let tr = Self::text_rect(area);
         self.tr = tr;
@@ -138,9 +138,9 @@ impl App for TextEdit {
         self.area.draw(c, tr, focused && self.picker.is_none());
         let (words, chars) = self.area.counts();
         let status = format!("{words} parole · {chars} caratteri");
-        text::draw(c, Font::Small, area.x + 20, area.bottom() - 24, &status, TEXT_DIM);
+        text::draw(c, Font::Small, area.x + 20, area.bottom() - 24, &status, ui::text_dim());
         if let Some(p) = &self.path {
-            text::draw_right(c, Font::Small, area.right() - 20, area.bottom() - 24, &text::fit(Font::Small, p, area.w / 2), ui::TEXT_FAINT);
+            text::draw_right(c, Font::Small, area.right() - 20, area.bottom() - 24, &text::fit(Font::Small, p, area.w / 2), ui::text_faint());
         }
         if let Some(p) = &mut self.picker {
             p.draw(c, area);

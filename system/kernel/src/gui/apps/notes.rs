@@ -7,7 +7,7 @@ use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::res;
 use crate::gui::text::{self, Font};
 use crate::gui::textarea::TextArea;
-use crate::gui::ui::{self, TEXT, TEXT_DIM, TEXT_FAINT};
+use crate::gui::ui;
 use crate::gui::wm::{Action, App};
 use crate::time;
 use alloc::format;
@@ -229,7 +229,7 @@ impl App for Notes {
         c.set_clip(saved.intersect(&lr));
         let visible = self.visible();
         if visible.is_empty() {
-            text::draw_centered(c, Font::Small, lr.x + lr.w / 2, lr.y + 20, "Nessuna nota", TEXT_FAINT);
+            text::draw_centered(c, Font::Small, lr.x + lr.w / 2, lr.y + 20, "Nessuna nota", ui::text_faint());
         }
         for (k, &i) in visible.iter().enumerate() {
             let r = Rect::new(lr.x, lr.y + k as i32 * ROW - self.scroll, lr.w, ROW - 4);
@@ -238,13 +238,13 @@ impl App for Notes {
             }
             let n = &self.list[i];
             if self.current == Some(i) {
-                c.fill_round(r, 10, ui::SELECTED);
+                c.fill_round(r, 10, ui::sel());
             } else if self.hover == Some(i) {
-                c.fill_round(r, 10, ui::PANEL);
+                c.fill_round(r, 10, ui::pane());
             }
-            text::draw(c, Font::Strong, r.x + 12, r.y + 9, &text::fit(Font::Strong, &n.title, r.w - 24), TEXT);
-            let w = text::draw(c, Font::Small, r.x + 12, r.y + 33, &when(n.modified), TEXT);
-            text::draw(c, Font::Small, r.x + 20 + w, r.y + 33, &text::fit(Font::Small, &n.preview, r.w - 40 - w), TEXT_DIM);
+            text::draw(c, Font::Strong, r.x + 12, r.y + 9, &text::fit(Font::Strong, &n.title, r.w - 24), ui::text());
+            let w = text::draw(c, Font::Small, r.x + 12, r.y + 33, &when(n.modified), ui::text());
+            text::draw(c, Font::Small, r.x + 20 + w, r.y + 33, &text::fit(Font::Small, &n.preview, r.w - 40 - w), ui::text_dim());
         }
         c.set_clip(saved);
         // The note.
@@ -254,14 +254,14 @@ impl App for Notes {
         if let Some(i) = self.current {
             let d = time::from_epoch(self.list[i].modified);
             let date = format!("{} {} {}, {:02}:{:02}", d.day, super::super::desktop::MONTHS[(d.month as usize + 11) % 12], d.year, d.hour, d.min);
-            text::draw_centered(c, Font::Small, area.x + SIDEBAR + (area.w - SIDEBAR) / 2 - 40, area.y + 20, &date, TEXT_FAINT);
+            text::draw_centered(c, Font::Small, area.x + SIDEBAR + (area.w - SIDEBAR) / 2 - 40, area.y + 20, &date, ui::text_faint());
             let tr = Self::text_rect(area);
             self.tr = tr;
             self.area.draw(c, tr, focused && !self.searching);
         } else {
             let cx = area.x + SIDEBAR + (area.w - SIDEBAR) / 2;
             res::draw_icon_faded(c, "notes", 64, cx - 32, area.y + area.h / 2 - 60, 120);
-            text::draw_centered(c, Font::Body, cx, area.y + area.h / 2 + 14, "Nessuna nota selezionata", TEXT_DIM);
+            text::draw_centered(c, Font::Body, cx, area.y + area.h / 2 + 14, "Nessuna nota selezionata", ui::text_dim());
         }
     }
 

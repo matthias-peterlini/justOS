@@ -16,7 +16,7 @@ use super::res;
 use super::settings;
 use super::splash::{draw_logo, draw_mark};
 use super::text::{self, Font};
-use super::ui::{self, Anim, Event, Glide, Looper, View, TEXT, TEXT_DIM, TEXT_FAINT};
+use super::ui::{self, Anim, Event, Glide, Looper, View};
 use super::wm::{self, Action, App, Hit, Window};
 use super::Display;
 use crate::dev::input::{self, Key, KeyEvent};
@@ -1241,6 +1241,7 @@ impl Desktop {
                 self.blur = b;
                 l.damage(self.screen());
             }
+            Action::RedrawAll => l.damage(self.screen()),
         }
     }
 
@@ -2243,13 +2244,13 @@ impl Desktop {
             let b = Rect::new(ix + 52 - w / 2, iy - 6, w, 22);
             c.fill_round(b, 11, ui::ACCENT);
             let (sh, _) = text::metrics(Font::Small);
-            text::draw_centered(c, Font::Small, b.x + b.w / 2, b.y + (b.h - sh) / 2, &n, TEXT);
+            text::draw_centered(c, Font::Small, b.x + b.w / 2, b.y + (b.h - sh) / 2, &n, ui::WHITE);
         }
         if carry.copy {
             let (cx, cy) = (ix + 48, iy + 46);
             c.fill_circle(cx, cy, 11, 0xFF30_D158);
-            c.fill(Rect::new(cx - 5, cy - 1, 10, 2), TEXT);
-            c.fill(Rect::new(cx - 1, cy - 5, 2, 10), TEXT);
+            c.fill(Rect::new(cx - 5, cy - 1, 10, 2), ui::WHITE);
+            c.fill(Rect::new(cx - 1, cy - 5, 2, 10), ui::WHITE);
         }
         let label = text::fit(Font::Small, &dnd::describe(&carry.paths), 170);
         let w = text::width(Font::Small, &label) + 18;
@@ -2258,7 +2259,7 @@ impl Desktop {
         let pill = Rect::new(x - w / 2, if below + 22 > self.h - 2 { iy - 30 } else { below }, w, 22);
         c.fill_round(pill, 11, 0xD91C_1C1E);
         let (sh, _) = text::metrics(Font::Small);
-        text::draw_centered(c, Font::Small, x, pill.y + (pill.h - sh) / 2, &label, TEXT);
+        text::draw_centered(c, Font::Small, x, pill.y + (pill.h - sh) / 2, &label, ui::WHITE);
     }
 
     fn released(&mut self, l: &mut Looper) {
@@ -2307,7 +2308,7 @@ impl Desktop {
             if lit {
                 c.fill_round(cb, cb.h / 2, if ink { 0x1F00_0000 } else { 0x26FF_FFFF });
             }
-            let fg = if ink { ui::INK } else { TEXT };
+            let fg = if ink { ui::INK } else { ui::WHITE };
             let (sh, _) = text::metrics(Font::Strong);
             let y = cb.y + (cb.h - sh) / 2;
             let w = text::draw(c, Font::Strong, cb.x + 14, y, &clock, fg);
@@ -2315,7 +2316,7 @@ impl Desktop {
             return;
         }
         let ink = ui::luminance(&self.blur, cb) > 150;
-        let (fg, shade, hover_bg) = if ink { (ui::INK, 0x40FF_FFFF, 0x1F00_0000) } else { (TEXT, 0x4D00_0000, 0x26FF_FFFF) };
+        let (fg, shade, hover_bg) = if ink { (ui::INK, 0x40FF_FFFF, 0x1F00_0000) } else { (ui::WHITE, 0x4D00_0000, 0x26FF_FFFF) };
         if lit {
             c.fill_round(cb, 20, hover_bg);
         }
@@ -2342,15 +2343,10 @@ impl Desktop {
         let ws = self.widgets();
         let d = now();
         let name = settings::get().name;
-        // Light glass; ink or white text, whichever reads on the wallpaper:
-        // (text, dimmed text).
+        // A panel of the theme: (text, dimmed text).
         let pane = |c: &mut Canvas, g: Rect| -> (u32, u32) {
             ui::light_glass(c, &self.blur, g, 24, true);
-            if ui::wants_ink(&self.blur, g) {
-                (ui::INK, ui::INK_DIM)
-            } else {
-                (TEXT, TEXT_DIM)
-            }
+            (ui::text(), ui::text_dim())
         };
         if n > 0 && r.overlaps(&ui::with_shadow(ws[0])) {
             let g = ws[0];
@@ -2445,7 +2441,7 @@ impl Desktop {
             let w = text::width(Font::Strong, label) + 24;
             let tip = Rect::new(r.x + r.w / 2 - w / 2, r.y - 44, w, 30);
             ui::glass(c, &self.blur, tip, 15, ui::GLASS_STRONG);
-            text::draw_centered(c, Font::Strong, tip.x + w / 2, tip.y + 6, label, TEXT);
+            text::draw_centered(c, Font::Strong, tip.x + w / 2, tip.y + 6, label, ui::text());
         }
     }
 
@@ -2464,26 +2460,26 @@ impl Desktop {
         let s = self.search_rect();
         let s = Rect::new(s.x, s.y - (1000 - t as i32) * 20 / 1000, s.w, s.h);
         c.fill_round(s, 20, alpha(0x33FF_FFFF));
-        c.stroke_round(s, 20, 1, alpha(ui::BORDER));
+        c.stroke_round(s, 20, 1, alpha(ui::GLASS_EDGE));
         res::draw_icon_faded(c, "g-search", 16, s.x + 16, s.y + 12, t * 255 / 1000);
         let (lh, _) = text::metrics(Font::Body);
         if la.query.is_empty() {
-            text::draw(c, Font::Body, s.x + 42, s.y + (s.h - lh) / 2, "Cerca", alpha(TEXT_FAINT));
+            text::draw(c, Font::Body, s.x + 42, s.y + (s.h - lh) / 2, "Cerca", alpha(ui::WHITE_FAINT));
         } else {
-            let w = text::draw(c, Font::Body, s.x + 42, s.y + (s.h - lh) / 2, &la.query, alpha(TEXT));
+            let w = text::draw(c, Font::Body, s.x + 42, s.y + (s.h - lh) / 2, &la.query, alpha(ui::WHITE));
             c.fill(Rect::new(s.x + 44 + w, s.y + 10, 2, s.h - 20), alpha(0xFFFF_FFFF));
         }
         let visible = la.visible();
         let top = la.found_h();
         if visible.is_empty() && la.found.is_empty() {
-            text::draw_centered(c, Font::Body, self.w / 2, 190, "Nessun risultato", alpha(TEXT_DIM));
+            text::draw_centered(c, Font::Body, self.w / 2, 190, "Nessun risultato", alpha(ui::WHITE_DIM));
         }
         // Calculations, settings and files, in a glass list.
         let rows = self.found_rows(la.found.len());
         if let (Some(first), Some(last)) = (rows.first(), rows.last()) {
             let panel = Rect::new(first.x - 6, first.y - 6, first.w + 12, last.bottom() - first.y + 12);
             c.fill_round(panel, 18, alpha(0x40FF_FFFF));
-            c.stroke_round(panel, 18, 1, alpha(ui::BORDER));
+            c.stroke_round(panel, 18, 1, alpha(ui::GLASS_EDGE));
             for (f, r) in la.found.iter().zip(&rows) {
                 if full && r.contains(self.mouse.0, self.mouse.1) {
                     c.fill_round(*r, 12, 0x22FF_FFFF);
@@ -2493,11 +2489,11 @@ impl Desktop {
                 let (lh, _) = text::metrics(font);
                 let tag_w = text::width(Font::Small, f.section) + 12;
                 let name = text::fit(font, &f.name, r.w / 2);
-                let w = text::draw(c, font, r.x + 50, r.y + (r.h - lh) / 2, &name, alpha(TEXT));
+                let w = text::draw(c, font, r.x + 50, r.y + (r.h - lh) / 2, &name, alpha(ui::WHITE));
                 let detail = text::fit(Font::Small, &f.detail, r.w - 50 - w - 24 - tag_w);
                 let (sh, _) = text::metrics(Font::Small);
-                text::draw(c, Font::Small, r.x + 62 + w, r.y + (r.h - sh) / 2, &detail, alpha(TEXT_FAINT));
-                text::draw_right(c, Font::Small, r.right() - 12, r.y + (r.h - sh) / 2, f.section, alpha(TEXT_DIM));
+                text::draw(c, Font::Small, r.x + 62 + w, r.y + (r.h - sh) / 2, &detail, alpha(ui::WHITE_FAINT));
+                text::draw_right(c, Font::Small, r.right() - 12, r.y + (r.h - sh) / 2, f.section, alpha(ui::WHITE_DIM));
             }
         }
         // Tiles zoom in from a little larger, as in Launchpad.
@@ -2516,10 +2512,10 @@ impl Desktop {
             let size = (64 * zoom / 1000) & !1;
             res::draw_icon_faded(c, &e.icon, size, tile.x + (tile.w - size) / 2, tile.y + 12, t * 255 / 1000);
             let label = text::fit(Font::Body, &e.name, tile.w - 12);
-            text::draw_centered(c, Font::Body, tile.x + tile.w / 2, tile.y + 86, &label, alpha(TEXT));
+            text::draw_centered(c, Font::Body, tile.x + tile.w / 2, tile.y + 86, &label, alpha(ui::WHITE));
         }
         c.set_clip(saved);
-        text::draw_centered(c, Font::Small, self.w / 2, self.h - 36, "Ctrl+Spazio apre e chiude · Esc per uscire", alpha(TEXT_FAINT));
+        text::draw_centered(c, Font::Small, self.w / 2, self.h - 36, "Ctrl+Spazio apre e chiude · Esc per uscire", alpha(ui::WHITE_FAINT));
     }
 
     fn draw_popup(&self, c: &mut Canvas, p: &Popup) {
@@ -2531,15 +2527,15 @@ impl Desktop {
                 let mut y = p.rect.y + 6;
                 for (label, act) in &p.items {
                     if act.is_none() {
-                        c.fill(Rect::new(p.rect.x + 14, y + 5, p.rect.w - 28, 1), ui::SEPARATOR);
+                        c.fill(Rect::new(p.rect.x + 14, y + 5, p.rect.w - 28, 1), ui::line());
                         y += 11;
                         continue;
                     }
                     let r = Rect::new(p.rect.x + 6, y, p.rect.w - 12, 32);
                     if r.contains(self.mouse.0, self.mouse.1) {
-                        c.fill_round(r, 8, ui::SELECTED);
+                        c.fill_round(r, 8, ui::sel());
                     }
-                    text::draw(c, Font::Body, r.x + 12, r.y + 7, label, TEXT);
+                    text::draw(c, Font::Body, r.x + 12, r.y + 7, label, ui::text());
                     y += 34;
                 }
             }
@@ -2567,12 +2563,12 @@ impl Desktop {
         let tw = sb.x - self.cc(16) - tx;
         let (nf, _) = font_near(self.cc(30));
         let (mf, _) = font_near(self.cc(18));
-        text_on(c, nf, tx, photo.y + self.cc(45), &text::fit(nf, &name, tw), TEXT);
-        text_on(c, mf, tx, photo.y + self.cc(73), &text::fit(mf, "Account locale", tw), TEXT);
+        text_on(c, nf, tx, photo.y + self.cc(45), &text::fit(nf, &name, tw), ui::WHITE);
+        text_on(c, mf, tx, photo.y + self.cc(73), &text::fit(mf, "Account locale", tw), ui::WHITE);
         if lit(ControlHit::Settings) {
             c.fill_circle(sb.x + sb.w / 2, sb.y + sb.h / 2, sb.w / 2, 0x2EFF_FFFF);
         }
-        ui::glyph(c, "l-gear", icon, sb.x + (sb.w - icon) / 2, sb.y + (sb.h - icon) / 2, TEXT);
+        ui::glyph(c, "l-gear", icon, sb.x + (sb.w - icon) / 2, sb.y + (sb.h - icon) / 2, ui::WHITE);
 
         // The panel: light grey glass, nearly opaque.
         let panel = self.control_panel();
@@ -2675,10 +2671,10 @@ impl Desktop {
         let (cal, list) = self.notices_parts();
         ui::card(c, &self.blur, cal, 30, PANE);
         ui::card(c, &self.blur, list, 30, PANE);
-        draw_month(c, Rect::new(cal.x + 6, cal.y + 8, cal.w - 12, cal.h - 16), &now(), TEXT, TEXT_DIM);
+        draw_month(c, Rect::new(cal.x + 6, cal.y + 8, cal.w - 12, cal.h - 16), &now(), ui::text(), ui::text_dim());
         if self.history.is_empty() {
             let (lh, _) = text::metrics(Font::Body);
-            text::draw_centered(c, Font::Body, list.x + list.w / 2, list.y + list.h / 2 - lh, "Nessuna notifica", TEXT_DIM);
+            text::draw_centered(c, Font::Body, list.x + list.w / 2, list.y + list.h / 2 - lh, "Nessuna notifica", ui::text_dim());
             return;
         }
         let saved = c.clip();
@@ -2695,10 +2691,10 @@ impl Desktop {
             let tx = r.x + 78;
             let tw = r.right() - tx - 14;
             let tw_title = tw - text::width(Font::Small, at) - 8;
-            text::draw(c, Font::Heading, tx, r.y + 16, &text::fit(Font::Heading, title, tw_title), TEXT);
-            text::draw_right(c, Font::Small, r.right() - 16, r.y + 20, at, TEXT_DIM);
+            text::draw(c, Font::Heading, tx, r.y + 16, &text::fit(Font::Heading, title, tw_title), ui::text());
+            text::draw_right(c, Font::Small, r.right() - 16, r.y + 20, at, ui::text_dim());
             if let Some(line) = text::wrap(Font::Small, body, tw).first() {
-                text::draw(c, Font::Small, tx, r.y + 46, line, TEXT_DIM);
+                text::draw(c, Font::Small, tx, r.y + 46, line, ui::text_dim());
             }
             y += 92;
         }
@@ -2742,26 +2738,26 @@ impl Desktop {
             } else {
                 c.stroke_round(th, 6, 1, alpha(0x59FF_FFFF));
             }
-            text::draw_centered(c, Font::Small, th.x + th.w / 2, th.bottom() + 8, &format!("Desktop {}", i + 1), alpha(TEXT));
+            text::draw_centered(c, Font::Small, th.x + th.w / 2, th.bottom() + 8, &format!("Desktop {}", i + 1), alpha(ui::WHITE));
             if still && dragging.is_none() && self.spaces > 1 && th.grow(10).contains(mx, my) {
                 let b = space_close(th);
                 c.fill_circle(b.x + b.w / 2, b.y + b.h / 2, b.w / 2, ui::GLASS_STRONG | 0xFF00_0000);
-                c.stroke_round(b, b.w / 2, 1, ui::BORDER);
-                text::draw_centered(c, Font::Small, b.x + b.w / 2, b.y + (b.h - sh) / 2, "×", TEXT);
+                c.stroke_round(b, b.w / 2, 1, ui::GLASS_EDGE);
+                text::draw_centered(c, Font::Small, b.x + b.w / 2, b.y + (b.h - sh) / 2, "×", ui::WHITE);
             }
         }
         if let Some(p) = plus {
             let p = p.offset(0, -drop);
             let hot = (still && p.contains(mx, my)) || (dragging.is_some() && p.grow(8).contains(mx, my));
             c.fill_round(p, 10, alpha(if hot { 0x4DFF_FFFF } else { 0x26FF_FFFF }));
-            c.stroke_round(p, 10, 1, if dragging.is_some() && hot { ui::ACCENT } else { alpha(ui::BORDER) });
+            c.stroke_round(p, 10, 1, if dragging.is_some() && hot { ui::ACCENT } else { alpha(ui::GLASS_EDGE) });
             let (hh, _) = text::metrics(Font::Heading);
-            text::draw_centered(c, Font::Heading, p.x + p.w / 2, p.y + (p.h - hh) / 2, "+", alpha(TEXT));
+            text::draw_centered(c, Font::Heading, p.x + p.w / 2, p.y + (p.h - hh) / 2, "+", alpha(ui::WHITE));
         }
         // This desktop's windows glide from their places to the grid.
         let slots = self.overview_slots();
         if slots.is_empty() {
-            text::draw_centered(c, Font::Body, self.w / 2, self.h / 2, "Nessuna finestra su questo desktop", alpha(TEXT_DIM));
+            text::draw_centered(c, Font::Body, self.w / 2, self.h / 2, "Nessuna finestra su questo desktop", alpha(ui::WHITE_DIM));
         }
         let mut lifted = None;
         for &(id, to) in &slots {
@@ -2779,7 +2775,7 @@ impl Desktop {
                 let w = text::width(Font::Strong, &name) + 24;
                 let tip = Rect::new(to.x + to.w / 2 - w / 2, to.bottom() + 10, w, 28);
                 c.fill_round(tip, 14, ui::GLASS_STRONG);
-                text::draw_centered(c, Font::Strong, tip.x + w / 2, tip.y + 5, &name, TEXT);
+                text::draw_centered(c, Font::Strong, tip.x + w / 2, tip.y + 5, &name, ui::WHITE);
             }
         }
         // The window being dragged follows the pointer, on top.
@@ -2788,7 +2784,7 @@ impl Desktop {
             c.draw_scaled(pic, place_snap(at, r, frame), 220);
         }
         let hint = "Clic su una finestra per sceglierla · trascinala su un desktop per spostarla · Esc per uscire";
-        text::draw_centered(c, Font::Small, self.w / 2, self.h - 30, hint, alpha(TEXT_FAINT));
+        text::draw_centered(c, Font::Small, self.w / 2, self.h - 30, hint, alpha(ui::WHITE_FAINT));
     }
 
     /// "Desktop 2" and a dot for each desktop, for a moment after a switch.
@@ -2798,8 +2794,8 @@ impl Desktop {
         let alpha = |col: u32| (((col >> 24) * t / 1000) << 24) | (col & 0xFF_FFFF);
         let r = self.space_hud_rect();
         c.fill_round(r, 22, alpha(ui::GLASS_STRONG));
-        c.stroke_round(r, 22, 1, alpha(ui::BORDER));
-        text::draw_centered(c, Font::Heading, r.x + r.w / 2, r.y + 22, &format!("Desktop {}", self.space + 1), alpha(TEXT));
+        c.stroke_round(r, 22, 1, alpha(ui::GLASS_EDGE));
+        text::draw_centered(c, Font::Heading, r.x + r.w / 2, r.y + 22, &format!("Desktop {}", self.space + 1), alpha(ui::WHITE));
         let n = self.spaces as i32;
         let x0 = r.x + r.w / 2 - (n - 1) * 9;
         for i in 0..n {
@@ -2816,10 +2812,10 @@ impl Desktop {
             }
             ui::card(c, &self.blur, r, 24, 0xCC5E_5B64);
             res::draw_icon(c, &n.icon, 40, r.x + 14, r.y + 18);
-            text::draw(c, Font::Strong, r.x + 66, r.y + 14, &text::fit(Font::Strong, &n.title, r.w - 84), TEXT);
+            text::draw(c, Font::Strong, r.x + 66, r.y + 14, &text::fit(Font::Strong, &n.title, r.w - 84), ui::text());
             let lines = text::wrap(Font::Small, &n.body, r.w - 84);
             for (k, line) in lines.iter().take(2).enumerate() {
-                text::draw(c, Font::Small, r.x + 66, r.y + 36 + k as i32 * 17, line, TEXT_DIM);
+                text::draw(c, Font::Small, r.x + 66, r.y + 36 + k as i32 * 17, line, ui::text_dim());
             }
         }
     }
@@ -2971,7 +2967,8 @@ fn draw_month(c: &mut Canvas, g: Rect, d: &DateTime, fg: u32, dim: u32) {
         let label = format!("{day}");
         if day as u64 == d.day {
             c.fill_circle(cx, cy, 12, fg);
-            let on = if fg == TEXT { ui::INK } else { TEXT };
+            // Dark on a light circle, white on a dark one.
+            let on = if (fg >> 8) & 0xFF > 0x80 { ui::INK } else { ui::WHITE };
             text::draw_centered(c, Font::Strong, cx, cy - 9, &label, on);
         } else {
             text::draw_centered(c, Font::Body, cx, cy - 9, &label, if col >= 5 { dim } else { fg });

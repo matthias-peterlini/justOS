@@ -11,7 +11,7 @@ use crate::fs;
 use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::res;
 use crate::gui::text::{self, Font};
-use crate::gui::ui::{self, TEXT, TEXT_DIM, TEXT_FAINT};
+use crate::gui::ui;
 use crate::gui::wm::{Action, App};
 use crate::net::http::{self, Request};
 use crate::sync::{IrqLock, Mutex};
@@ -917,15 +917,15 @@ impl Browser {
 
     fn draw_chrome(&mut self, c: &mut Canvas, area: Rect, focused: bool) {
         let bar = Rect::new(area.x, area.y, area.w, BAR_H);
-        c.fill(Rect::new(area.x, bar.bottom() - 1, area.w, 1), ui::SEPARATOR);
+        c.fill(Rect::new(area.x, bar.bottom() - 1, area.w, 1), ui::line());
         // Tabs.
         let rects = self.tab_rects(area);
         for (i, r) in rects.iter().enumerate() {
             let active = i == self.cur;
             let t = &self.tabs[i];
-            c.fill_round(*r, 12, if active { ui::SELECTED } else if self.hover == Some(*r) { ui::PANEL_HOVER } else { ui::PANEL });
+            c.fill_round(*r, 12, if active { ui::sel() } else if self.hover == Some(*r) { ui::hover() } else { ui::pane() });
             if active {
-                c.stroke_round(*r, 12, 1, ui::BORDER);
+                c.stroke_round(*r, 12, 1, ui::line());
             }
             // The site's letter in a little circle (a spinner while loading).
             let (cx, cy) = (r.x + 18, r.y + 16);
@@ -938,11 +938,11 @@ impl Browser {
                 c.fill_circle(cx, cy, 9, 0x24FF_FFFF);
                 let letter: String = t.title.chars().next().map(|ch| ch.to_lowercase().collect()).unwrap_or_else(|| String::from("n"));
                 let (lh, _) = text::metrics(Font::Small);
-                text::draw_centered(c, Font::Small, cx, cy - lh / 2, &letter, TEXT_DIM);
+                text::draw_centered(c, Font::Small, cx, cy - lh / 2, &letter, ui::text_dim());
             }
             let tw = r.w - 64;
             if tw > 10 {
-                text::draw(c, Font::Body, r.x + 34, r.y + 7, &text::fit(Font::Body, &t.title, tw), if active { TEXT } else { TEXT_DIM });
+                text::draw(c, Font::Body, r.x + 34, r.y + 7, &text::fit(Font::Body, &t.title, tw), if active { ui::text() } else { ui::text_dim() });
             }
             if active || self.hover == Some(Self::tab_close(*r)) || r.w > 120 {
                 let x = Self::tab_close(*r);
@@ -973,13 +973,13 @@ impl Browser {
         }
         let ar = Self::address_rect(area);
         let editing = focused && self.focus == Focus::Address;
-        c.fill_round(ar, ar.h / 2, ui::FIELD);
+        c.fill_round(ar, ar.h / 2, ui::well());
         c.stroke_round(ar, ar.h / 2, 1, if editing { 0x59FF_FFFF } else { 0x26FF_FFFF });
         let secure = t.url.starts_with("https://");
         if t.page.is_some() && !editing {
             // A padlock for secure pages.
             let (lx, ly) = (ar.x + 16, ar.y + 13);
-            let col = if secure { TEXT_DIM } else { ui::ORANGE };
+            let col = if secure { ui::text_dim() } else { ui::ORANGE };
             c.stroke_round(Rect::new(lx + 2, ly - 1, 8, 9), 4, 2, col);
             c.fill_round(Rect::new(lx, ly + 4, 12, 9), 2, col);
         } else {
@@ -989,13 +989,13 @@ impl Browser {
         let ty = ar.y + (ar.h - lh) / 2;
         let tx = ar.x + 40;
         if self.address.is_empty() && !(editing && !self.address.is_empty()) {
-            text::draw(c, Font::Body, tx, ty, "Cerca o digita un indirizzo", TEXT_FAINT);
+            text::draw(c, Font::Body, tx, ty, "Cerca o digita un indirizzo", ui::text_faint());
             if editing && self.caret_on {
                 c.fill(Rect::new(tx, ty + 2, 2, lh - 4), ui::ACCENT);
             }
         } else if editing {
             let shown = tail_fit(Font::Body, &self.address, ar.w - 64);
-            let w = text::draw(c, Font::Body, tx, ty, &shown, TEXT);
+            let w = text::draw(c, Font::Body, tx, ty, &shown, ui::text());
             if self.caret_on {
                 c.fill(Rect::new(tx + w + 1, ty + 2, 2, lh - 4), ui::ACCENT);
             }
@@ -1006,9 +1006,9 @@ impl Browser {
                 Some(i) => (&shown[..i], &shown[i..]),
                 None => (shown, ""),
             };
-            let w = text::draw(c, Font::Body, tx, ty, &text::fit(Font::Body, host, ar.w - 64), TEXT);
+            let w = text::draw(c, Font::Body, tx, ty, &text::fit(Font::Body, host, ar.w - 64), ui::text());
             if ar.w - 64 - w > 30 && rest != "/" {
-                text::draw(c, Font::Body, tx + w, ty, &text::fit(Font::Body, rest, ar.w - 64 - w), TEXT_FAINT);
+                text::draw(c, Font::Body, tx + w, ty, &text::fit(Font::Body, rest, ar.w - 64 - w), ui::text_faint());
             }
         }
         // Tab counter and menu.
@@ -1016,10 +1016,10 @@ impl Browser {
         if self.hover == Some(cr) {
             c.fill_circle(cr.x + 14, cr.y + 14, 17, 0x1FFF_FFFF);
         }
-        c.stroke_round(cr.grow(-3), 5, 2, TEXT);
+        c.stroke_round(cr.grow(-3), 5, 2, ui::text());
         let n = format!("{}", self.tabs.len());
         let (sh, _) = text::metrics(Font::Strong);
-        text::draw_centered(c, Font::Strong, cr.x + 14, cr.y + (28 - sh) / 2, &n, TEXT);
+        text::draw_centered(c, Font::Strong, cr.x + 14, cr.y + (28 - sh) / 2, &n, ui::text());
         let mb = Self::menu_button(area);
         if self.hover == Some(mb) || self.menu {
             c.fill_circle(mb.x + 17, mb.y + 17, 17, 0x1FFF_FFFF);
@@ -1037,24 +1037,24 @@ impl Browser {
         let r = Self::start_card(area);
         ui::card(c, blur, r, 22, ui::GLASS_STRONG);
         crate::gui::splash::draw_mark(c, r.x + r.w / 2, r.y + 54, 34, 0xFFF2_EFE6);
-        text::draw_centered(c, Font::Title, r.x + r.w / 2, r.y + 84, "Dove vuoi andare?", TEXT);
+        text::draw_centered(c, Font::Title, r.x + r.w / 2, r.y + 84, "Dove vuoi andare?", ui::text());
         let sr = Self::start_search(area);
         ui::text_field(c, sr, &text::fit(Font::Heading, &self.search, sr.w - 40), "Cerca con DuckDuckGo o scrivi un indirizzo", focused && self.focus == Focus::Search && self.caret_on);
         let b = Self::start_buttons(area);
         ui::button(c, b[0], "Cerca", true, self.hover == Some(b[0]));
-        ui::caps(c, r.x + 36, b[1].y - 26, "Siti", TEXT_DIM);
+        ui::caps(c, r.x + 36, b[1].y - 26, "Siti", ui::text_dim());
         for (t, (name, host, _)) in b[1..].iter().zip(LINKS) {
             let hover = self.hover == Some(*t);
-            c.fill_round(*t, 14, if hover { ui::PANEL_HOVER } else { ui::PANEL });
-            c.stroke_round(*t, 14, 1, ui::BORDER);
+            c.fill_round(*t, 14, if hover { ui::hover() } else { ui::pane() });
+            c.stroke_round(*t, 14, 1, ui::line());
             let badge = Rect::new(t.x + 14, t.y + 16, 32, 32);
             c.fill_round(badge, 9, 0x1FFF_FFFF);
             let (lh, _) = text::metrics(Font::Strong);
             let letter: String = name.chars().take(1).collect();
-            text::draw_centered(c, Font::Strong, badge.x + 16, badge.y + (32 - lh) / 2, &letter, TEXT);
+            text::draw_centered(c, Font::Strong, badge.x + 16, badge.y + (32 - lh) / 2, &letter, ui::text());
             let w = t.w - 70;
-            text::draw(c, Font::Strong, t.x + 56, t.y + 13, &text::fit(Font::Strong, name, w), TEXT);
-            text::draw(c, Font::Small, t.x + 56, t.y + 36, &text::fit(Font::Small, host, w), TEXT_FAINT);
+            text::draw(c, Font::Strong, t.x + 56, t.y + 13, &text::fit(Font::Strong, name, w), ui::text());
+            text::draw(c, Font::Small, t.x + 56, t.y + 36, &text::fit(Font::Small, host, w), ui::text_faint());
         }
     }
 
@@ -1104,16 +1104,16 @@ impl Browser {
                     let card = Rect::new(content.x + (content.w - 520) / 2, content.y + 90, 520, 220);
                     ui::card(c, blur, card, 22, ui::GLASS_STRONG);
                     crate::gui::splash::draw_mark(c, card.x + 50, card.y + 40, 24, 0xFFF2_EFE6);
-                    text::draw(c, Font::Heading, card.x + 32, card.y + 72, "Impossibile aprire la pagina", TEXT);
+                    text::draw(c, Font::Heading, card.x + 32, card.y + 72, "Impossibile aprire la pagina", ui::text());
                     let msg = net_error(e);
                     for (i, l) in text::wrap(Font::Body, &msg, card.w - 64).iter().take(3).enumerate() {
-                        text::draw(c, Font::Body, card.x + 32, card.y + 106 + i as i32 * 21, l, TEXT_DIM);
+                        text::draw(c, Font::Body, card.x + 32, card.y + 106 + i as i32 * 21, l, ui::text_dim());
                     }
                     let b = Rect::new(card.x + 32, card.bottom() - 62, 140, 40);
                     ui::button(c, b, "Riprova", true, self.hover == Some(b));
                 } else {
                     let (lh, _) = text::metrics(Font::Body);
-                    text::draw_centered(c, Font::Body, content.x + content.w / 2, content.y + content.h / 2 - lh, "Caricamento…", TEXT_DIM);
+                    text::draw_centered(c, Font::Body, content.x + content.w / 2, content.y + content.h / 2 - lh, "Caricamento…", ui::text_dim());
                 }
             }
         }
@@ -1138,8 +1138,8 @@ impl Browser {
             let w = text::width(Font::Small, &s) + 24;
             let r = Rect::new(content.x + 8, content.bottom() - 34, w, 26);
             c.fill_round(r, 13, 0xE614_1011);
-            c.stroke_round(r, 13, 1, ui::BORDER);
-            text::draw(c, Font::Small, r.x + 12, r.y + 6, &s, TEXT_DIM);
+            c.stroke_round(r, 13, 1, ui::line());
+            text::draw(c, Font::Small, r.x + 12, r.y + 6, &s, ui::text_dim());
         }
         if let Some(q) = &self.find {
             let r = Self::find_rect(area);
@@ -1155,9 +1155,9 @@ impl Browser {
             for (i, o) in opts.iter().take(10).enumerate() {
                 let rr = Rect::new(r.x + 6, r.y + 6 + i as i32 * 34, r.w - 12, 32);
                 if i == *sel || self.hover == Some(rr) {
-                    c.fill_round(rr, 9, if i == *sel { ui::SELECTED } else { ui::PANEL_HOVER });
+                    c.fill_round(rr, 9, if i == *sel { ui::sel() } else { ui::hover() });
                 }
-                text::draw(c, Font::Body, rr.x + 12, rr.y + 7, &text::fit(Font::Body, o, rr.w - 24), TEXT);
+                text::draw(c, Font::Body, rr.x + 12, rr.y + 7, &text::fit(Font::Body, o, rr.w - 24), ui::text());
             }
         }
         if self.menu {
@@ -1167,9 +1167,9 @@ impl Browser {
             }
             for (r, label) in rows.iter().zip(MENU) {
                 if self.hover == Some(*r) {
-                    c.fill_round(*r, 10, ui::PANEL_HOVER);
+                    c.fill_round(*r, 10, ui::hover());
                 }
-                text::draw(c, Font::Body, r.x + 14, r.y + 10, label, TEXT);
+                text::draw(c, Font::Body, r.x + 14, r.y + 10, label, ui::text());
             }
         }
     }

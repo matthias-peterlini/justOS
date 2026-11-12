@@ -1,5 +1,6 @@
 //! The user's settings, kept in `sys:/system/settings` as `key=value` lines.
 
+use super::ui::{set_theme, Theme};
 use crate::dev::input;
 use crate::dev::keymap::Layout;
 use crate::fs;
@@ -31,6 +32,8 @@ pub struct Settings {
     pub scale: u32,
     /// The widgets (greeting, month, system) on the desktop.
     pub widgets: bool,
+    /// Dark or light windows, menus and panels.
+    pub theme: Theme,
 }
 
 impl Default for Settings {
@@ -47,6 +50,7 @@ impl Default for Settings {
             lock_after: 5,
             scale: 0,
             widgets: false,
+            theme: Theme::Dark,
         }
     }
 }
@@ -73,6 +77,7 @@ fn load() -> Settings {
             "lock-after" => s.lock_after = v.parse().unwrap_or(5),
             "scale" => s.scale = v.parse::<u32>().unwrap_or(0).min(2),
             "widgets" => s.widgets = v == "on",
+            "theme" => s.theme = Theme::from_name(v),
             _ => {}
         }
     }
@@ -88,6 +93,7 @@ pub fn get() -> Settings {
             input::set_layout(s.layout);
         }
         crate::dev::audio::set_volume(s.volume);
+        set_theme(s.theme);
         *cur = Some(s);
     }
     cur.clone().unwrap()
@@ -99,15 +105,17 @@ pub fn update(f: impl FnOnce(&mut Settings)) {
     f(&mut s);
     input::set_layout(s.layout);
     crate::dev::audio::set_volume(s.volume);
+    set_theme(s.theme);
     let mut text = format!(
-        "name={}\nlayout={}\nwallpaper={}\nsetup={}\nvolume={}\nstartup-sound={}\nlock-after={}\n",
+        "name={}\nlayout={}\nwallpaper={}\nsetup={}\nvolume={}\nstartup-sound={}\nlock-after={}\ntheme={}\n",
         s.name,
         if s.layout == Layout::Us { "us" } else { "it" },
         s.wallpaper,
         if s.setup_done { "done" } else { "no" },
         s.volume,
         if s.startup_sound { "on" } else { "off" },
-        s.lock_after
+        s.lock_after,
+        s.theme.name()
     );
     if !s.password.is_empty() {
         text.push_str(&format!("password={}\n", s.password));

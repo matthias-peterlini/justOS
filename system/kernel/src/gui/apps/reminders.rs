@@ -6,7 +6,7 @@ use crate::dev::input::{Key, KeyEvent};
 use crate::fs;
 use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::text::{self, Font};
-use crate::gui::ui::{self, Anim, TEXT, TEXT_DIM, TEXT_FAINT};
+use crate::gui::ui::{self, Anim};
 use crate::gui::wm::{Action, App};
 use alloc::format;
 use alloc::string::String;
@@ -117,7 +117,7 @@ impl App for Reminders {
     fn draw(&mut self, c: &mut Canvas, area: Rect, _blur: &Canvas, focused: bool) {
         let open = self.items.iter().filter(|i| !i.done).count();
         text::draw(c, Font::Title, area.x + 20, area.y + 14, "Da fare", ui::ORANGE);
-        text::draw(c, Font::Body, area.x + 22, area.y + 58, &format!("{open} da completare"), TEXT_DIM);
+        text::draw(c, Font::Body, area.x + 22, area.y + 58, &format!("{open} da completare"), ui::text_dim());
         let tb = Self::toggle_done(area);
         ui::button(c, tb, if self.show_done { "Nascondi fatti" } else { "Mostra fatti" }, false, false);
         let list = Self::list(area);
@@ -125,7 +125,7 @@ impl App for Reminders {
         c.set_clip(saved.intersect(&list));
         let rows = self.rows();
         if rows.is_empty() {
-            text::draw_centered(c, Font::Body, list.x + list.w / 2, list.y + 40, "Niente da fare. Ottimo!", TEXT_FAINT);
+            text::draw_centered(c, Font::Body, list.x + list.w / 2, list.y + 40, "Niente da fare. Ottimo!", ui::text_faint());
         }
         for (k, &i) in rows.iter().enumerate() {
             let it = &self.items[i];
@@ -134,7 +134,7 @@ impl App for Reminders {
                 continue;
             }
             if self.hover == Some(i) {
-                c.fill_round(r, 10, ui::PANEL);
+                c.fill_round(r, 10, ui::pane());
             }
             let fade = it.ticked.as_ref().map_or(255, |a| 255 - a.t() * 155 / 1000);
             let (cx, cy) = (r.x + 22, r.y + ROW / 2);
@@ -146,13 +146,13 @@ impl App for Reminders {
                 c.fill_circle(cx, cy, 11, 0x80FF_FFFF);
                 c.fill_circle(cx, cy, 9, 0xFF2A_2234);
             }
-            let color = if it.done { (fade.min(150) << 24) | 0xF5_F2F8 } else { TEXT };
+            let color = if it.done { (fade.min(150) << 24) | 0xF5_F2F8 } else { ui::text() };
             let label = text::fit(Font::Body, &it.text, r.w - 60);
             let w = text::draw(c, Font::Body, r.x + 46, r.y + 12, &label, color);
             if it.done {
                 c.fill(Rect::new(r.x + 46, r.y + 22, w, 1), color);
             }
-            c.fill(Rect::new(r.x + 46, r.bottom() - 1, r.w - 46, 1), ui::SEPARATOR);
+            c.fill(Rect::new(r.x + 46, r.bottom() - 1, r.w - 46, 1), ui::line());
         }
         c.set_clip(saved);
         let ir = Self::input_rect(area);
@@ -163,9 +163,9 @@ impl App for Reminders {
         let (lh, _) = text::metrics(Font::Body);
         let ty = ir.y + (ir.h - lh) / 2;
         if self.input.is_empty() {
-            text::draw(c, Font::Body, ir.x + 46, ty, "Nuovo promemoria", TEXT_FAINT);
+            text::draw(c, Font::Body, ir.x + 46, ty, "Nuovo promemoria", ui::text_faint());
         }
-        let w = text::draw(c, Font::Body, ir.x + 46, ty, &text::fit(Font::Body, &self.input, ir.w - 60), TEXT);
+        let w = text::draw(c, Font::Body, ir.x + 46, ty, &text::fit(Font::Body, &self.input, ir.w - 60), ui::text());
         if focused && self.blink {
             c.fill(Rect::new(ir.x + 47 + w, ty + 2, 2, lh - 4), ui::ORANGE);
         }

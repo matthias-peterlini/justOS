@@ -8,7 +8,7 @@ use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::res;
 use crate::gui::settings;
 use crate::gui::text::{self, Font};
-use crate::gui::ui::{self, TEXT, TEXT_DIM, TEXT_FAINT};
+use crate::gui::ui;
 use crate::gui::wm::{Action, App};
 use crate::sandbox::Grants;
 use alloc::format;
@@ -63,6 +63,9 @@ const LOCK_AFTER: [(u32, &str); 4] = [(0, "Mai"), (2, "2 min"), (5, "5 min"), (1
 /// The sizes of the interface (pixels per unit; 0: by the screen).
 const SIZES: [(u32, &str); 3] = [(0, "Auto"), (1, "100%"), (2, "200%")];
 
+/// The themes of windows and panels.
+const THEMES: [(ui::Theme, &str); 2] = [(ui::Theme::Dark, "Scuro"), (ui::Theme::Light, "Chiaro")];
+
 impl Prefs {
     pub fn new() -> Prefs {
         let thumbs = Self::thumbs();
@@ -90,6 +93,11 @@ impl Prefs {
     /// The choice of the interface size, next to the "Schermo" heading.
     fn sizes(area: Rect) -> Rect {
         Rect::new(area.x + RIGHT + 150, area.y + 12, 214, 32)
+    }
+
+    /// The choice of the theme, next to the "Sfondo" heading.
+    fn themes(area: Rect) -> Rect {
+        Rect::new(area.x + 296, area.y + 202, 180, 32)
     }
 
     fn privacy_btn(area: Rect) -> Rect {
@@ -131,18 +139,18 @@ impl Prefs {
 
     fn draw_privacy(&self, c: &mut Canvas, area: Rect, grants: &[Grants]) {
         ui::icon_button(c, Self::back_btn(area), "g-back", false);
-        text::draw(c, Font::Strong, area.x + 60, area.y + 20, "Privacy", TEXT);
+        text::draw(c, Font::Strong, area.x + 60, area.y + 20, "Privacy", ui::text());
         text::draw(
             c,
             Font::Small,
             area.x + 24,
             area.y + 58,
             "Le app del Negozio vedono solo la propria cartella. Qui scegli a cos'altro possono accedere.",
-            TEXT_DIM,
+            ui::text_dim(),
         );
         let list = Self::list_area(area);
         if grants.is_empty() {
-            text::draw_centered(c, Font::Body, list.x + list.w / 2, list.y + 60, "Nessuna app ha ancora chiesto qualcosa.", TEXT_FAINT);
+            text::draw_centered(c, Font::Body, list.x + list.w / 2, list.y + 60, "Nessuna app ha ancora chiesto qualcosa.", ui::text_faint());
             return;
         }
         let saved = c.clip();
@@ -156,8 +164,8 @@ impl Prefs {
                     let g = &grants[i];
                     c.fill_round(r, 12, 0x22FF_FFFF);
                     let name = if g.name.is_empty() { g.id.as_str() } else { g.name.as_str() };
-                    let w = text::draw(c, Font::Strong, r.x + 14, r.y + 11, name, TEXT);
-                    text::draw(c, Font::Small, r.x + 14 + w + 10, r.y + 14, &g.id, TEXT_FAINT);
+                    let w = text::draw(c, Font::Strong, r.x + 14, r.y + 11, name, ui::text());
+                    text::draw(c, Font::Small, r.x + 14 + w + 10, r.y + 14, &g.id, ui::text_faint());
                     ui::button(c, Self::forget_of(r), "Chiedi di nuovo", false, false);
                 }
                 Row::Perm(i, j) => {
@@ -169,8 +177,8 @@ impl Prefs {
                         label.extend(first.to_uppercase());
                         label.push_str(chars.as_str());
                     }
-                    text::draw(c, Font::Body, r.x + 8, r.y + 9, &label, TEXT);
-                    text::draw_right(c, Font::Small, r.right() - 72, r.y + 11, if *allow { "consentito" } else { "negato" }, TEXT_FAINT);
+                    text::draw(c, Font::Body, r.x + 8, r.y + 9, &label, ui::text());
+                    text::draw_right(c, Font::Small, r.right() - 72, r.y + 11, if *allow { "consentito" } else { "negato" }, ui::text_faint());
                     ui::toggle(c, Self::toggle_of(r), *allow);
                 }
             }
@@ -306,36 +314,41 @@ impl App for Prefs {
             self.thumbs = Self::thumbs();
         }
         let s = settings::get();
-        text::draw(c, Font::Strong, area.x + 24, area.y + 20, "Il tuo nome", TEXT);
+        text::draw(c, Font::Strong, area.x + 24, area.y + 20, "Il tuo nome", ui::text());
         ui::text_field(c, Self::field(area), &self.name, "Nome", self.editing);
         ui::button(c, Self::save_btn(area), "Salva", true, false);
 
-        text::draw(c, Font::Strong, area.x + 24, area.y + 118, "Tastiera", TEXT);
+        text::draw(c, Font::Strong, area.x + 24, area.y + 118, "Tastiera", ui::text());
         for (i, b) in Self::layout_btns(area).iter().enumerate() {
             let sel = (i == 0) == (s.layout == Layout::It);
             ui::button(c, *b, if i == 0 { "Italiano" } else { "English (US)" }, sel, false);
         }
 
-        text::draw(c, Font::Strong, area.x + 24, area.y + 210, "Sfondo", TEXT);
+        text::draw(c, Font::Strong, area.x + 24, area.y + 210, "Sfondo", ui::text());
+        let tr = Self::themes(area);
+        text::draw_right(c, Font::Body, tr.x - 12, area.y + 210, "Tema", ui::text_dim());
+        let sel = THEMES.iter().position(|(t, _)| *t == ui::theme()).unwrap_or(0);
+        let labels: Vec<&str> = THEMES.iter().map(|(_, l)| *l).collect();
+        ui::segmented(c, tr, &labels, sel);
         for (i, (name, label)) in res::WALLPAPERS.iter().enumerate() {
             let r = Self::thumb(area, i);
             if *name == s.wallpaper {
                 c.stroke_round(r.grow(3), 14, 2, 0xFFFF_FFFF);
             }
             c.blit_round_from(&self.thumbs[i], 0, 0, r, 12, 0);
-            text::draw_centered(c, Font::Small, r.x + r.w / 2, r.bottom() + 8, label, TEXT_DIM);
+            text::draw_centered(c, Font::Small, r.x + r.w / 2, r.bottom() + 8, label, ui::text_dim());
         }
 
-        text::draw(c, Font::Strong, area.x + 24, area.y + 438, "Sistema", TEXT);
+        text::draw(c, Font::Strong, area.x + 24, area.y + 438, "Sistema", ui::text());
         ui::button(c, Self::redo_btn(area), "Configurazione iniziale", false, false);
         ui::button(c, Self::privacy_btn(area), "Privacy delle app", false, false);
         if !self.note.is_empty() {
-            text::draw(c, Font::Small, area.x + 24, area.y + 510, self.note, TEXT_FAINT);
+            text::draw(c, Font::Small, area.x + 24, area.y + 510, self.note, ui::text_faint());
         }
 
         // Screen
         let x = area.x + RIGHT;
-        text::draw(c, Font::Strong, x, area.y + 20, "Schermo", TEXT);
+        text::draw(c, Font::Strong, x, area.y + 20, "Schermo", ui::text());
         if crate::gui::can_double() {
             let sel = SIZES.iter().position(|(k, _)| *k == s.scale).unwrap_or(0);
             let labels: Vec<&str> = SIZES.iter().map(|(_, l)| *l).collect();
@@ -344,12 +357,12 @@ impl App for Prefs {
         let (w, h) = crate::console::pixel_size().unwrap_or((0, 0));
         let current = DisplayMode { width: w as u32, height: h as u32 };
         if self.modes.is_empty() {
-            text::draw(c, Font::Small, x, area.y + 48, &format!("{w} × {h}"), TEXT_DIM);
-            text::draw(c, Font::Small, x, area.y + 72, "Risoluzione scelta dal firmware:", TEXT_FAINT);
-            text::draw(c, Font::Small, x, area.y + 92, "nessun driver video la può cambiare.", TEXT_FAINT);
+            text::draw(c, Font::Small, x, area.y + 48, &format!("{w} × {h}"), ui::text_dim());
+            text::draw(c, Font::Small, x, area.y + 72, "Risoluzione scelta dal firmware:", ui::text_faint());
+            text::draw(c, Font::Small, x, area.y + 92, "nessun driver video la può cambiare.", ui::text_faint());
         } else {
             let name = crate::dev::display::controller().unwrap_or_default();
-            text::draw(c, Font::Small, x, area.y + 48, &text::fit(Font::Small, &name, 360), TEXT_DIM);
+            text::draw(c, Font::Small, x, area.y + 48, &text::fit(Font::Small, &name, 360), ui::text_dim());
             for (i, m) in self.modes.iter().enumerate() {
                 let label = format!("{}×{}", m.width, m.height);
                 ui::button(c, Self::mode_btn(area, i), &label, *m == current, false);
@@ -357,27 +370,27 @@ impl App for Prefs {
         }
 
         // Sound
-        text::draw(c, Font::Strong, x, area.y + 236, "Suono", TEXT);
+        text::draw(c, Font::Strong, x, area.y + 236, "Suono", ui::text());
         if crate::dev::audio::available() {
             let v = crate::dev::audio::volume();
             let bar = Self::volume_bar(area);
             res::draw_icon(c, if v == 0 { "g-mute" } else { "g-volume" }, 18, x, bar.y + 3);
             ui::slider(c, bar, v * 10);
             ui::button(c, Self::test_btn(area), "Prova", false, false);
-            text::draw(c, Font::Body, x, area.y + 319, "Suono all'avvio", TEXT);
+            text::draw(c, Font::Body, x, area.y + 319, "Suono all'avvio", ui::text());
             ui::toggle(c, Self::chime_switch(area), s.startup_sound);
         } else {
-            text::draw(c, Font::Small, x, area.y + 264, "Nessuna scheda audio trovata.", TEXT_FAINT);
+            text::draw(c, Font::Small, x, area.y + 264, "Nessuna scheda audio trovata.", ui::text_faint());
         }
 
         // Security
-        text::draw(c, Font::Strong, x, area.y + 368, "Password", TEXT);
+        text::draw(c, Font::Strong, x, area.y + 368, "Password", ui::text());
         let has = !s.password.is_empty();
         let dots: String = self.password.chars().map(|_| '•').collect();
         ui::text_field(c, Self::password_field(area), &dots, if has { "Nuova password" } else { "Nessuna" }, self.editing_password);
         let label = if self.editing_password || !has { "Imposta" } else { "Togli" };
         ui::button(c, Self::password_btn(area), label, self.editing_password, false);
-        text::draw(c, Font::Body, x, area.y + 460, "Blocca dopo", TEXT);
+        text::draw(c, Font::Body, x, area.y + 460, "Blocca dopo", ui::text());
         let sel = LOCK_AFTER.iter().position(|(m, _)| *m == s.lock_after).unwrap_or(2);
         let labels: Vec<&str> = LOCK_AFTER.iter().map(|(_, l)| *l).collect();
         ui::segmented(c, Self::lock_after(area), &labels, sel);
@@ -419,6 +432,13 @@ impl App for Prefs {
             if seg.contains(ax, ay) {
                 settings::update(|s| s.lock_after = LOCK_AFTER[i].0);
                 return Action::Redraw;
+            }
+        }
+        for (i, seg) in ui::segments(Self::themes(area), THEMES.len()).iter().enumerate() {
+            if seg.contains(ax, ay) {
+                settings::update(|s| s.theme = THEMES[i].0);
+                // Every window and panel changes colour.
+                return Action::RedrawAll;
             }
         }
         for (i, b) in Self::layout_btns(area).iter().enumerate() {

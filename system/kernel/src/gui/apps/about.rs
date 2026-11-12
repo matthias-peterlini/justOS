@@ -5,7 +5,7 @@ use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::res;
 use crate::gui::splash::draw_mark;
 use crate::gui::text::{self, Font};
-use crate::gui::ui::{self, TEXT, TEXT_DIM, TEXT_FAINT};
+use crate::gui::ui;
 use crate::gui::wm::{Action, App};
 use crate::util::Size;
 use alloc::format;
@@ -105,8 +105,8 @@ impl App for About {
                 c.fill_circle(cx, area.y + 170, 74, 0xFF14_1414);
                 draw_mark(c, cx, area.y + 170, 56, 0xFFF2_EFE6);
                 let x = area.x + 250;
-                text::draw(c, Font::Title, x, area.y + 76, "justOS", TEXT);
-                text::draw(c, Font::Body, x, area.y + 116, &format!("Versione {}", crate::VERSION), TEXT_DIM);
+                text::draw(c, Font::Title, x, area.y + 76, "justOS", ui::text());
+                text::draw(c, Font::Body, x, area.y + 116, &format!("Versione {}", crate::VERSION), ui::text_dim());
                 let mut brand = [0u8; 48];
                 let cpu = match crate::arch::smp::count() {
                     1 => crate::arch::cpu::brand(&mut brand).trim().to_string(),
@@ -138,8 +138,8 @@ impl App for About {
                 rows.push(("Acceso da", format!("{} h {} min {} s", up / 3600, up / 60 % 60, up % 60)));
                 let mut y = area.y + 150;
                 for (k, v) in rows {
-                    text::draw(c, Font::Strong, x, y, k, TEXT);
-                    text::draw(c, Font::Body, x + 110, y, &text::fit(Font::Body, &v, area.right() - x - 130), TEXT_DIM);
+                    text::draw(c, Font::Strong, x, y, k, ui::text());
+                    text::draw(c, Font::Body, x + 110, y, &text::fit(Font::Body, &v, area.right() - x - 130), ui::text_dim());
                     y += 27;
                 }
                 use crate::update::State;
@@ -163,17 +163,17 @@ impl App for About {
                     None => {}
                 }
                 let (line, color) = match &state {
-                    State::NotChecked | State::Checking => (String::new(), TEXT_FAINT),
+                    State::NotChecked | State::Checking => (String::new(), ui::text_faint()),
                     State::UpToDate => (String::from("justOS è aggiornato."), ui::GREEN),
                     State::Available(v) => (format!("È disponibile justOS {v}."), ui::ORANGE),
                     State::Released(v) => (format!("justOS {v} è nelle release su GitHub."), ui::ORANGE),
-                    State::Downloading { version, done, total } => (format!("Scarico justOS {version}: {} di {}", Size(*done), Size(*total)), TEXT_DIM),
-                    State::Installing { version, .. } => (format!("Scrivo justOS {version} accanto a questo sistema…"), TEXT_DIM),
+                    State::Downloading { version, done, total } => (format!("Scarico justOS {version}: {} di {}", Size(*done), Size(*total)), ui::text_dim()),
+                    State::Installing { version, .. } => (format!("Scrivo justOS {version} accanto a questo sistema…"), ui::text_dim()),
                     State::Staged(v) => (format!("justOS {v} parte al prossimo riavvio."), ui::GREEN),
-                    State::Failed(e) => (format!("Non riuscito: {e}"), TEXT_FAINT),
+                    State::Failed(e) => (format!("Non riuscito: {e}"), ui::text_faint()),
                 };
                 text::draw(c, Font::Small, b.x + 4, b.bottom() + 10, &text::fit(Font::Small, &line, area.right() - b.x - 20), color);
-                text::draw_centered(c, Font::Small, area.x + area.w / 2, area.bottom() - 30, "Scritto da zero, in Rust · © Matthias Peterlini", TEXT_FAINT);
+                text::draw_centered(c, Font::Small, area.x + area.w / 2, area.bottom() - 30, "Scritto da zero, in Rust · © Matthias Peterlini", ui::text_faint());
             }
             1 => {
                 let l = Self::list(area);
@@ -185,10 +185,10 @@ impl App for About {
                     if r.bottom() < l.y || r.y > l.bottom() {
                         continue;
                     }
-                    c.fill_round(r, 10, ui::PANEL);
+                    c.fill_round(r, 10, ui::pane());
                     res::draw_icon(c, device_icon(d), 28, r.x + 10, r.y + 7);
-                    text::draw(c, Font::Strong, r.x + 48, r.y + 4, &text::fit(Font::Strong, &d.description(), r.w - 200), TEXT);
-                    text::draw(c, Font::Small, r.x + 48, r.y + 24, &d.location(), TEXT_FAINT);
+                    text::draw(c, Font::Strong, r.x + 48, r.y + 4, &text::fit(Font::Strong, &d.description(), r.w - 200), ui::text());
+                    text::draw(c, Font::Small, r.x + 48, r.y + 24, &d.location(), ui::text_faint());
                     let (label, color) = match (&d.driver, d.builtin, d.has_driver()) {
                         (Some(drv), _, _) => (drv.clone(), ui::GREEN),
                         (None, Some(b), _) => (String::from(b), ui::GREEN),
@@ -196,7 +196,7 @@ impl App for About {
                         _ => (String::from("senza driver"), ui::ORANGE),
                     };
                     c.fill_circle(r.right() - 130, r.y + r.h / 2, 4, color);
-                    text::draw(c, Font::Small, r.right() - 120, r.y + 13, &text::fit(Font::Small, &label, 110), TEXT_DIM);
+                    text::draw(c, Font::Small, r.right() - 120, r.y + 13, &text::fit(Font::Small, &label, 110), ui::text_dim());
                 }
                 c.set_clip(saved);
             }
@@ -206,18 +206,18 @@ impl App for About {
                 for v in crate::fs::volumes() {
                     let (total, free) = v.space();
                     let r = Rect::new(l.x, y, l.w, 74);
-                    c.fill_round(r, 12, ui::PANEL);
+                    c.fill_round(r, 12, ui::pane());
                     res::draw_icon(c, if v.source == "memory" { "computer" } else { "archive" }, 40, r.x + 12, r.y + 16);
                     let name = if v.label.is_empty() { format!("{}:", v.name) } else { format!("{} ({}:)", v.label, v.name) };
-                    text::draw(c, Font::Strong, r.x + 66, r.y + 10, &name, TEXT);
+                    text::draw(c, Font::Strong, r.x + 66, r.y + 10, &name, ui::text());
                     let ro = if v.read_only() { " · sola lettura" } else { "" };
-                    text::draw_right(c, Font::Small, r.right() - 14, r.y + 12, &format!("{} liberi su {}{ro}", Size(free), Size(total)), TEXT_DIM);
+                    text::draw_right(c, Font::Small, r.right() - 14, r.y + 12, &format!("{} liberi su {}{ro}", Size(free), Size(total)), ui::text_dim());
                     let bar = Rect::new(r.x + 66, r.y + 42, r.w - 82, 10);
                     c.fill_round(bar, 5, 0x30FF_FFFF);
                     let used = total.saturating_sub(free);
                     let w = (bar.w as u64 * used / total.max(1)) as i32;
                     c.fill_round(Rect::new(bar.x, bar.y, w.max(10), bar.h), 5, ui::ACCENT);
-                    text::draw(c, Font::Small, r.x + 66, r.y + 54, &v.source, TEXT_FAINT);
+                    text::draw(c, Font::Small, r.x + 66, r.y + 54, &v.source, ui::text_faint());
                     y += 84;
                 }
             }

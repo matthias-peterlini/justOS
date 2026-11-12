@@ -6,7 +6,7 @@ use crate::gui::dnd;
 use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::res;
 use crate::gui::text::{self, Font};
-use crate::gui::ui::{TEXT, TEXT_DIM, TEXT_FAINT};
+use crate::gui::ui;
 use crate::gui::wm::{Action, App};
 use alloc::format;
 use alloc::string::String;
@@ -508,18 +508,18 @@ impl App for Files {
 
     fn draw(&mut self, c: &mut Canvas, area: Rect, _blur: &Canvas, _focused: bool) {
         // Places.
-        crate::gui::ui::caps(c, area.x + 22, area.y + 18, "Risorse", TEXT_FAINT);
+        crate::gui::ui::caps(c, area.x + 22, area.y + 18, "Risorse", ui::text_faint());
         for (i, (name, path)) in PLACES.iter().enumerate() {
             let r = Self::place_rect(i, area);
             if fs::abs(path).is_ok_and(|p| p == self.dir) {
-                c.fill_round(r, 10, crate::gui::ui::SELECTED);
+                c.fill_round(r, 10, crate::gui::ui::sel());
             }
             if self.drop_at == Some(Target::Place(i)) {
                 c.fill_round(r, 10, DROP_FILL);
                 c.stroke_round(r, 10, 2, DROP_EDGE);
             }
             res::draw_icon(c, place_icon(name), 20, r.x + 10, r.y + 6);
-            text::draw(c, Font::Body, r.x + 40, r.y + 7, name, TEXT);
+            text::draw(c, Font::Body, r.x + 40, r.y + 7, name, ui::text());
         }
         // The tabs.
         let (sh, _) = text::metrics(Font::Small);
@@ -528,7 +528,7 @@ impl App for Files {
             let (rects, plus) = self.tab_rects(area);
             for (i, r) in rects.iter().enumerate() {
                 let on = i == self.tab;
-                c.fill_round(*r, 10, if on { crate::gui::ui::SELECTED } else { 0x14FF_FFFF });
+                c.fill_round(*r, 10, if on { crate::gui::ui::sel() } else { 0x14FF_FFFF });
                 if self.drop_at == Some(Target::Tab(i)) {
                     c.fill_round(*r, 10, DROP_FILL);
                     c.stroke_round(*r, 10, 2, DROP_EDGE);
@@ -536,12 +536,12 @@ impl App for Files {
                 let name = Self::name_of(&self.tabs[i]);
                 res::draw_icon(c, place_icon(&name), 16, r.x + 9, r.y + (r.h - 16) / 2);
                 let name = text::fit(Font::Small, &name, r.w - 58);
-                text::draw(c, Font::Small, r.x + 31, r.y + (r.h - sh) / 2, &name, if on { TEXT } else { TEXT_DIM });
+                text::draw(c, Font::Small, r.x + 31, r.y + (r.h - sh) / 2, &name, if on { ui::text() } else { ui::text_dim() });
                 let x = tab_close(*r);
-                text::draw_centered(c, Font::Small, x.x + x.w / 2, x.y + (x.h - sh) / 2, "×", TEXT_DIM);
+                text::draw_centered(c, Font::Small, x.x + x.w / 2, x.y + (x.h - sh) / 2, "×", ui::text_dim());
             }
             c.fill_circle(plus.x + 13, plus.y + 13, 13, 0x1FFF_FFFF);
-            text::draw_centered(c, Font::Heading, plus.x + 13, plus.y + (26 - hh) / 2, "+", TEXT);
+            text::draw_centered(c, Font::Heading, plus.x + 13, plus.y + (26 - hh) / 2, "+", ui::text());
         }
         // The folder.
         let content = self.content(area);
@@ -550,19 +550,19 @@ impl App for Files {
         res::draw_icon(c, "g-back", 14, back.x + 7, back.y + 7);
         let nt = self.new_tab_btn(area);
         let title = text::fit(Font::Heading, &self.title_of(), nt.x - content.x - 64);
-        text::draw(c, Font::Heading, content.x + 52, content.y + 14, &title, TEXT);
+        text::draw(c, Font::Heading, content.x + 52, content.y + 14, &title, ui::text());
         let count = format!("{} elementi", self.items.len());
         let cw = text::width(Font::Small, &count);
-        text::draw(c, Font::Small, content.right() - cw - 16, content.y + 20, &count, TEXT_DIM);
+        text::draw(c, Font::Small, content.right() - cw - 16, content.y + 20, &count, ui::text_dim());
         if !self.trash {
             c.fill_circle(nt.x + 14, nt.y + 14, 14, 0x26FF_FFFF);
-            text::draw_centered(c, Font::Heading, nt.x + 14, nt.y + (28 - hh) / 2, "+", TEXT);
+            text::draw_centered(c, Font::Heading, nt.x + 14, nt.y + (28 - hh) / 2, "+", ui::text());
         }
         let (grid, cols) = self.grid(area);
         let saved = c.clip();
         c.set_clip(saved.intersect(&grid));
         if self.items.is_empty() {
-            text::draw_centered(c, Font::Body, grid.x + grid.w / 2, grid.y + 60, "La cartella è vuota", TEXT_DIM);
+            text::draw_centered(c, Font::Body, grid.x + grid.w / 2, grid.y + 60, "La cartella è vuota", ui::text_dim());
         }
         for (i, item) in self.items.iter().enumerate() {
             let (col, row) = (i as i32 % cols, i as i32 / cols);
@@ -588,7 +588,7 @@ impl App for Files {
                 }
                 _ => {
                     let label = text::fit(Font::Small, &item.name, TILE_W - 10);
-                    text::draw_centered(c, Font::Small, t.x + TILE_W / 2, t.y + 70, &label, TEXT);
+                    text::draw_centered(c, Font::Small, t.x + TILE_W / 2, t.y + 70, &label, ui::text());
                 }
             }
         }
@@ -601,13 +601,13 @@ impl App for Files {
         if let Some((r, items)) = &self.menu {
             c.shadow(*r, 12, 12, 80);
             c.fill_round(*r, 12, 0xF52A_2234);
-            c.stroke_round(*r, 12, 1, crate::gui::ui::BORDER);
+            c.stroke_round(*r, 12, 1, crate::gui::ui::line());
             for (k, (label, act)) in items.iter().enumerate() {
                 let row = Rect::new(r.x + 5, r.y + 5 + k as i32 * MENU_ROW, r.w - 10, MENU_ROW - 2);
                 if self.hover_menu == Some(k) {
-                    c.fill_round(row, 7, crate::gui::ui::SELECTED);
+                    c.fill_round(row, 7, crate::gui::ui::sel());
                 }
-                let color = if matches!(act, Do::Delete | Do::EmptyBin) && self.hover_menu != Some(k) { 0xFFFF_6961 } else { TEXT };
+                let color = if matches!(act, Do::Delete | Do::EmptyBin) && self.hover_menu != Some(k) { 0xFFFF_6961 } else { ui::text() };
                 text::draw(c, Font::Body, row.x + 12, row.y + 6, label, color);
             }
         }

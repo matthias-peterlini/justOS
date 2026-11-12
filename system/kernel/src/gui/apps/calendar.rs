@@ -7,7 +7,7 @@ use crate::fs;
 use crate::gui::desktop::MONTHS;
 use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::text::{self, Font};
-use crate::gui::ui::{self, TEXT, TEXT_DIM, TEXT_FAINT};
+use crate::gui::ui;
 use crate::gui::wm::{Action, App};
 use crate::time;
 use alloc::format;
@@ -210,8 +210,8 @@ impl App for Calendar {
         if let Some(f) = title.get_mut(0..1) {
             f.make_ascii_uppercase();
         }
-        let w = text::draw(c, Font::Title, area.x + 20, area.y + 14, &title, TEXT);
-        text::draw(c, Font::Title, area.x + 30 + w, area.y + 14, &format!("{}", self.year), TEXT_DIM);
+        let w = text::draw(c, Font::Title, area.x + 20, area.y + 14, &title, ui::text());
+        text::draw(c, Font::Title, area.x + 30 + w, area.y + 14, &format!("{}", self.year), ui::text_dim());
         let [prev, today, next] = Self::nav(area);
         ui::icon_button(c, prev, "g-back", self.hover == Some(prev));
         ui::button(c, today, "Oggi", false, self.hover == Some(today));
@@ -219,21 +219,21 @@ impl App for Calendar {
         let g = Self::grid(area);
         let cw = g.w / 7;
         for (i, d) in DAYS.iter().enumerate() {
-            text::draw_right(c, Font::Small, g.x + (i as i32 + 1) * cw - 10, g.y + 4, d, TEXT_FAINT);
+            text::draw_right(c, Font::Small, g.x + (i as i32 + 1) * cw - 10, g.y + 4, d, ui::text_faint());
         }
         let now = time::from_epoch(time::now());
         let first = self.first_slot();
         let days = time::days_in_month(self.year, self.month) as i32;
         for slot in 0..42 {
             let r = Self::cell(area, slot);
-            c.fill(Rect::new(r.x, r.y, r.w, 1), ui::SEPARATOR);
+            c.fill(Rect::new(r.x, r.y, r.w, 1), ui::line());
             let day = slot - first + 1;
             if day < 1 || day > days {
                 continue;
             }
             let date = (self.year, self.month, day as u64);
             if self.selected == date {
-                c.fill_round(r.grow(-2), 10, ui::PANEL_HOVER);
+                c.fill_round(r.grow(-2), 10, ui::hover());
             }
             let label = format!("{day}");
             let is_today = (now.year, now.month, now.day) == date;
@@ -244,7 +244,7 @@ impl App for Calendar {
                 c.fill_circle(lx - lw / 2, ly + 10, 13, ui::ORANGE);
                 text::draw_right(c, Font::Strong, lx, ly, &label, 0xFFFF_FFFF);
             } else {
-                let color = if hol.is_some() || slot % 7 == 6 { 0xFFFF_6961 } else if slot % 7 == 5 { TEXT_DIM } else { TEXT };
+                let color = if hol.is_some() || slot % 7 == 6 { 0xFFFF_6961 } else if slot % 7 == 5 { ui::text_dim() } else { ui::text() };
                 text::draw_right(c, Font::Strong, lx, ly, &label, color);
             }
             let mut y = r.y + 30;
@@ -259,7 +259,7 @@ impl App for Calendar {
                     break;
                 }
                 c.fill_round(Rect::new(r.x + 4, y, r.w - 8, 16), 4, 0x660A_84FF);
-                text::draw(c, Font::Small, r.x + 8, y, &text::fit(Font::Small, &e.text, r.w - 14), TEXT);
+                text::draw(c, Font::Small, r.x + 8, y, &text::fit(Font::Small, &e.text, r.w - 14), ui::text());
                 y += 18;
             }
         }
@@ -268,7 +268,7 @@ impl App for Calendar {
         c.fill_round(side, 18, 0x22_00_00_00);
         let (y, m, d) = self.selected;
         text::draw(c, Font::Body, side.x + 16, side.y + 16, WEEKDAYS[weekday(y, m, d)], ui::ORANGE);
-        text::draw(c, Font::Title, side.x + 16, side.y + 36, &format!("{d} {}", MONTHS[(m as usize + 11) % 12]), TEXT);
+        text::draw(c, Font::Title, side.x + 16, side.y + 36, &format!("{d} {}", MONTHS[(m as usize + 11) % 12]), ui::text());
         let mut ey = side.y + 92;
         if let Some(h) = holiday(y, m, d) {
             text::draw(c, Font::Strong, side.x + 16, ey, h, 0xFFFF_6961);
@@ -276,16 +276,16 @@ impl App for Calendar {
         }
         let list = self.events_on(self.selected);
         if list.is_empty() && holiday(y, m, d).is_none() {
-            text::draw(c, Font::Body, side.x + 16, ey, "Nessun evento", TEXT_FAINT);
+            text::draw(c, Font::Body, side.x + 16, ey, "Nessun evento", ui::text_faint());
         }
         for (_, e) in list {
             if ey > side.bottom() - 110 {
                 break;
             }
             c.fill_round(Rect::new(side.x + 14, ey, 4, 36), 2, ui::ACCENT);
-            text::draw(c, Font::Strong, side.x + 26, ey, &text::fit(Font::Strong, &e.text, side.w - 40), TEXT);
+            text::draw(c, Font::Strong, side.x + 26, ey, &text::fit(Font::Strong, &e.text, side.w - 40), ui::text());
             let when = if e.time.is_empty() { String::from("tutto il giorno") } else { e.time.clone() };
-            text::draw(c, Font::Small, side.x + 26, ey + 20, &when, TEXT_DIM);
+            text::draw(c, Font::Small, side.x + 26, ey + 20, &when, ui::text_dim());
             ey += 48;
         }
         let ir = Self::input_rect(area);
@@ -293,13 +293,13 @@ impl App for Calendar {
         let (lh, _) = text::metrics(Font::Body);
         let ty = ir.y + (ir.h - lh) / 2;
         if self.input.is_empty() {
-            text::draw(c, Font::Body, ir.x + 14, ty, "Nuovo evento (es. 9:30 Riunione)", TEXT_FAINT);
+            text::draw(c, Font::Body, ir.x + 14, ty, "Nuovo evento (es. 9:30 Riunione)", ui::text_faint());
         }
-        let w = text::draw(c, Font::Body, ir.x + 14, ty, &text::fit(Font::Body, &self.input, ir.w - 24), TEXT);
+        let w = text::draw(c, Font::Body, ir.x + 14, ty, &text::fit(Font::Body, &self.input, ir.w - 24), ui::text());
         if focused && self.blink {
             c.fill(Rect::new(ir.x + 15 + w, ty + 2, 2, lh - 4), ui::ACCENT);
         }
-        text::draw(c, Font::Small, ir.x + 4, ir.y - 22, "Clic destro su un evento per toglierlo", TEXT_FAINT);
+        text::draw(c, Font::Small, ir.x + 4, ir.y - 22, "Clic destro su un evento per toglierlo", ui::text_faint());
     }
 
     fn press(&mut self, x: i32, y: i32, double: bool, area: Rect) -> Action {

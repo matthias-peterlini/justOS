@@ -3,7 +3,7 @@
 
 use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::text::{self, Font};
-use crate::gui::ui::{self, TEXT, TEXT_DIM, TEXT_FAINT};
+use crate::gui::ui;
 use crate::gui::wm::{Action, App};
 use crate::time;
 use crate::util::Size;
@@ -165,9 +165,9 @@ impl App for Monitor {
         let cols = [t.x + 14, t.right() - 300, t.right() - 190, t.right() - 90];
         let heads = ["Nome", if self.tab == 0 { "% CPU" } else { "Memoria" }, "Thread", "PID"];
         for (x, h) in cols.iter().zip(heads) {
-            text::draw(c, Font::Small, *x, area.y + 66, h, TEXT_FAINT);
+            text::draw(c, Font::Small, *x, area.y + 66, h, ui::text_faint());
         }
-        c.fill(Rect::new(t.x, t.y - 4, t.w, 1), ui::SEPARATOR);
+        c.fill(Rect::new(t.x, t.y - 4, t.w, 1), ui::line());
         let saved = c.clip();
         c.set_clip(saved.intersect(&t));
         let mut order: Vec<usize> = (0..self.rows.len()).collect();
@@ -179,19 +179,19 @@ impl App for Monitor {
             let y = t.y + k as i32 * ROW - self.scroll;
             let row = Rect::new(t.x, y, t.w, ROW);
             if self.selected == Some(i) {
-                c.fill_round(row, 8, ui::SELECTED);
+                c.fill_round(row, 8, ui::sel());
             } else if k % 2 == 1 {
                 c.fill(row, 0x0CFF_FFFF);
             }
-            text::draw(c, Font::Body, cols[0], y + 5, &text::fit(Font::Body, &r.name, cols[1] - cols[0] - 20), TEXT);
+            text::draw(c, Font::Body, cols[0], y + 5, &text::fit(Font::Body, &r.name, cols[1] - cols[0] - 20), ui::text());
             let v = if self.tab == 0 {
                 format!("{},{}", r.cpu / 10, r.cpu % 10)
             } else {
                 r.memory.map_or(String::from("—"), |m| format!("{}", Size(m)))
             };
-            text::draw(c, Font::Body, cols[1], y + 5, &v, TEXT);
-            text::draw(c, Font::Body, cols[2], y + 5, &format!("{}", r.threads), TEXT_DIM);
-            text::draw(c, Font::Body, cols[3], y + 5, &r.pid.map_or(String::from("—"), |p| format!("{p}")), TEXT_DIM);
+            text::draw(c, Font::Body, cols[1], y + 5, &v, ui::text());
+            text::draw(c, Font::Body, cols[2], y + 5, &format!("{}", r.threads), ui::text_dim());
+            text::draw(c, Font::Body, cols[3], y + 5, &r.pid.map_or(String::from("—"), |p| format!("{p}")), ui::text_dim());
         }
         c.set_clip(saved);
         // History and totals.
@@ -201,19 +201,19 @@ impl App for Monitor {
         if self.tab == 0 {
             draw_graph(c, g, &self.cpu_history, ui::GREEN);
             let now = self.cpu_history.last().copied().unwrap_or(0);
-            text::draw(c, Font::Small, side.x + 16, side.y + 14, "Utilizzo", TEXT_DIM);
-            text::draw(c, Font::Title, side.x + 16, side.y + 32, &format!("{},{} %", now / 10, now % 10), TEXT);
+            text::draw(c, Font::Small, side.x + 16, side.y + 14, "Utilizzo", ui::text_dim());
+            text::draw(c, Font::Title, side.x + 16, side.y + 32, &format!("{},{} %", now / 10, now % 10), ui::text());
             let threads: usize = self.rows.iter().map(|r| r.threads).sum();
-            text::draw(c, Font::Small, side.x + 16, side.y + 78, &format!("{} thread · {} programmi", threads, crate::user::count()), TEXT_DIM);
+            text::draw(c, Font::Small, side.x + 16, side.y + 78, &format!("{} thread · {} programmi", threads, crate::user::count()), ui::text_dim());
             let up = time::uptime_ms() / 1000;
-            text::draw(c, Font::Small, side.x + 16, side.y + 98, &format!("Acceso da {} h {:02} min", up / 3600, up / 60 % 60), TEXT_DIM);
+            text::draw(c, Font::Small, side.x + 16, side.y + 98, &format!("Acceso da {} h {:02} min", up / 3600, up / 60 % 60), ui::text_dim());
         } else {
             draw_graph(c, g, &self.mem_history, ui::ACCENT);
             let (free, total) = crate::mem::frame::stats();
-            text::draw(c, Font::Small, side.x + 16, side.y + 14, "In uso", TEXT_DIM);
-            text::draw(c, Font::Title, side.x + 16, side.y + 32, &format!("{}", Size(total.saturating_sub(free))), TEXT);
-            text::draw(c, Font::Small, side.x + 16, side.y + 78, &format!("Libera: {}", Size(free)), TEXT_DIM);
-            text::draw(c, Font::Small, side.x + 16, side.y + 98, &format!("Totale: {}", Size(total)), TEXT_DIM);
+            text::draw(c, Font::Small, side.x + 16, side.y + 14, "In uso", ui::text_dim());
+            text::draw(c, Font::Title, side.x + 16, side.y + 32, &format!("{}", Size(total.saturating_sub(free))), ui::text());
+            text::draw(c, Font::Small, side.x + 16, side.y + 78, &format!("Libera: {}", Size(free)), ui::text_dim());
+            text::draw(c, Font::Small, side.x + 16, side.y + 98, &format!("Totale: {}", Size(total)), ui::text_dim());
         }
     }
 

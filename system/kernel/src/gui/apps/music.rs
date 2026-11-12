@@ -8,7 +8,7 @@ use crate::fs;
 use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::res;
 use crate::gui::text::{self, Font};
-use crate::gui::ui::{self, TEXT, TEXT_DIM, TEXT_FAINT};
+use crate::gui::ui;
 use crate::gui::wm::{Action, App};
 use alloc::format;
 use alloc::string::String;
@@ -232,14 +232,14 @@ impl App for Music {
     }
 
     fn draw(&mut self, c: &mut Canvas, area: Rect, _blur: &Canvas, _focused: bool) {
-        text::draw(c, Font::Title, area.x + 20, area.y + 14, "Brani", TEXT);
+        text::draw(c, Font::Title, area.x + 20, area.y + 14, "Brani", ui::text());
         let total: u64 = self.songs.iter().map(|s| s.secs).sum();
-        text::draw_right(c, Font::Small, area.right() - 20, area.y + 28, &format!("{} brani, {} minuti", self.songs.len(), total.div_ceil(60)), TEXT_DIM);
+        text::draw_right(c, Font::Small, area.right() - 20, area.y + 28, &format!("{} brani, {} minuti", self.songs.len(), total.div_ceil(60)), ui::text_dim());
         let lr = Self::list(area);
         let saved = c.clip();
         c.set_clip(saved.intersect(&lr));
         if self.songs.is_empty() {
-            text::draw_centered(c, Font::Body, lr.x + lr.w / 2, lr.y + 40, "Metti i file WAV nella cartella Musica", TEXT_FAINT);
+            text::draw_centered(c, Font::Body, lr.x + lr.w / 2, lr.y + 40, "Metti i file WAV nella cartella Musica", ui::text_faint());
         }
         let state = self.state();
         let cur = self.current.as_ref().map(|c| c.0);
@@ -251,7 +251,7 @@ impl App for Music {
             if cur == Some(i) {
                 c.fill_round(r, 10, 0x40FF_2D55);
             } else if self.hover == Some(i) {
-                c.fill_round(r, 10, ui::PANEL);
+                c.fill_round(r, 10, ui::pane());
             }
             if cur == Some(i) && state.is_some_and(|s| s.2) {
                 // Three bars, as a level meter.
@@ -259,11 +259,11 @@ impl App for Music {
                     c.fill(Rect::new(r.x + 17 + k as i32 * 5, r.y + 30 - h, 3, *h), 0xFFFF_375F);
                 }
             } else {
-                text::draw_centered(c, Font::Body, r.x + 24, r.y + 12, &format!("{}", i + 1), if cur == Some(i) { 0xFFFF_375F } else { TEXT_FAINT });
+                text::draw_centered(c, Font::Body, r.x + 24, r.y + 12, &format!("{}", i + 1), if cur == Some(i) { 0xFFFF_375F } else { ui::text_faint() });
             }
-            text::draw(c, Font::Strong, r.x + 50, r.y + 4, &text::fit(Font::Strong, &s.title, r.w - 200), TEXT);
-            text::draw(c, Font::Small, r.x + 50, r.y + 24, &s.album, TEXT_DIM);
-            text::draw_right(c, Font::Body, r.right() - 16, r.y + 12, &mmss(s.secs), TEXT_DIM);
+            text::draw(c, Font::Strong, r.x + 50, r.y + 4, &text::fit(Font::Strong, &s.title, r.w - 200), ui::text());
+            text::draw(c, Font::Small, r.x + 50, r.y + 24, &s.album, ui::text_dim());
+            text::draw_right(c, Font::Body, r.right() - 16, r.y + 12, &mmss(s.secs), ui::text_dim());
         }
         c.set_clip(saved);
         // The player.
@@ -274,10 +274,10 @@ impl App for Music {
         res::draw_icon(c, "g-note", 36, art.x + 16, art.y + 16);
         if let Some(i) = cur {
             let s = &self.songs[i];
-            text::draw(c, Font::Strong, art.right() + 14, b.y + 22, &text::fit(Font::Strong, &s.title, b.w / 2 - 200), TEXT);
-            text::draw(c, Font::Small, art.right() + 14, b.y + 46, &s.album, TEXT_DIM);
+            text::draw(c, Font::Strong, art.right() + 14, b.y + 22, &text::fit(Font::Strong, &s.title, b.w / 2 - 200), ui::text());
+            text::draw(c, Font::Small, art.right() + 14, b.y + 46, &s.album, ui::text_dim());
         } else {
-            text::draw(c, Font::Body, art.right() + 14, b.y + 34, "Scegli un brano", TEXT_DIM);
+            text::draw(c, Font::Body, art.right() + 14, b.y + 34, "Scegli un brano", ui::text_dim());
         }
         let [prev, play, next] = Self::controls(area);
         ui::icon_button(c, prev, "g-prev", false);
@@ -288,8 +288,8 @@ impl App for Music {
         let sr = Self::seek_rect(area);
         let (pos, len, rate) = state.map_or((0, 1, 1), |s| (s.0, s.1.max(1), s.3.max(1) as u64));
         ui::slider(c, sr, (pos * 1000 / len) as u32);
-        text::draw_right(c, Font::Small, sr.x - 12, sr.y - 3, &mmss(pos / rate), TEXT_DIM);
-        text::draw(c, Font::Small, sr.right() + 12, sr.y - 3, &mmss(len / rate), TEXT_DIM);
+        text::draw_right(c, Font::Small, sr.x - 12, sr.y - 3, &mmss(pos / rate), ui::text_dim());
+        text::draw(c, Font::Small, sr.right() + 12, sr.y - 3, &mmss(len / rate), ui::text_dim());
         let vr = Self::volume_rect(area);
         res::draw_icon(c, "g-volume", 16, vr.x - 26, vr.y + 2);
         ui::slider(c, vr, audio::volume() * 10);

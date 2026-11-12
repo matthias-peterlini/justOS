@@ -4,7 +4,7 @@
 use crate::dev::input::{Key, KeyEvent};
 use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::text::{self, Font};
-use crate::gui::ui::{self, TEXT, TEXT_DIM, TEXT_FAINT};
+use crate::gui::ui;
 use crate::gui::wm::{Action, App};
 use crate::time;
 use alloc::format;
@@ -190,8 +190,8 @@ impl App for Clock {
             Tab::Clock => {
                 let d = time::from_epoch(time::now());
                 draw_face(c, area.x + 140, area.y + 200, 110, d.hour, d.min, Some(d.sec));
-                text::draw(c, Font::Body, area.x + 290, area.y + 96, "Qui", TEXT_DIM);
-                text::draw(c, Font::Clock, area.x + 286, area.y + 114, &format!("{:02}:{:02}", d.hour, d.min), TEXT);
+                text::draw(c, Font::Body, area.x + 290, area.y + 96, "Qui", ui::text_dim());
+                text::draw(c, Font::Clock, area.x + 286, area.y + 114, &format!("{:02}:{:02}", d.hour, d.min), ui::text());
                 let mut y = area.y + 340;
                 for (name, off) in CITIES {
                     let t = time::now() as i64 + off * 3600;
@@ -202,23 +202,23 @@ impl App for Clock {
                         _ => "ieri",
                     };
                     let r = Rect::new(area.x + 24, y, area.w - 48, 30);
-                    text::draw(c, Font::Strong, r.x, r.y + 4, name, TEXT);
+                    text::draw(c, Font::Strong, r.x, r.y + 4, name, ui::text());
                     let rel = if off >= 0 { format!("{day}, +{off} h") } else { format!("{day}, {off} h") };
-                    text::draw(c, Font::Small, r.x + 150, r.y + 7, &rel, TEXT_DIM);
-                    text::draw_right(c, Font::Heading, r.right(), r.y, &format!("{:02}:{:02}", cd.hour, cd.min), TEXT);
-                    c.fill(Rect::new(r.x, r.bottom() + 2, r.w, 1), ui::SEPARATOR);
+                    text::draw(c, Font::Small, r.x + 150, r.y + 7, &rel, ui::text_dim());
+                    text::draw_right(c, Font::Heading, r.right(), r.y, &format!("{:02}:{:02}", cd.hour, cd.min), ui::text());
+                    c.fill(Rect::new(r.x, r.bottom() + 2, r.w, 1), ui::line());
                     y += 34;
                 }
             }
             Tab::Stopwatch => {
                 let ms = self.stopwatch();
                 let shown = fmt_ms(ms);
-                text::draw_centered(c, Font::Display, cx, area.y + 90, &shown, TEXT);
+                text::draw_centered(c, Font::Display, cx, area.y + 90, &shown, ui::text());
                 let [l, r] = Self::controls(area);
                 let running = self.sw_start.is_some();
                 let left = if running { "Giro" } else { "Azzera" };
                 c.fill_circle(l.x + 40, l.y + 40, 40, if self.hover == Some(l) { 0x60FF_FFFF } else { 0x40FF_FFFF });
-                text::draw_centered(c, Font::Strong, l.x + 40, l.y + 30, left, TEXT);
+                text::draw_centered(c, Font::Strong, l.x + 40, l.y + 30, left, ui::text());
                 let (bg, label) = if running { (0x66FF_453A, "Stop") } else { (0x6630_D158, "Avvia") };
                 c.fill_circle(r.x + 40, r.y + 40, 40, bg);
                 text::draw_centered(c, Font::Strong, r.x + 40, r.y + 30, label, if running { 0xFFFF_6961 } else { 0xFF5D_E28A });
@@ -227,9 +227,9 @@ impl App for Clock {
                 let laps: Vec<(usize, u64)> = self.laps.iter().copied().enumerate().collect();
                 for (i, total) in laps.iter().rev().take(6) {
                     let lap = total - if *i > 0 { self.laps[i - 1] } else { 0 };
-                    text::draw(c, Font::Body, area.x + 150, y, &format!("Giro {}", i + 1), TEXT_DIM);
-                    text::draw_right(c, Font::Body, area.right() - 150, y, &fmt_ms(lap), TEXT);
-                    c.fill(Rect::new(area.x + 150, y + 26, area.w - 300, 1), ui::SEPARATOR);
+                    text::draw(c, Font::Body, area.x + 150, y, &format!("Giro {}", i + 1), ui::text_dim());
+                    text::draw_right(c, Font::Body, area.right() - 150, y, &fmt_ms(lap), ui::text());
+                    c.fill(Rect::new(area.x + 150, y + 26, area.w - 300, 1), ui::line());
                     y += 32;
                     prev = *total;
                 }
@@ -245,22 +245,22 @@ impl App for Clock {
                     c.arc(rx, ry, rr, 8, share.max(1), ui::ORANGE);
                 }
                 let (lh, _) = text::metrics(Font::Clock);
-                text::draw_centered(c, Font::Clock, rx, ry - lh / 2, &fmt_left(left), TEXT);
+                text::draw_centered(c, Font::Clock, rx, ry - lh / 2, &fmt_left(left), ui::text());
                 if self.timer_end.is_none() && self.timer_left.is_none() {
                     for (r, ms) in Self::presets(area) {
                         let sel = ms == self.timer_len;
                         c.fill_round(r, 17, if sel { ui::ORANGE } else if self.hover == Some(r) { 0x40FF_FFFF } else { 0x26FF_FFFF });
-                        text::draw_centered(c, Font::Strong, r.x + r.w / 2, r.y + 8, &format!("{} min", ms / 60_000), TEXT);
+                        text::draw_centered(c, Font::Strong, r.x + r.w / 2, r.y + 8, &format!("{} min", ms / 60_000), ui::text());
                     }
                 } else {
-                    text::draw_centered(c, Font::Body, cx, area.y + 88, &format!("Timer di {} minuti", self.timer_len / 60_000), TEXT_DIM);
+                    text::draw_centered(c, Font::Body, cx, area.y + 88, &format!("Timer di {} minuti", self.timer_len / 60_000), ui::text_dim());
                 }
                 if self.ringing {
                     text::draw_centered(c, Font::Strong, cx, ry + 40, "Tempo scaduto!", ui::ORANGE);
                 }
                 let [l, r] = Self::controls(area);
                 c.fill_circle(l.x + 40, l.y + 40, 40, if self.hover == Some(l) { 0x60FF_FFFF } else { 0x40FF_FFFF });
-                text::draw_centered(c, Font::Strong, l.x + 40, l.y + 30, "Annulla", TEXT);
+                text::draw_centered(c, Font::Strong, l.x + 40, l.y + 30, "Annulla", ui::text());
                 let running = self.timer_end.is_some();
                 let (bg, label, fg) = if running {
                     (0x66FF_9F0A, "Pausa", 0xFFFF_B340)
@@ -273,7 +273,7 @@ impl App for Clock {
                 text::draw_centered(c, Font::Strong, r.x + 40, r.y + 30, label, fg);
             }
         }
-        let _ = TEXT_FAINT;
+        let _ = ui::text_faint();
     }
 
     fn press(&mut self, x: i32, y: i32, _double: bool, area: Rect) -> Action {

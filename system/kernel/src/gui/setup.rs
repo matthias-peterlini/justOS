@@ -6,7 +6,7 @@ use super::res;
 use super::settings;
 use super::splash::draw_logo;
 use super::text::{self, Font};
-use super::ui::{self, Event, Looper, View, TEXT, TEXT_DIM};
+use super::ui::{self, Event, Looper, View};
 use super::Display;
 use crate::dev::input::Key;
 use crate::dev::keymap::Layout;
@@ -197,22 +197,22 @@ impl View for Setup {
             0 => {
                 draw_logo(c, cx, y + 40, 35, 0xFFF2_EFE6);
                 y += 110;
-                text::draw_centered(c, Font::Title, cx, y, "Benvenuto in justOS", TEXT);
-                text::draw_centered(c, Font::Body, cx, y + 56, "Prepariamo il computer in pochi passi.", TEXT_DIM);
-                text::draw_centered(c, Font::Body, cx, y + 78, "Ci vuole meno di un minuto.", TEXT_DIM);
+                text::draw_centered(c, Font::Title, cx, y, "Benvenuto in justOS", ui::text());
+                text::draw_centered(c, Font::Body, cx, y + 56, "Prepariamo il computer in pochi passi.", ui::text_dim());
+                text::draw_centered(c, Font::Body, cx, y + 78, "Ci vuole meno di un minuto.", ui::text_dim());
             }
             1 => {
                 res::draw_icon(c, "user", 72, cx - 36, y);
-                text::draw_centered(c, Font::Title, cx, y + 88, "Come ti chiami?", TEXT);
-                text::draw_centered(c, Font::Body, cx, y + 140, "Il tuo nome compare sulla scrivania.", TEXT_DIM);
+                text::draw_centered(c, Font::Title, cx, y + 88, "Come ti chiami?", ui::text());
+                text::draw_centered(c, Font::Body, cx, y + 140, "Il tuo nome compare sulla scrivania.", ui::text_dim());
                 if let Some(f) = lay.field {
                     ui::text_field(c, f, &self.name, "Il tuo nome", true);
                 }
             }
             2 => {
                 res::draw_icon(c, "keyboard", 72, cx - 36, y);
-                text::draw_centered(c, Font::Title, cx, y + 88, "Scegli la tastiera", TEXT);
-                text::draw_centered(c, Font::Body, cx, y + 140, "Potrai cambiarla dopo nelle Impostazioni.", TEXT_DIM);
+                text::draw_centered(c, Font::Title, cx, y + 88, "Scegli la tastiera", ui::text());
+                text::draw_centered(c, Font::Body, cx, y + 140, "Potrai cambiarla dopo nelle Impostazioni.", ui::text_dim());
                 for (i, o) in lay.options.iter().enumerate() {
                     let sel = (i == 0) == (self.layout == Layout::It);
                     option_tile(
@@ -225,8 +225,8 @@ impl View for Setup {
                 }
             }
             3 => {
-                text::draw_centered(c, Font::Title, cx, y, "Scegli lo sfondo", TEXT);
-                text::draw_centered(c, Font::Body, cx, y + 52, "Ne puoi scegliere un altro quando vuoi.", TEXT_DIM);
+                text::draw_centered(c, Font::Title, cx, y, "Scegli lo sfondo", ui::text());
+                text::draw_centered(c, Font::Body, cx, y + 52, "Ne puoi scegliere un altro quando vuoi.", ui::text_dim());
                 for (i, o) in lay.options.iter().enumerate() {
                     let sel = i == self.wall;
                     if sel {
@@ -239,7 +239,7 @@ impl View for Setup {
                         o.x + o.w / 2,
                         o.bottom() + 12,
                         res::WALLPAPERS[i].1,
-                        if sel { TEXT } else { TEXT_DIM },
+                        if sel { ui::text() } else { ui::text_dim() },
                     );
                 }
             }
@@ -247,8 +247,8 @@ impl View for Setup {
                 draw_logo(c, cx, y + 40, 35, 0xFFF2_EFE6);
                 y += 110;
                 let title = format!("Tutto pronto, {}!", self.name.trim());
-                text::draw_centered(c, Font::Title, cx, y, &text::fit(Font::Title, &title, card.w - 60), TEXT);
-                text::draw_centered(c, Font::Body, cx, y + 56, "justOS è configurato. Buon lavoro!", TEXT_DIM);
+                text::draw_centered(c, Font::Title, cx, y, &text::fit(Font::Title, &title, card.w - 60), ui::text());
+                text::draw_centered(c, Font::Body, cx, y + 56, "justOS è configurato. Buon lavoro!", ui::text_dim());
             }
         }
         let (mx, my) = self.mouse;
@@ -284,9 +284,9 @@ impl View for Setup {
 
 fn option_tile(c: &mut Canvas, r: Rect, title: &str, sub: &str, selected: bool) {
     c.fill_round(r, 18, if selected { 0x40FF_FFFF } else { 0x1AFF_FFFF });
-    c.stroke_round(r, 18, if selected { 2 } else { 1 }, if selected { 0xFFFF_FFFF } else { ui::BORDER });
-    text::draw(c, Font::Heading, r.x + 20, r.y + 14, title, TEXT);
-    text::draw(c, Font::Small, r.x + 20, r.y + 42, sub, TEXT_DIM);
+    c.stroke_round(r, 18, if selected { 2 } else { 1 }, if selected { 0xFFFF_FFFF } else { ui::line() });
+    text::draw(c, Font::Heading, r.x + 20, r.y + 14, title, ui::text());
+    text::draw(c, Font::Small, r.x + 20, r.y + 42, sub, ui::text_dim());
     if selected {
         c.fill_circle(r.right() - 26, r.y + r.h / 2, 11, 0xFFFF_FFFF);
         c.fill_circle(r.right() - 26, r.y + r.h / 2, 5, 0xFF2F_7BEF);

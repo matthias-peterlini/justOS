@@ -7,7 +7,7 @@ use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::qoi;
 use crate::gui::res;
 use crate::gui::text::{self, Font};
-use crate::gui::ui::{self, Anim, TEXT, TEXT_DIM, TEXT_FAINT};
+use crate::gui::ui::{self, Anim};
 use crate::gui::wm::{Action, App};
 use alloc::format;
 use alloc::string::String;
@@ -128,8 +128,8 @@ impl App for Photos {
             ui::icon_button(c, prev, "g-back", false);
             ui::icon_button(c, next, "g-forward", false);
             let p = &self.photos[*i];
-            text::draw_centered(c, Font::Strong, area.x + area.w / 2, area.y + 16, &p.name, TEXT);
-            text::draw_centered(c, Font::Small, area.x + area.w / 2, area.y + 38, &format!("{} di {}", i + 1, self.photos.len()), TEXT_DIM);
+            text::draw_centered(c, Font::Strong, area.x + area.w / 2, area.y + 16, &p.name, ui::text());
+            text::draw_centered(c, Font::Small, area.x + area.w / 2, area.y + 38, &format!("{} di {}", i + 1, self.photos.len()), ui::text_dim());
             let stage = Rect::new(area.x + 20, area.y + 66, area.w - 40, area.h - 80);
             match img {
                 Some(img) => {
@@ -141,16 +141,16 @@ impl App for Photos {
                         c.draw_scaled(img, ui::scale_rect(full, ui::lerp(820, 1000, t)), t * 255 / 1000);
                     }
                 }
-                None => text::draw_centered(c, Font::Body, stage.x + stage.w / 2, stage.y + stage.h / 2, "Immagine non leggibile", TEXT_DIM),
+                None => text::draw_centered(c, Font::Body, stage.x + stage.w / 2, stage.y + stage.h / 2, "Immagine non leggibile", ui::text_dim()),
             }
             return;
         }
-        text::draw(c, Font::Title, area.x + 20, area.y + 14, "Libreria", TEXT);
-        text::draw_right(c, Font::Small, area.right() - 20, area.y + 28, &format!("{} foto", self.photos.len()), TEXT_DIM);
+        text::draw(c, Font::Title, area.x + 20, area.y + 14, "Libreria", ui::text());
+        text::draw_right(c, Font::Small, area.right() - 20, area.y + 28, &format!("{} foto", self.photos.len()), ui::text_dim());
         let (g, _) = Self::grid(area);
         if self.photos.is_empty() {
             res::draw_icon_faded(c, "photos", 72, area.x + area.w / 2 - 36, area.y + 160, 140);
-            text::draw_centered(c, Font::Body, area.x + area.w / 2, area.y + 250, "Metti le immagini (QOI) in Immagini", TEXT_FAINT);
+            text::draw_centered(c, Font::Body, area.x + area.w / 2, area.y + 250, "Metti le immagini (QOI) in Immagini", ui::text_faint());
         }
         let saved = c.clip();
         c.set_clip(saved.intersect(&g));
@@ -183,13 +183,13 @@ impl App for Photos {
             }
             match &self.photos[i].thumb {
                 Some(th) => c.blit_round_from(th, (th.w - t.w).max(0) / 2, (th.h - t.h).max(0) / 2, t, 8, 0),
-                None => c.fill_round(t, 8, ui::PANEL),
+                None => c.fill_round(t, 8, ui::pane()),
             }
             if self.hover == Some(i) {
                 c.fill_round(t, 8, 0x26FF_FFFF);
                 let label = text::fit(Font::Small, &self.photos[i].name, t.w - 16);
                 c.fill_round(Rect::new(t.x + 6, t.bottom() - 28, t.w - 12, 22), 8, 0x99_00_00_00);
-                text::draw(c, Font::Small, t.x + 12, t.bottom() - 26, &label, TEXT);
+                text::draw(c, Font::Small, t.x + 12, t.bottom() - 26, &label, ui::text());
             }
         }
         c.set_clip(saved);

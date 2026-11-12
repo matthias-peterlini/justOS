@@ -457,6 +457,133 @@ impl Canvas {
         }
     }
 
+    /// The light edge along the top of a rounded rectangle, inside it,
+    /// `width` units thick: full along the straight top, thinning out round
+    /// the corners (what CSS draws for `box-shadow: inset 0 1px 0`).
+    pub fn sheen_round(&mut self, r: Rect, rad: i32, width: i32, c: u32) {
+        let s = self.scale;
+        let r = self.up(r);
+        let width = (width * s).max(1);
+        let rad = (rad * s).min(r.w / 2).min(r.h / 2).max(0);
+        // What the rectangle covers and the same rectangle moved down by
+        // `width` does not: only the top rows can have any.
+        let below = r.offset(0, width);
+        let area = Rect::new(r.x, r.y, r.w, (rad + width).min(r.h)).intersect(&self.clip);
+        let a = c >> 24;
+        for y in area.y..area.bottom() {
+            for x in area.x..area.right() {
+                let outer = round_cover(&r, rad, x, y);
+                let inner = if below.contains(x, y) { round_cover(&below, rad, x, y) } else { 0 };
+                let cov = outer.saturating_sub(inner);
+                if cov > 0 {
+                    self.put(x, y, c, a * cov / 16);
+                }
+            }
+        }
+    }
+
+    /// Pixel art with soft corners ("soft pixels"): a grid of cells, `cols`
+    /// to a row, given by `keys` row by row (0: an empty cell). Each cell is
+    /// a square `cell` thousandths of a unit wide and the grid's top-left
+    /// corner is at (`x`, `y`), also in thousandths of a unit, so cells of
+    /// any size (2.5 units, 3.4 units...) fit any scale. A corner that
+    /// sticks out is rounded by half a cell; where two filled cells meet
+    /// round an empty one, the inside corner is filled in with a curve of
+    /// 0.38 cell. A filled cell is drawn in `color(key)` (the fill of an
+    /// inside corner takes the colour of the cell beside it). The edges are
+    /// anti-aliased; the corner snaps to a whole pixel, so cells of a whole
+    /// number of pixels come out crisp.
+    #[allow(clippy::too_many_arguments)]
+    pub fn soft_grid(&mut self, keys: &[u8], cols: i32, x: i32, y: i32, cell: i32, color: &dyn Fn(u8) -> u32) {
+        let cols = cols.max(1) as i64;
+        let rows = keys.len() as i64 / cols;
+        if rows == 0 || cell <= 0 {
+            return;
+        }
+        // Positions in 1/256 of a pixel.
+        let s = self.scale as i64;
+        let q = |m: i32| m as i64 * s * 256 / 1000;
+        let (ox, oy) = ((q(x) + 128) & !255, (q(y) + 128) & !255);
+        let cs = q(cell).max(1);
+        let (x0, y0) = ((ox >> 8) as i32, (oy >> 8) as i32);
+        let x1 = ((ox + cols * cs + 255) >> 8) as i32;
+        let y1 = ((oy + rows * cs + 255) >> 8) as i32;
+        let area = Rect::new(x0, y0, x1 - x0, y1 - y0).intersect(&self.clip);
+        if area.is_empty() {
+            return;
+        }
+        let at = |cx: i64, cy: i64| -> u8 {
+            if cx < 0 || cy < 0 || cx >= cols || cy >= rows {
+                0
+            } else {
+                keys[(cy * cols + cx) as usize]
+            }
+        };
+        // The key that covers the point (`gx`, `gy`) of the grid, in 1/256
+        // of a cell (0: none).
+        let owner = |gx: i64, gy: i64| -> u8 {
+            const HALF: i64 = 128;
+            const FILLET: i64 = 97; // 0.38 of a cell
+            let (cx, cy, u, v) = (gx >> 8, gy >> 8, gx & 255, gy & 255);
+            if cx >= cols || cy >= rows {
+                return 0;
+            }
+            let (k, l, r, up, d) = (at(cx, cy), at(cx - 1, cy), at(cx + 1, cy), at(cx, cy - 1), at(cx, cy + 1));
+            let outside = |du: i64, dv: i64, rad: i64| du * du + dv * dv > rad * rad;
+            if k != 0 {
+                // A rounded corner where neither neighbour is filled.
+                let cut = (u < HALF && v < HALF && l == 0 && up == 0 && outside(HALF - u, HALF - v, HALF))
+                    || (u >= HALF && v < HALF && r == 0 && up == 0 && outside(u - HALF, HALF - v, HALF))
+                    || (u >= HALF && v >= HALF && r == 0 && d == 0 && outside(u - HALF, v - HALF, HALF))
+                    || (u < HALF && v >= HALF && l == 0 && d == 0 && outside(HALF - u, v - HALF, HALF));
+                return if cut { 0 } else { k };
+            }
+            // An empty cell: the fillets of its corners.
+            let far = 256 - FILLET;
+            if u < FILLET && v < FILLET && l != 0 && up != 0 && outside(FILLET - u, FILLET - v, FILLET) {
+                l
+            } else if u > far && v < FILLET && r != 0 && up != 0 && outside(u - far, FILLET - v, FILLET) {
+                r
+            } else if u > far && v > far && r != 0 && d != 0 && outside(u - far, v - far, FILLET) {
+                r
+            } else if u < FILLET && v > far && l != 0 && d != 0 && outside(FILLET - u, v - far, FILLET) {
+                l
+            } else {
+                0
+            }
+        };
+        for py in area.y..area.bottom() {
+            for px in area.x..area.right() {
+                // Sixteen samples per pixel, counted by key.
+                const KINDS: usize = 4;
+                let mut seen = [(0u8, 0u32); KINDS];
+                let mut kinds = 0;
+                for j in 0..4i64 {
+                    let gy = (py as i64 * 256 + j * 64 + 32 - oy) * 256 / cs;
+                    for i in 0..4i64 {
+                        let gx = (px as i64 * 256 + i * 64 + 32 - ox) * 256 / cs;
+                        let k = owner(gx, gy);
+                        if k == 0 {
+                            continue;
+                        }
+                        match seen[..kinds].iter_mut().find(|e| e.0 == k) {
+                            Some(e) => e.1 += 1,
+                            None if kinds < KINDS => {
+                                seen[kinds] = (k, 1);
+                                kinds += 1;
+                            }
+                            None => {}
+                        }
+                    }
+                }
+                for &(k, n) in &seen[..kinds] {
+                    let c = color(k);
+                    self.put(px, py, c, (c >> 24) * n / 16);
+                }
+            }
+        }
+    }
+
     /// A filled anti-aliased circle.
     pub fn fill_circle(&mut self, cx: i32, cy: i32, rad: i32, c: u32) {
         self.fill_round(Rect::new(cx - rad, cy - rad, rad * 2, rad * 2), rad, c);
@@ -999,6 +1126,36 @@ mod tests {
         assert_eq!(back.px, screen.px);
         let small = screen.crop(Rect::new(1, 1, 2, 2));
         assert_eq!((small.w, small.pixel_width(), small.pixel(0, 0)), (2, 4, 0xFFFF_0000));
+    }
+
+    #[test]
+    fn soft_pixels_round_outer_corners_and_fill_inner_ones() {
+        // An L: the empty cell at the bottom right gets a fillet at its
+        // top-left corner; the cell at the top left is rounded off.
+        let keys = [1, 1, 1, 0];
+        let mut c = Canvas::new(16, 16, 0xFF00_0000);
+        c.soft_grid(&keys, 2, 0, 0, 8000, &|_| 0xFFFF_FFFF);
+        let v = |x, y| c.pixel(x, y) & 0xFF;
+        assert_eq!(v(0, 0), 0); // outside the rounded corner
+        assert_eq!(v(4, 0), 255); // the straight top edge
+        assert_eq!(v(8, 8), 255); // inside the fillet
+        assert_eq!(v(10, 10), 0); // past the fillet's curve
+        assert_eq!(v(15, 15), 0);
+        // At two pixels per unit the same grid is twice as many pixels.
+        let mut sharp = Canvas::new_at(16, 16, 0xFF00_0000, 2);
+        sharp.soft_grid(&keys, 2, 0, 0, 8000, &|_| 0xFFFF_FFFF);
+        assert_eq!(sharp.pixel(8, 0) & 0xFF, 255);
+        assert_eq!(sharp.pixel(16, 16) & 0xFF, 255);
+        assert_eq!(sharp.pixel(30, 30) & 0xFF, 0);
+    }
+
+    #[test]
+    fn a_sheen_lines_only_the_top() {
+        let mut c = Canvas::new(10, 6, 0xFF00_0000);
+        c.sheen_round(Rect::new(0, 0, 10, 6), 0, 1, 0xFFFF_FFFF);
+        assert_eq!(c.pixel(5, 0), 0xFFFF_FFFF);
+        assert_eq!(c.pixel(5, 1), 0xFF00_0000);
+        assert_eq!(c.pixel(5, 5), 0xFF00_0000);
     }
 
     #[test]

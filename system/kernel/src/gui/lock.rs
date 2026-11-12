@@ -5,7 +5,7 @@
 use super::gfx::{Canvas, Rect};
 use super::settings;
 use super::text::{self, Font};
-use super::ui::{self, Anim, TEXT, TEXT_DIM, TEXT_FAINT};
+use super::ui::{self, Anim};
 use crate::dev::input::{Key, KeyEvent};
 use crate::time::DateTime;
 use alloc::format;
@@ -117,8 +117,8 @@ impl Lock {
         let (w, h) = (blur.w, blur.h);
         let cx = w / 2;
         let date = format!("{} {} {}", WEEKDAYS[now.weekday as usize % 7], now.day, super::desktop::MONTHS[(now.month as usize + 11) % 12]);
-        text::draw_centered(c, Font::Heading, cx, h / 2 - 210, &date, TEXT_DIM);
-        text::draw_centered(c, Font::Clock, cx, h / 2 - 176, &format!("{:02}:{:02}", now.hour, now.min), TEXT);
+        text::draw_centered(c, Font::Heading, cx, h / 2 - 210, &date, ui::WHITE_DIM);
+        text::draw_centered(c, Font::Clock, cx, h / 2 - 176, &format!("{:02}:{:02}", now.hour, now.min), ui::WHITE);
 
         // The account: a round badge with the initial, and the name.
         let s = settings::get();
@@ -128,7 +128,7 @@ impl Lock {
         let initial: String = name.chars().next().map(|ch| ch.to_uppercase().collect()).unwrap_or_default();
         let (lh, _) = text::metrics(Font::Title);
         text::draw_centered(c, Font::Title, cx, ay - lh / 2, &initial, 0xFFFF_FFFF);
-        text::draw_centered(c, Font::Heading, cx, ay + 54, &name, TEXT);
+        text::draw_centered(c, Font::Heading, cx, ay + 54, &name, ui::WHITE);
 
         let mut field = Self::field(w, h);
         if let Some(a) = &self.wrong {
@@ -141,11 +141,11 @@ impl Lock {
         }
         if s.password.is_empty() {
             ui::button(c, Rect::new(cx - 90, field.y, 180, 46), "Entra", true, false);
-            text::draw_centered(c, Font::Small, cx, field.bottom() + 18, "Premi Invio o fai clic", TEXT_FAINT);
+            text::draw_centered(c, Font::Small, cx, field.bottom() + 18, "Premi Invio o fai clic", ui::WHITE_FAINT);
         } else {
             let dots: String = self.input.chars().map(|_| '•').collect();
             ui::text_field(c, field, &dots, "Password", true);
-            let (hint, color) = if self.wrong.is_some() { ("Password errata", ui::RED) } else { ("Scrivi la password e premi Invio", TEXT_FAINT) };
+            let (hint, color) = if self.wrong.is_some() { ("Password errata", ui::RED) } else { ("Scrivi la password e premi Invio", ui::WHITE_FAINT) };
             text::draw_centered(c, Font::Small, cx, field.bottom() + 16, hint, color);
         }
     }

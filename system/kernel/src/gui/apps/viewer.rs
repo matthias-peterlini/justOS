@@ -4,7 +4,7 @@ use crate::fs;
 use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::qoi;
 use crate::gui::text::{self, Font};
-use crate::gui::ui::TEXT_DIM;
+use crate::gui::ui;
 use crate::gui::wm::App;
 use alloc::string::String;
 
@@ -52,7 +52,7 @@ impl App for Viewer {
                 let r = Rect::new(area.x + 12, area.y + 12, img.w, img.h);
                 c.blit_round_from(img, 0, 0, r, 12, 0);
             }
-            None => text::draw_centered(c, Font::Body, area.x + area.w / 2, area.y + 60, "Immagine non leggibile", TEXT_DIM),
+            None => text::draw_centered(c, Font::Body, area.x + area.w / 2, area.y + 60, "Immagine non leggibile", ui::text_dim()),
         }
     }
 }

@@ -8,7 +8,7 @@ use crate::dev::input::{Key, KeyEvent};
 use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::res;
 use crate::gui::text::{self, Font};
-use crate::gui::ui::{self, TEXT, TEXT_DIM};
+use crate::gui::ui;
 use crate::gui::wm::{Action, App};
 use crate::sync::{IrqLock, Mutex};
 use crate::task::WaitQueue;
@@ -164,13 +164,13 @@ impl App for Prompt {
         let x = area.x + 96;
         let mut y = area.y + 24;
         for line in text::wrap(Font::Strong, &format!("«{app}» vuole usare {what}"), area.w - 120) {
-            text::draw(c, Font::Strong, x, y, &line, TEXT);
+            text::draw(c, Font::Strong, x, y, &line, ui::text());
             y += 24;
         }
         y += 6;
         let detail = "Potrà leggere e cambiare quello che c'è. Puoi cambiare idea in Impostazioni, Privacy.";
         for line in text::wrap(Font::Small, detail, area.w - 120) {
-            text::draw(c, Font::Small, x, y, &line, TEXT_DIM);
+            text::draw(c, Font::Small, x, y, &line, ui::text_dim());
             y += 18;
         }
         let [no, yes] = Self::buttons(area);

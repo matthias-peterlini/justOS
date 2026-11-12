@@ -1,16 +1,15 @@
-//! Windows, as in the justOS design: a frame of warm pink frosted glass
-//! with the app's name at the top left and three round buttons (minimise
-//! and full screen in dark grey, close in orange) on a light pill at the top
-//! right; the content sits on a darker pane inside the frame. Their content
-//! is an [`App`].
+//! Windows, as in the justOS design: an opaque panel of the theme with the
+//! app's name at the top left and three tiles at the top right (minimise
+//! and full screen grey, close orange); the content sits in a well inside
+//! the frame. Their content is an [`App`].
 //!
-//! An app with a sidebar gets two panes side by side, with a gap of frame
+//! An app with a sidebar gets two wells side by side, with a gap of frame
 //! between them. A maximised window fills the whole screen, frame and all,
 //! with square corners.
 
 use super::gfx::{Canvas, Rect};
 use super::text::{self, Font};
-use super::ui::{self, TEXT};
+use super::ui;
 use crate::dev::input::KeyEvent;
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -18,7 +17,11 @@ use alloc::string::String;
 pub const TITLE_H: i32 = 44;
 /// The frame around the content pane, and the gap between panes.
 pub const GAP: i32 = 8;
-const KNOB: i32 = 24;
+/// The side of a window button, the gap between them and the margin at the
+/// right end of the title row.
+const KNOB: i32 = 26;
+const KNOB_GAP: i32 = 8;
+const KNOB_MARGIN: i32 = 14;
 /// The corner that resizes a window.
 const GRIP: i32 = 18;
 
@@ -39,6 +42,8 @@ pub enum Action {
     Notify(String, String, &'static str),
     /// The wallpaper changed: draw everything again.
     Wallpaper,
+    /// The look changed (the theme): draw the whole screen again.
+    RedrawAll,
 }
 
 /// The content of a window. Positions handed to it are relative to the
@@ -192,16 +197,10 @@ impl Window {
     /// Minimise, maximise and close, at the right end of the title row.
     pub fn buttons(&self) -> [Rect; 3] {
         let t = self.title_rect();
-        let s = KNOB;
+        let (s, step) = (KNOB, KNOB + KNOB_GAP);
         let y = t.y + (t.h - s) / 2;
-        let x = t.right() - 12 - s;
-        [Rect::new(x - 2 * (s + 6), y, s, s), Rect::new(x - (s + 6), y, s, s), Rect::new(x, y, s, s)]
-    }
-
-    /// The pill behind the buttons.
-    pub fn knob_pill(&self) -> Rect {
-        let [a, _, c] = self.buttons();
-        Rect::new(a.x - 6, a.y - 5, c.right() - a.x + 12, a.h + 10)
+        let x = t.right() - KNOB_MARGIN - s;
+        [Rect::new(x - 2 * step, y, s, s), Rect::new(x - step, y, s, s), Rect::new(x, y, s, s)]
     }
 
     fn grip(&self) -> Rect {
@@ -239,36 +238,36 @@ impl Window {
         let body = self.body();
         let full = self.full();
         if clip.overlaps(&ui::with_shadow(self.rect)) {
-            // The frame, with the title row (square on a full screen).
+            // The frame, with the title row (square on a full screen): an
+            // opaque panel of the theme.
             let frame = self.rect;
             let rad = if full { 0 } else { 26 };
             if !full {
-                c.shadow(frame, rad, 22, if focused { 95 } else { 60 });
+                ui::drop_shadow(c, frame, rad, 22, if focused { 95 } else { 60 });
             }
-            c.blit_round(blur, frame, rad, if focused { ui::FRAME_STRONG } else { ui::FRAME });
+            c.fill_round_grad(frame, rad, ui::panel_top(), ui::panel_bottom());
             if !full {
-                c.stroke_round(frame, rad, 1, 0x66FF_FFFF);
+                c.stroke_round(frame, rad, 1, ui::line());
             }
+            c.sheen_round(frame, rad, 1, ui::sheen());
             let t = self.title_rect();
-            let ink = ui::wants_ink(blur, t);
-            let (fg, dim) = if ink { (ui::INK, ui::INK_DIM) } else { (TEXT, ui::TEXT_DIM) };
             let (lh, _) = text::metrics(Font::Body);
-            let pill = self.knob_pill();
-            let name = text::fit(Font::Body, &self.app.title(), pill.x - t.x - 40);
-            text::draw(c, Font::Body, t.x + 20, t.y + (TITLE_H - lh) / 2 + 1, &name, if focused { fg } else { dim });
-            ui::window_knobs(c, pill, &self.buttons(), self.hover);
+            let first = self.buttons()[0];
+            let name = text::fit(Font::Body, &self.app.title(), first.x - t.x - 34);
+            let fg = if focused { ui::text() } else { ui::text_dim() };
+            text::draw(c, Font::Body, t.x + 20, t.y + (TITLE_H - lh) / 2 + 1, &name, fg);
+            ui::window_knobs(c, &self.buttons(), self.hover);
         }
         if clip.overlaps(&ui::with_shadow(body)) {
-            let tint = if focused { ui::GLASS } else { 0xA83A_383F };
             let rad = 18;
             let side = self.app.sidebar();
             if side > 0 {
                 let sb = Rect::new(body.x, body.y, side, body.h);
                 let main = Rect::new(body.x + side + GAP, body.y, body.w - side - GAP, body.h);
-                c.blit_round(blur, sb, rad, tint);
-                c.blit_round(blur, main, rad, tint);
+                ui::well_pane(c, sb, rad);
+                ui::well_pane(c, main, rad);
             } else {
-                c.blit_round(blur, body, rad, tint);
+                ui::well_pane(c, body, rad);
             }
             let saved = c.clip();
             c.set_clip(saved.intersect(&body));
@@ -277,7 +276,7 @@ impl Window {
                 // Three short diagonal strokes in the corner.
                 let (gx, gy) = (body.right() - 8, body.bottom() - 8);
                 for k in [4, 8, 12] {
-                    c.line(gx - k, gy, gx, gy - k, 1, 0x40FF_FFFF);
+                    c.line(gx - k, gy, gx, gy - k, 1, ui::text_faint());
                 }
             }
             c.set_clip(saved);

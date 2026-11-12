@@ -4,7 +4,7 @@
 
 use super::gfx::{Canvas, Rect};
 use super::text::{self, Font};
-use super::ui::{self, TEXT, TEXT_FAINT};
+use super::ui;
 use crate::dev::input::{Key, KeyEvent};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -314,7 +314,7 @@ impl TextArea {
         let saved = c.clip();
         c.set_clip(saved.intersect(&r));
         if self.text.is_empty() && !self.placeholder.is_empty() {
-            text::draw(c, self.font, inner.x, inner.y, self.placeholder, TEXT_FAINT);
+            text::draw(c, self.font, inner.x, inner.y, self.placeholder, ui::text_faint());
         }
         let sel = self.selection();
         let first = (self.scroll / lh) as usize;
@@ -334,7 +334,7 @@ impl TextArea {
                 if s == 0 || self.text[s - 1] == '\n' {
                     let here = (s..=e).contains(&self.cursor);
                     let label = alloc::format!("{number}");
-                    text::draw_right(c, font, inner.x - 12, y + 1, &label, if here { TEXT } else { TEXT_FAINT });
+                    text::draw_right(c, font, inner.x - 12, y + 1, &label, if here { ui::text() } else { ui::text_faint() });
                 }
                 if e < self.text.len() && self.text[e] == '\n' {
                     number += 1;
@@ -389,11 +389,11 @@ impl TextArea {
                         x += 4 * text::advance(font, ' ');
                     } else {
                         let mut b = [0u8; 4];
-                        x += text::draw(c, font, x, y + 1, ch.encode_utf8(&mut b), TEXT);
+                        x += text::draw(c, font, x, y + 1, ch.encode_utf8(&mut b), ui::text());
                     }
                 }
             } else {
-                text::draw(c, font, x, y + 1, &line, TEXT);
+                text::draw(c, font, x, y + 1, &line, ui::text());
             }
         }
         self.caret_at = None;
