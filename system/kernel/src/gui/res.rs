@@ -64,7 +64,7 @@ pub fn with_icon_at<T>(name: &str, size: i32, k: i32, f: impl FnOnce(&Canvas) ->
         let known = ICONS.lock().as_ref()?.files.contains_key(&key);
         if !known {
             // Read outside the lock: the file system may sleep.
-            let img = read(path).and_then(|d| qoi::decode(&d)).map(|img| if img.w == size && k == 1 { img } else { img.scaled_at(size, size, k) });
+            let img = read(path).and_then(|d| qoi::decode(&d).or_else(|| justweb::image::decode(&d))).map(|img| if img.w == size && k == 1 { img } else { img.scaled_at(size, size, k) });
             ICONS.lock().as_mut()?.files.insert(key.clone(), img);
         }
         let guard = ICONS.lock();

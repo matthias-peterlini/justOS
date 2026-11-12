@@ -215,7 +215,15 @@ static KINDS: IrqLock<Vec<&'static str>> = IrqLock::new(Vec::new());
 
 /// The icon of a program's windows (`program` as the process is named).
 pub fn icon_for(program: &str) -> String {
-    super::apps::package_icon(program)
+    if let Some(icon) = crate::store::icon(program) {
+        return icon;
+    }
+    // A Linux program has the icon of its .desktop file.
+    let file = alloc::format!("/{program}");
+    super::apps::linux_apps()
+        .into_iter()
+        .find(|e| matches!(&e.launch, super::apps::Launch::Spawn(p) if p.ends_with(&file)))
+        .map_or_else(|| String::from("window"), |e| e.icon)
 }
 
 pub fn intern(name: &str) -> &'static str {

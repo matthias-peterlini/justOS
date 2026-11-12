@@ -41,7 +41,7 @@ CARGO    ?= cargo
 QEMU     ?= qemu-system-x86_64
 MEMORY   ?= 512M
 # The disk image: the EFI partition holds two system slots of SLOT_SIZE.
-SIZE     ?= 256M
+SIZE     ?= 1G
 SLOT_SIZE ?= 24M
 # UEFI firmware for QEMU: code (read-only) and a template of its variables.
 OVMF_CODE ?= /usr/share/OVMF/OVMF_CODE_4M.fd
@@ -62,8 +62,9 @@ STORE    := $(notdir $(wildcard system/store/*))
 # (tools/linux/debroot.py): the dynamic loader and glibc (with its C.UTF-8
 # locale, in libc-bin), what programs with windows link to talk to the
 # Wayland compositor, and GTK 3 (with the SVG loader for its icons, and
-# its demo programs gtk3-widget-factory and gtk3-demo).
-LINUX_PKGS ?= dash libc6 libc-bin libwayland-client0 libxkbcommon0 libgtk-3-0t64 librsvg2-common gtk-3-examples
+# its demo programs gtk3-widget-factory and gtk3-demo), and Firefox, which
+# comes with the system (it is in the launcher, from its .desktop file).
+LINUX_PKGS ?= dash libc6 libc-bin libwayland-client0 libxkbcommon0 libgtk-3-0t64 librsvg2-common gtk-3-examples firefox-esr
 LINUX_DIST ?= trixie
 # Packages left out although others depend on them (comma-separated):
 # libraries the programs run without.

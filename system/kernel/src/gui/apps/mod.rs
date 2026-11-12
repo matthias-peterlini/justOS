@@ -126,6 +126,9 @@ pub fn app_name(kind: &str, title: &str) -> String {
 pub fn program_name(file: &str) -> String {
     let stem = file.rsplit('/').next().unwrap_or(file);
     let stem = stem.strip_suffix(".app").unwrap_or(stem);
+    if let Some(e) = linux_app_for(file) {
+        return e.name;
+    }
     match crate::store::installed(stem) {
         Some(info) => info.name,
         None => String::from(stem),
@@ -167,7 +170,88 @@ pub fn catalog() -> Vec<Entry> {
         let launch = if p.gui { Launch::Spawn(crate::store::program_path(&p)) } else { Launch::Run(p.open.clone()) };
         v.push(Entry { icon: package_icon(&p.id), name: p.name, launch });
     }
+    v.extend(linux_apps());
     v
+}
+
+/// Where Linux programs with a window describe themselves (one .desktop
+/// file each), and where their icons are, best size first.
+const LINUX_APPS: &str = "sys:/usr/share/applications";
+const LINUX_ICONS: [&str; 6] = [
+    "sys:/usr/share/icons/hicolor/128x128/apps",
+    "sys:/usr/share/icons/hicolor/256x256/apps",
+    "sys:/usr/share/icons/hicolor/64x64/apps",
+    "sys:/usr/share/icons/hicolor/48x48/apps",
+    "sys:/usr/share/icons/hicolor/32x32/apps",
+    "sys:/usr/share/pixmaps",
+];
+
+/// One .desktop file as a launcher entry: its name (the Italian one if it
+/// has one), its program and its icon. `None` for what is not an app to
+/// show (NoDisplay, a terminal program, a program that is not there).
+fn linux_app(text: &str) -> Option<Entry> {
+    let (mut name, mut name_it, mut exec, mut icon) = (None, None, None, None);
+    let mut main = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            main = line == "[Desktop Entry]";
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else { continue };
+        if !main {
+            continue;
+        }
+        let v = v.trim();
+        match k.trim() {
+            "Name" => name = Some(v),
+            "Name[it]" => name_it = Some(v),
+            "Exec" => exec = Some(v),
+            "Icon" => icon = Some(v),
+            "NoDisplay" | "Hidden" | "Terminal" if v == "true" => return None,
+            "Type" if v != "Application" => return None,
+            _ => {}
+        }
+    }
+    // The program, without its arguments ("firefox-esr %u").
+    let program = exec?.split_whitespace().next()?;
+    let path = if program.starts_with('/') { alloc::format!("sys:{program}") } else { alloc::format!("sys:/usr/bin/{program}") };
+    if !fs::abs(&path).is_ok_and(|p| fs::exists(&p)) {
+        return None;
+    }
+    let picture = icon.and_then(|icon| {
+        if icon.starts_with('/') {
+            return Some(alloc::format!("@sys:{icon}"));
+        }
+        LINUX_ICONS.iter().map(|d| alloc::format!("{d}/{icon}.png")).find(|f| fs::abs(f).is_ok_and(|p| fs::exists(&p))).map(|f| alloc::format!("@{f}"))
+    });
+    // "Firefox ESR" is Firefox to who uses it.
+    let name = name_it.or(name)?.trim_end_matches(" ESR");
+    Some(Entry { name: name.to_string(), icon: picture.unwrap_or_else(|| String::from("window")), launch: Launch::Spawn(path) })
+}
+
+/// The Linux programs with a window that are in the system (Firefox).
+pub fn linux_apps() -> Vec<Entry> {
+    let Ok(dir) = fs::abs(LINUX_APPS) else { return Vec::new() };
+    let mut v: Vec<Entry> = fs::list_dir(&dir)
+        .unwrap_or_default()
+        .iter()
+        .filter(|(e, _)| e.name.ends_with(".desktop"))
+        .filter_map(|(e, _)| fs::abs(&alloc::format!("{LINUX_APPS}/{}", e.name)).ok())
+        .filter_map(|p| fs::read_file(&p).ok())
+        .filter_map(|d| linux_app(&String::from_utf8_lossy(&d)))
+        .collect();
+    v.sort_by(|a, b| a.name.cmp(&b.name));
+    v
+}
+
+/// The name and icon a Linux program goes by on the desktop, from its
+/// .desktop file.
+pub fn linux_app_for(path: &str) -> Option<Entry> {
+    if !path.starts_with("sys:/usr/") {
+        return None;
+    }
+    linux_apps().into_iter().find(|e| matches!(&e.launch, Launch::Spawn(p) if p == path))
 }
 
 /// How a file opens.

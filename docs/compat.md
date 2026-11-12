@@ -127,10 +127,16 @@ blu di Adwaita.
 
 ### Firefox
 
-Anche **Firefox ESR** di Debian gira, con i suoi processi figli e le pagine
-web dalla rete: basta aggiungere `firefox-esr` a `LINUX_PKGS` (e un'immagine
-più grande, `SIZE=1G`). Sotto emulazione, senza accelerazione, la prima
+**Firefox ESR** di Debian è nel sistema (`firefox-esr` in `LINUX_PKGS`;
+per questo l'immagine è di 1 GiB) e gira con i suoi processi figli e le
+pagine web dalla rete. Sotto emulazione, senza accelerazione, la prima
 finestra arriva dopo una quarantina di secondi.
+
+I programmi Linux con una finestra compaiono tra le applicazioni (e nella
+ricerca) da soli: il launcher legge i file `.desktop` di
+`sys:/usr/share/applications` (nome, anche in italiano, programma, icona;
+quelli con `NoDisplay` o `Terminal` restano fuori) e prende l'icona PNG dal
+tema `hicolor`. La stessa icona va nel dock mentre il programma è aperto.
 
 ## Programmi Windows
 
