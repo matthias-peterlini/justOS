@@ -1352,7 +1352,14 @@ impl Desktop {
         let name = apps::program_name(path);
         let home = fs::abs("sys:/home").unwrap_or_else(|_| Path::root("sys"));
         match fs::abs(path).map_err(|_| justdk::syscall::Error::NotFound).and_then(|p| crate::user::spawn(&p, "", home)) {
-            Ok(_) => self.bounce = Some((format!("@{path}"), Anim::new(900))),
+            Ok(_) => {
+                self.bounce = Some((format!("@{path}"), Anim::new(900)));
+                // A big Linux program (Firefox) takes a while to show its
+                // window: say that it is on its way.
+                if let Some(e) = apps::linux_app_for(path) {
+                    self.notify(l, e.name, String::from("Si sta avviando: la finestra arriva tra poco."), e.icon);
+                }
+            }
             Err(e) => self.notify(l, name, format!("Non si è potuto avviare: {}", e.as_str()), String::from("window")),
         }
     }
