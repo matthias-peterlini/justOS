@@ -45,9 +45,15 @@ acpi eval \_SB.BAT0.SETC 1000 0
 echo still-on
 EOT
 
-# Presses the power button through QMP after $2 seconds.
+# Presses the power button through QMP, $2 seconds after QEMU has started
+# (the machine starts only once test.sh has copied the image, which can
+# take seconds on a slow disk).
 cat > "$WORK/press.py" <<'EOT'
-import json, socket, sys, time
+import json, os, socket, sys, time
+for _ in range(600):
+    if os.path.exists(sys.argv[1]):
+        break
+    time.sleep(0.1)
 time.sleep(float(sys.argv[2]))
 s = socket.socket(socket.AF_UNIX)
 s.connect(sys.argv[1])
