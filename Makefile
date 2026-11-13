@@ -39,7 +39,7 @@
 PROFILE  ?= release
 CARGO    ?= cargo
 QEMU     ?= qemu-system-x86_64
-MEMORY   ?= 512M
+MEMORY   ?= 1G
 # The disk image: the EFI partition holds two system slots of SLOT_SIZE.
 SIZE     ?= 1G
 SLOT_SIZE ?= 24M
