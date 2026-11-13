@@ -18,36 +18,42 @@ dettagli solo sulla porta seriale.
    home (Documenti, Scaricati, Immagini, Musica, Video, Scrivania, Progetti).
 3. **Avvii successivi**: dopo lo splash compare direttamente la scrivania.
 
-Le scelte sono in `sys:/system/settings`; *Impostazioni → Rifai la
-configurazione iniziale* la ripropone al prossimo avvio. Il CD live non
+Le scelte sono in `sys:/system/settings`; *Impostazioni → Generale →
+Configurazione iniziale* la ripropone al prossimo avvio. Il CD live non
 conserva nulla, quindi mostra la configurazione ogni volta.
 
 ## La scrivania
 
 Presa a modello da macOS:
 
-- **Niente barra in alto**: l'ora e la data fluttuano al centro, in
-  bianco o in nero secondo lo sfondo. Un clic apre il **centro notifiche**
-  con il calendario del mese e le notifiche ricevute.
-- **Dock**: a sinistra il marchio **J▮**, che apre il menu di sistema
+- **Niente barra in alto**: l'ora e la data fluttuano al centro, con le
+  cifre in pixel morbidi (bianche o nere secondo lo sfondo, con una
+  piccola ombra). Un clic apre il **centro notifiche** con il calendario
+  del mese e le notifiche ricevute.
+- **Dock**: un unico pannello opaco del tema. A sinistra il marchio **J▮**
+  su un riquadro scuro, che apre il menu di sistema
   (*Info su justOS*, *Impostazioni di sistema*, *Negozio*, *Monitor
   attività*, *Desktop e finestre*, *Schermata*, *Blocca schermo*,
   *Sospendi* quando il computer può, *Riavvia*, *Spegni*). Poi File,
   Applicazioni, Editor di testo, Note, Calendario, Foto, Musica,
   Calcolatrice, Negozio, Impostazioni e, dopo un separatore, le app aperte
   che non ci sono già e il Cestino. Le icone **si ingrandiscono** sotto il
-  puntatore, quella di un'app che parte **rimbalza**, un puntino segna le
-  app aperte; un clic su un'app aperta la porta davanti (o la riapre se è
+  puntatore, quella di un'app che parte **rimbalza**, un quadratino arancione
+  segna le app aperte; un clic su un'app aperta la porta davanti (o la riapre se è
   ridotta). Con molte app aperte le icone si rimpiccioliscono perché il
   dock stia nello schermo.
-- **Stato e centro di controllo**: a destra nel dock la rete, il suono e,
-  sui portatili, un anello verde con la carica della batteria (rosso
-  quando è quasi scarica, con il fulmine quando è in carica). Un clic apre
-  il **centro di controllo**, mentre lo sfondo si scurisce verso il basso:
-  il nome di chi usa il computer e l'ingranaggio delle impostazioni, i
-  riquadri *Rete* (blu quando è collegata), *Suono* e *Non disturbare*,
-  due cursori verticali per volume e luminosità, *Spegni*, *Blocca*,
-  *Riavvia* e, sui portatili, la carica in percentuale.
+- **Stato e centro di controllo**: a destra nel dock, in un incavo, i
+  simboli in pixel morbidi della rete (spento se non è collegata), del
+  suono e, sui portatili, della batteria (colorata secondo la carica). Un
+  clic apre il **centro di controllo**, un pannello sopra il dock fatto di
+  schede: il nome di chi usa il computer su un disco arancione, con la
+  carica (o *Alimentatore*) e un riquadro con l'ingranaggio delle
+  impostazioni; i riquadri *Rete* (blu quando è collegata), *Bluetooth*
+  e *Non disturbare* (viola, con un interruttore); due barre a celle
+  orizzontali per luminosità e volume (l'altoparlante a sinistra spegne e
+  riaccende il suono); i pulsanti *Blocca*, *Riavvia* e *Spegni*
+  (arancione). Le misure sono quelle di un disegno per 1024×768,
+  rimpicciolite fino al 60% sugli schermi più piccoli.
 - **Widget** (tasto destro → *Mostra i widget*): saluto, calendario del
   mese, stato del sistema.
 - **Applicazioni** (come Launchpad, dal dock o con Ctrl+Spazio): tutte le app,
@@ -62,9 +68,10 @@ Presa a modello da macOS:
   o con un clic.
 - **Tasto destro** sulla scrivania: cambiare sfondo, mostrare o
   nascondere i widget, impostazioni dello schermo, informazioni.
-- **Finestre**: vetro rosato con il nome dell'app in alto a sinistra e, su
-  una pillola chiara a destra, i pulsanti riduci, schermo intero e chiudi
-  (arancione); il contenuto sta su pannelli scuri. Si spostano trascinando
+- **Finestre**: un pannello opaco del tema (scuro o chiaro) con il nome
+  dell'app in alto a sinistra e, in alto a destra, tre riquadri con un
+  simbolo in pixel morbidi: riduci e schermo intero grigi, chiudi
+  arancione; il contenuto sta su un incavo. Si spostano trascinando
   la riga del titolo (doppio clic per lo schermo intero), molte si
   ridimensionano dall'angolo in basso a destra. A schermo intero (anche
   **F11**) la finestra prende tutto lo schermo, l'ora passa nella sua riga
@@ -73,7 +80,8 @@ Presa a modello da macOS:
   primo piano.
 - **Snap**, come in Windows: una finestra trascinata sul bordo sinistro o
   destro occupa quella metà dello schermo, in un angolo un quarto, sul bordo
-  in alto tutto lo schermo; mentre si trascina un vetro mostra dove andrà.
+  in alto tutto lo schermo; mentre si trascina un riquadro chiaro mostra
+  dove andrà.
   Da tastiera (finestre ridimensionabili) **Ctrl+Alt+←/→** per le metà,
   **Ctrl+Alt+U/I/J/K** per i quarti, **Ctrl+Alt+↑** ingrandisce e
   **Ctrl+Alt+↓** ripristina. Trascinata via, la finestra torna alla sua
@@ -102,7 +110,7 @@ Presa a modello da macOS:
   che Foto apre subito.
 - **Blocco**: **logo+L** o *Blocca schermo* nel menu J▮ coprono tutto
   con l'ora sullo sfondo sfocato. Con una password (*Impostazioni →
-  Password*) justOS si avvia bloccato, si blocca da solo dopo 2, 5 o 15
+  Blocco e password*) justOS si avvia bloccato, si blocca da solo dopo 2, 5 o 15
   minuti senza usarlo e prima di ogni sospensione, così al risveglio chiede
   la password; senza password basta Invio. La password non è salvata
   in chiaro: nelle impostazioni c'è un sale casuale e 20 000 passaggi di
@@ -117,6 +125,102 @@ Presa a modello da macOS:
   solo alla precedente e lo dice. Una release su GitHub che l'indice non ha
   ancora è solo annunciata.
 
+### Lo stile a pixel morbidi
+
+Finestre, dock, menu, notifiche e centro di controllo non sono più di vetro:
+sono superfici **opache**, senza sfocatura dello sfondo né contorni scuri.
+
+- **Superfici** (`ui::panel`): una sfumatura dall'alto al basso
+  (`panel_top` → `panel_bottom`), una linea sottile tutt'intorno e un
+  riflesso chiaro lungo il bordo superiore (`Canvas::sheen_round`); sotto,
+  un'ombra morbida (`ui::drop_shadow`). Il raggio è 26 per finestre,
+  centro di controllo e centro notifiche, 28 per il dock, 18 per gli incavi e le
+  schede (`ui::well_pane`: il colore `well` con una linea sottile).
+- **Riquadri** (`ui::tile`): i quadratini che reggono un simbolo (i tre
+  pulsanti della finestra, l'ingranaggio, le icone delle sezioni, i
+  riquadri del centro di controllo). Hanno il raggio pari a un quarto del
+  lato, una sfumatura verticale, il riflesso in alto e una piccola ombra.
+  Quello arancione è `ui::ORANGE_GRAD`; il grigio, `ui::knob_grad()`.
+- **Simboli a pixel morbidi**: ogni simbolo è poche righe di testo (`#` è
+  una cella piena, `.` vuota, qualsiasi altro carattere una cella con un
+  colore a parte), disegnato da `Canvas::soft_grid` tramite
+  `ui::soft_pixels_at`, `soft_pixels_in` (centrato in un rettangolo) o
+  `soft_pixels_keyed`. La regola degli angoli: un angolo **in fuori** si
+  arrotonda di mezza cella; dove due celle piene si incontrano intorno a
+  una vuota, l'angolo **in dentro** si raccorda con una curva di 0,38
+  celle. La cella si dà in millesimi di unità, così lo stesso simbolo vale
+  a ogni scala; l'angolo in alto a sinistra si allinea a un pixel intero,
+  quindi celle di un numero intero di pixel escono nitide. Sono fatti così
+  i simboli del dock e del centro di controllo, quelli dei pulsanti della
+  finestra e delle sezioni delle Impostazioni.
+- **Cursori a celle** (`ui::cell_bar`, `ui::slider`): una fila di 16 celle
+  arrotondate che si riempiono da sinistra; piene in arancione (volume,
+  accento) o nel colore del testo (luminosità).
+- **Orologio**: le cifre sono pixel morbidi di 3×5 celle (`DIGITS` in
+  `desktop.rs`, cella da 10 unità), con la data sotto nel carattere
+  normale. Il colore è bianco o nero secondo la luminosità dello sfondo
+  sotto l'orologio, con un'ombra leggera fatta ridisegnando le cifre un
+  po' più in basso.
+
+### Il tema scuro e chiaro
+
+Ci sono due tavolozze, scura e chiara (`ui::DARK` e `ui::LIGHT`), e si
+sceglie in *Impostazioni → Aspetto → Tema*. La scelta è nelle impostazioni
+come `theme=dark` o `theme=light` (`settings.rs` la legge all'avvio e la
+scrive a ogni salvataggio) e `ui::set_theme` la rende attiva; senza
+scelta il tema è scuro.
+
+I colori **non sono costanti**: si leggono con le funzioni di `ui`, che
+guardano la tavolozza del tema in uso: `ui::text()`, `text_dim()`,
+`text_faint()`, `well()`, `pane()`, `line()`, `sheen()`, `sel()`,
+`hover()`, `cell()`, `panel_top()`, `panel_bottom()`, `knob_grad()`,
+`knob_glyph()` e `shadow_strength()` per le ombre (più deboli nel chiaro).
+Il tema attivo si legge con `ui::theme()`. Cambiando tema, Impostazioni
+restituisce `Action::RedrawAll` e la scrivania ridisegna tutto lo schermo.
+
+Come sceglie i colori un'app:
+
+- testo, linee, selezioni, passaggio del puntatore e campi vanno sempre
+  presi da queste funzioni, mai scritti come bianco o nero con
+  trasparenza, perché nell'altro tema non si leggerebbero;
+- vanno bene colori fissi solo per ciò che è uguale in entrambi i temi:
+  l'arancione (`ui::ORANGE`, `ORANGE_GRAD`), il rosso e il verde di stato,
+  i riquadri colorati, le immagini dell'app. Se un colore deve essere più
+  scuro nel tema chiaro (il rosso dei festivi in Calendario, i colori
+  della sintassi in JustStudio) l'app guarda `ui::theme()` e ne ha due;
+- i componenti comuni (`ui::button`, `toggle`, `slider`, `segmented`,
+  `search_field`, `text_field`) e le superfici (`panel`, `well_pane`,
+  `tile`) seguono già il tema.
+
+### Le Impostazioni
+
+A sinistra una barra con la ricerca e sette sezioni, ognuna con il suo
+riquadro colorato e un simbolo: *Generale*, *Aspetto*, *Schermo*, *Suono*,
+*Tastiera*, *Blocco e password*, *Privacy*. A destra le **schede**
+(`Card`) della sezione, ognuna con più **righe** (`Row`): un'etichetta, una
+riga di spiegazione facoltativa e un controllo (`Ctl`) a destra, oppure
+sotto per quelli larghi (sfondi, risoluzioni). Il tema si sceglie da due
+anteprime disegnate, scuro e chiaro. Le frecce su e giù cambiano sezione,
+Pag su e Pag giù scorrono.
+
+La **ricerca** si apre scrivendo (Esc la chiude): ignora maiuscole e
+accenti (`fold`), cerca nelle etichette delle righe e nei nomi delle
+sezioni e mostra i risultati raggruppati per sezione. Le frecce scelgono un
+risultato; Invio o un clic aprono la sezione e accendono per un momento la
+riga trovata.
+
+Per **aggiungere una riga** si modifica `Prefs::cards` in
+`system/kernel/src/gui/apps/prefs.rs`: nella sezione giusta si aggiunge
+`row("Etichetta", "Spiegazione", Ctl::…)` a una scheda (o una nuova
+`card(vec![...])`). Va bene un controllo che già c'è (`Ctl::Info` per un
+valore, `Ctl::Text` per una riga di testo, `Ctl::Themes`, `Ctl::Layout`…).
+La ricerca la trova da sola, perché cerca nelle righe di `cards`. Un
+controllo nuovo vuole una variante di `Ctl` e il suo disegno in
+`draw_ctl`, la misura in `ctl_size`, le zone cliccabili in `parts` e
+l'azione in `act`. Se cambia qualcosa dei colori, `act` restituisce
+`Action::RedrawAll`. Una sezione nuova si aggiunge a `Section` e a
+`SECTIONS` con nome, sfumatura e simbolo.
+
 ### Le animazioni
 
 Tutto ciò che si muove segue il tempo, non i fotogrammi: su un computer lento
@@ -130,7 +234,7 @@ si vedono meno fotogrammi ma l'animazione dura uguale.
 | ingrandisci / ripristina | la finestra si allarga fino allo schermo e torna |
 | Applicazioni | lo sfondo si sfoca e scurisce, le icone arrivano con uno zoom |
 | dock | ingrandimento morbido delle icone, rimbalzo all'avvio di un'app |
-| menu e centro di controllo | si aprono in un attimo, dal dock verso l'alto; con il centro di controllo lo sfondo si scurisce |
+| menu e centro di controllo | si aprono in un attimo, dal dock verso l'alto |
 | notifiche | scivolano dentro da destra e poi via |
 | vista d'insieme | le finestre scivolano dal loro posto alla griglia, i desktop scendono dall'alto |
 | cambio di desktop | il nome del desktop e i suoi pallini al centro, per un attimo |
@@ -157,7 +261,7 @@ si ridisegna a ogni fotogramma.
 | Musica | i file WAV di `Musica` e i suoni di sistema: riproduzione, pausa, brano precedente e successivo, barra di avanzamento, volume; tre brani di esempio |
 | Anteprima | un'immagine sola, aperta da File |
 | Negozio | le app di `sys:/store` per categoria, con la loro pagina; installa, apre, rimuove |
-| Impostazioni | nome, tastiera, sfondo, risoluzione dello schermo, volume e suono all'avvio, configurazione iniziale |
+| Impostazioni | sette sezioni con ricerca: nome e configurazione iniziale, tema e sfondo, risoluzione e dimensione dello schermo, volume e suono all'avvio, tastiera, password e blocco, permessi delle app (vedi [Le Impostazioni](#le-impostazioni)) |
 | Monitor attività | i programmi in esecuzione, il processore e la memoria nell'ultimo minuto; un programma si può terminare |
 | Info sistema | panoramica, dispositivi con i loro driver, dischi con lo spazio libero |
 | Terminale | la shell di justOS: l'unico posto dove si vedono le righe di comando |
@@ -249,12 +353,12 @@ esterne.
 
 | File | Contenuto |
 |---|---|
-| `justgfx` (`gfx.rs`, `font.rs`, `qoi.rs`) | superfici e disegno: rettangoli arrotondati antialiasati, trasparenze (anche su livelli trasparenti), sfumature, ombre, sfocatura, linee, archi, ridimensionamento; il testo dall'atlante dei glifi; le immagini QOI (lettura e scrittura). Solo aritmetica intera |
+| `justgfx` (`gfx.rs`, `font.rs`, `qoi.rs`) | superfici e disegno: rettangoli arrotondati antialiasati, il riflesso sul bordo (`sheen_round`), i pixel morbidi (`soft_grid`), trasparenze (anche su livelli trasparenti), sfumature, ombre, sfocatura, linee, archi, ridimensionamento; il testo dall'atlante dei glifi; le immagini QOI (lettura e scrittura). Solo aritmetica intera |
 | `text.rs`, `res.rs` | i caratteri e le icone di sistema, gli sfondi |
 | `splash.rs`, `setup.rs`, `desktop.rs` | avvio, configurazione guidata, scrivania con dock, Applicazioni, notifiche, centro di controllo e animazioni |
 | `wm.rs` | le finestre e l'interfaccia `App` delle app |
 | `window.rs` | le finestre dei programmi in modalità utente |
-| `ui.rs` | componenti comuni (pulsanti, cursori, interruttori, schede), animazioni (`Anim`, curve di accelerazione), appunti, il ciclo degli eventi |
+| `ui.rs` | il tema e le sue tavolozze, superfici (pannelli, incavi, riquadri), pixel morbidi, componenti comuni (pulsanti, cursori a celle, interruttori, schede), animazioni (`Anim`, curve di accelerazione), appunti, il ciclo degli eventi |
 | `textarea.rs` | il testo su più righe di Editor, Note |
 | `apps/` | le app di sistema |
 
@@ -263,8 +367,8 @@ parte che cambia. Un'app può dire quale parte del suo contenuto è cambiata
 (`App::changed`): il cursore che lampeggia nel Terminale o nell'Editor
 ridisegna una cella, non la finestra, e l'output del Terminale solo le
 righe nuove. Il puntatore è disegnato direttamente sullo schermo, così
-muoverlo non ridisegna nulla. I pannelli "vetro smerigliato" mostrano una
-copia sfocata dello sfondo calcolata una volta sola. I clic del mouse vengono
+muoverlo non ridisegna nulla. Una copia sfocata dello sfondo, calcolata una
+volta sola, serve dietro Applicazioni, la vista d'insieme e il blocco. I clic del mouse vengono
 messi in coda dal driver, così un clic rapido non si perde anche se la
 scrivania sta disegnando un'animazione.
 

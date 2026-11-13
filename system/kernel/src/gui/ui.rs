@@ -422,7 +422,7 @@ pub fn window_knobs(c: &mut Canvas, buttons: &[Rect; 3], hover: Option<usize>) {
 
 /// The area a panel's shadow reaches.
 pub fn with_shadow(r: Rect) -> Rect {
-    r.grow(20).offset(0, 6)
+    r.grow(24).offset(0, 7)
 }
 
 /// A label in small spaced capitals ("OGGI", "CERCA NEL WEB").

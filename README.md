@@ -63,7 +63,7 @@ disco o come CD live.
 
 **Pulito e veloce**
 
-Niente barra in alto: un dock di vetro chiaro, finestre rosate, animazioni
+Niente barra in alto: un dock e finestre a pixel morbidi, tema scuro o chiaro, animazioni
 morbide e l'interfaccia a 2× sugli schermi ad alta densità.
 
 </td>
