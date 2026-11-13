@@ -488,11 +488,16 @@ struct Starting {
     hop: u64,
     /// How high the icon was drawn last.
     lift: i32,
+    /// It may take minutes ([`SLOW_START_TIMEOUT_MS`]).
+    slow: bool,
+    /// What to say if it ends without a window (None: the usual words).
+    fail: Option<String>,
 }
 
 /// How long a program may take to show its first window before its icon
-/// leaves the dock.
+/// leaves the dock; one that says it is slow (Wine making its C: drive).
 const START_TIMEOUT_MS: u64 = 120_000;
+const SLOW_START_TIMEOUT_MS: u64 = 420_000;
 /// A starting program's icon: one hop, the rest after it, and how high.
 const HOP_MS: u64 = 620;
 const HOP_REST_MS: u64 = 480;
@@ -1329,12 +1334,13 @@ impl Desktop {
         }
     }
 
-    /// Types a command line into the terminal (opening it if needed).
+    /// Types a command line into the terminal (opening it if needed); a
+    /// line break in `cmd` ends a line there too.
     fn run(&mut self, l: &mut Looper, cmd: &str) {
         self.open_id(l, "terminal");
         let plain = |key| KeyEvent { key, ctrl: false, alt: false, shift: false };
         for ch in cmd.chars() {
-            input::inject(plain(Key::Char(ch)));
+            input::inject(plain(if ch == '\n' { Key::Enter } else { Key::Char(ch) }));
         }
         input::inject(plain(Key::Enter));
     }
@@ -1426,7 +1432,9 @@ impl Desktop {
                 self.open(l, app, false);
             }
             apps::Opener::Spawn(p) => self.spawn(l, &p),
+            apps::Opener::Start(s) => self.start(l, s),
             apps::Opener::Run(cmd) => self.run(l, &cmd),
+            apps::Opener::Tell(title, text, icon) => self.notify(l, title, text, icon),
             apps::Opener::Install(file) => {
                 let name = String::from(file.rsplit('/').next().unwrap_or(&file));
                 self.notify(l, name, String::from("Installazione in corso…"), String::from("store"));
@@ -1450,52 +1458,74 @@ impl Desktop {
 
     /// Starts a program that opens a window of its own.
     fn spawn(&mut self, l: &mut Looper, path: &str) {
-        // Still starting: no second copy, its icon just hops again.
-        if let Some(s) = self.starting.iter_mut().find(|s| s.path == path) {
-            s.hop = time::uptime_ms();
-            l.damage(self.starting_zone());
+        if !self.hop_again(l, path) {
+            self.start(l, apps::start_for(path));
+        }
+    }
+
+    /// A program still starting from `key`: its icon hops again (no second
+    /// copy). Whether there was one.
+    fn hop_again(&mut self, l: &mut Looper, key: &str) -> bool {
+        let Some(s) = self.starting.iter_mut().find(|s| s.path == key) else { return false };
+        s.hop = time::uptime_ms();
+        l.damage(self.starting_zone());
+        true
+    }
+
+    /// Starts a program with its arguments in its folder: its icon waits in
+    /// the dock until its first window comes. A text program is typed into
+    /// the terminal instead, after a `cd` to its folder.
+    fn start(&mut self, l: &mut Looper, s: apps::Start) {
+        if self.hop_again(l, &s.key) {
             return;
         }
-        let name = apps::program_name(path);
-        let home = fs::abs("sys:/home").unwrap_or_else(|_| Path::root("sys"));
-        match fs::abs(path).map_err(|_| justdk::syscall::Error::NotFound).and_then(|p| crate::user::spawn(&p, "", home)) {
+        let note_icon = s.icon.clone().unwrap_or_else(|| String::from(if s.terminal { "terminal" } else { "window" }));
+        if s.terminal {
+            if let Some(note) = s.note {
+                self.notify(l, s.name, note, note_icon);
+            }
+            let dir = if s.cwd.contains(char::is_whitespace) { format!("\"{}\"", s.cwd) } else { s.cwd };
+            self.run(l, &format!("cd {dir}\n{} {}", s.program, s.args));
+            return;
+        }
+        let cwd = fs::abs(&s.cwd).unwrap_or_else(|_| Path::root("sys"));
+        match fs::abs(&s.program).map_err(|_| justdk::syscall::Error::NotFound).and_then(|p| crate::user::spawn(&p, &s.args, cwd)) {
             Ok(pid) => {
-                // A big Linux program (Firefox) takes a while to show its
-                // window: say that it is on its way.
-                let linux = apps::linux_app_for(path);
-                if let Some(e) = &linux {
-                    self.notify(l, e.name.clone(), String::from("Si sta avviando: la finestra arriva tra poco."), e.icon.clone());
+                if let Some(note) = s.note {
+                    self.notify(l, s.name.clone(), note, note_icon);
                 }
-                // The icon its windows will have (and so their kind, see
-                // `window::icon_for` and `window::create`), when known.
-                let icon = match linux {
-                    Some(e) => Some(e.icon),
-                    None if path.to_ascii_lowercase().ends_with(".app") => {
-                        let file = path.rsplit('/').next().unwrap_or(path);
-                        Some(apps::package_icon(&file[..file.len() - 4]))
-                    }
-                    None => None,
-                };
-                match icon {
+                match s.icon {
                     // Its icon waits in the dock, hopping, until its first
                     // window comes. One already open just hops once.
                     Some(icon) if !self.windows.iter().any(|w| w.app.kind() == icon) => {
                         let now = time::uptime_ms();
                         l.damage(self.dock_zone());
-                        self.starting.push(Starting { path: String::from(path), kind: icon.clone(), icon, label: name, pid, since: now, hop: now, lift: 0 });
+                        self.starting.push(Starting {
+                            path: s.key,
+                            kind: icon.clone(),
+                            icon,
+                            label: s.name,
+                            pid,
+                            since: now,
+                            hop: now,
+                            lift: 0,
+                            slow: s.slow,
+                            fail: s.fail,
+                        });
                         l.damage(self.dock_zone());
                     }
                     Some(icon) => self.bounce_icon(&icon),
-                    None => self.bounce = Some((format!("@{path}"), Anim::new(900))),
+                    None => self.bounce = Some((format!("@{}", s.key), Anim::new(900))),
                 }
             }
-            Err(e) => self.notify(l, name, format!("Non si è potuto avviare: {}", e.as_str()), String::from("window")),
+            Err(e) => self.notify(l, s.name, format!("Non si è potuto avviare: {}", e.as_str()), String::from("window")),
         }
     }
 
     /// Programs starting: the icon of one goes when it ended without a
-    /// window (saying so) or after [`START_TIMEOUT_MS`]; [`Desktop::open`]
-    /// takes it when its window comes.
+    /// window (saying so) or after [`START_TIMEOUT_MS`] (a slow one
+    /// [`SLOW_START_TIMEOUT_MS`]); [`Desktop::open`] takes it when its
+    /// window comes.
     fn check_starting(&mut self, l: &mut Looper) {
         if self.starting.is_empty() {
             return;
@@ -1508,7 +1538,8 @@ impl Desktop {
             .enumerate()
             .filter_map(|(i, s)| {
                 let gone = !crate::user::is_running(s.pid);
-                (gone || now.saturating_sub(s.since) >= START_TIMEOUT_MS).then_some((i, gone))
+                let timeout = if s.slow { SLOW_START_TIMEOUT_MS } else { START_TIMEOUT_MS };
+                (gone || now.saturating_sub(s.since) >= timeout).then_some((i, gone))
             })
             .collect();
         if ended.is_empty() {
@@ -1518,7 +1549,8 @@ impl Desktop {
         for &(i, gone) in ended.iter().rev() {
             let s = self.starting.remove(i);
             if gone {
-                self.notify(l, s.label, String::from("Non si è avviato."), s.icon);
+                let text = s.fail.unwrap_or_else(|| String::from("Non si è avviato."));
+                self.notify(l, s.label, text, s.icon);
             }
         }
         l.damage(self.dock_zone());
@@ -1530,7 +1562,8 @@ impl Desktop {
             Launch::Spawn(path) => self.spawn(l, &path),
             Launch::Run(cmd) => self.run(l, &cmd),
             Launch::File(path) => {
-                if fs::abs(&path).is_ok_and(|p| fs::is_dir(&p)) {
+                // A macOS app is a folder: it says it cannot run.
+                if fs::abs(&path).is_ok_and(|p| fs::is_dir(&p)) && !apps::mac_bundle(&path) {
                     self.open(l, Box::new(apps::Files::new(&path)), false);
                 } else {
                     self.open_file(l, &path);

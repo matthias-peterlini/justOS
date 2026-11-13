@@ -466,6 +466,15 @@ fn dir_join(dir: &Path, rel: &str) -> Path {
 }
 
 fn open_path(path: &Path, text: &str, flags: u32, mode: u32) -> i64 {
+    // /proc/<pid>/exe opens the program file itself (an AppImage reads the
+    // image appended to its program this way).
+    if let Some((pid, "exe")) = proc_of(text.trim_end_matches('/')) {
+        let Some(exe) = super::with_state_of(pid, |st| st.exe.clone()).filter(|e| !e.is_empty()) else { return -err::ENOENT };
+        return match linux_path(&exe) {
+            Ok(p) => open_path(&p, &exe, flags, mode),
+            Err(e) => e,
+        };
+    }
     let cloexec = flags & O_CLOEXEC != 0;
     let keep = flags & (O_NONBLOCK | O_APPEND | 3);
     if let Some(kind) = virtual_file(text) {

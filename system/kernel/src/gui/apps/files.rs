@@ -426,7 +426,8 @@ impl Files {
     fn open_item(&mut self, i: usize) -> Action {
         let item = &self.items[i];
         let path = self.dir.join(&item.name);
-        if item.dir {
+        // A macOS app is a folder too: opening it says it cannot run.
+        if item.dir && !super::mac_bundle(&format!("{path}")) {
             self.go(path);
             return Action::Redraw;
         }
