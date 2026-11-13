@@ -28,8 +28,8 @@ Mancano ancora Wi-Fi, Bluetooth e l'accelerazione grafica: sulle schede video ve
 
 | File | Cosa farne |
 |---|---|
-| `justos.iso` | **CD live**: si avvia in una macchina virtuale (VirtualBox, VMware, QEMU, Hyper-V di prima generazione) o da un CD, con BIOS o UEFI, senza disco rigido. Il sistema gira in memoria: le modifiche si perdono allo spegnimento. |
-| `justos-img.zip` | **Immagine di disco** (256 MiB, BIOS e UEFI): scompattata, si scrive su una chiavetta USB (balenaEtcher, Rufus in modalità DD, `dd`) per avviare un PC vero, con le modifiche che restano. Secure Boot va disattivato. |
+| `justos.iso` | **CD live**: si avvia in una macchina virtuale (VirtualBox, VMware, QEMU, Hyper-V di prima generazione) o da un CD, con BIOS o UEFI, senza disco rigido. Il sistema gira in memoria: le modifiche si perdono allo spegnimento. Non ha Firefox né Wine. |
+| `justos-img.zip` | **Immagine di disco** (circa 570 MiB; scompattata 5 GiB, BIOS e UEFI), con Firefox e **Wine** per i programmi Windows (doppio clic su un `.exe`): si scrive su una chiavetta USB da almeno 8 GB (balenaEtcher, Rufus in modalità DD, `dd`) per avviare un PC vero, con le modifiche che restano, o si usa come disco di una macchina virtuale. Secure Boot va disattivato. |
 | `SHA256SUMS` | le impronte dei due file |
 
 ## Provarlo

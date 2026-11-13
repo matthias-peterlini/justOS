@@ -1,5 +1,5 @@
 # Builds and tests justOS on every push and pull request; the live CD and the
-# disk image are kept as the run's artifacts for a week.
+# disk image (compressed with xz) are kept as the run's artifacts for a week.
 name: Build
 
 on:
@@ -27,6 +27,18 @@ jobs:
 
       - name: Build
         run: make image iso
+
+      # The disk image has Wine and room for the C: drive it makes at its
+      # first start: 5 GiB, of which about 1.8 GiB are data; xz makes it
+      # about 325 MiB. The tests build and boot an image without Wine
+      # (build/justos-test.img), so the trees with Wine go, to keep the
+      # runner's disk free.
+      - name: Compress the image
+        run: |
+          xz -T0 -6 build/justos.img
+          rm -rf build/winelinux build/wineroot
+          ls -l build/justos.img.xz
+          df -h .
 
       - name: Test in QEMU
         run: |
@@ -56,5 +68,5 @@ jobs:
           name: justos
           path: |
             build/justos.iso
-            build/justos.img
+            build/justos.img.xz
           retention-days: 7

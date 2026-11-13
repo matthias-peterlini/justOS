@@ -27,14 +27,16 @@ condivise con `mmap`.
 Il caricatore, la glibc e le altre librerie vengono dai **pacchetti di
 Debian**, non sono ricompilati: `tools/linux/debroot.py` scarica i pacchetti
 indicati (controllando le somme SHA-256 dell'archivio), segue le loro
-dipendenze e li scompatta in `build/linux`. L'immagine li porta nel volume di
+dipendenze e li scompatta in `build/winelinux` (con Wine) o in `build/linux`
+(senza, `make WINE=0` e i test). L'immagine li porta nel volume di
 sistema con la disposizione di Debian: tutto in `/usr`, con `/bin`, `/sbin`,
 `/lib` e `/lib64` come collegamenti simbolici dentro `/usr` (JustFS ha i
 collegamenti simbolici). L'app File non mostra queste cartelle. Quali
 pacchetti, lo dice `LINUX_PKGS` nel `Makefile` (per ora `libc6`, la glibc
 2.41 di Debian 13 con la sua localizzazione C.UTF-8, `libwayland-client0`
-con `libxkbcommon0` per i programmi con finestre, e GTK 3); `make
-linux-root` rifà l'albero. Il CD live non le porta: il suo volume di
+con `libxkbcommon0` per i programmi con finestre, GTK 3 e Firefox), più
+`WINE_PKGS` (Wine) se non c'è `WINE=0`; `make linux-root` rifà l'albero. Il
+CD live non le porta: il suo volume di
 sistema viene letto in memoria all'avvio, e l'albero di Debian è più
 grande di tutto il resto.
 
@@ -128,7 +130,7 @@ blu di Adwaita.
 ### Firefox
 
 **Firefox ESR** di Debian è nel sistema (`firefox-esr` in `LINUX_PKGS`;
-per questo l'immagine è di 1 GiB) e gira con i suoi processi figli e le
+per questo anche l'immagine senza Wine è di 1 GiB) e gira con i suoi processi figli e le
 pagine web dalla rete. Sotto emulazione, senza accelerazione, la prima
 finestra arriva dopo una quarantina di secondi.
 
@@ -173,9 +175,10 @@ e con finestre:
 | disegno (`gdi32`) | penne, pennelli e caratteri, rettangoli, ellissi, linee, poligoni, testo e `DrawText`, DC in memoria con `BitBlt` |
 
 Un `.exe` con finestre (sottosistema GUI) si apre con un doppio clic senza
-Terminale: le sue finestre sono finestre di justOS. Nell'immagine con Wine il
-doppio clic passa invece da Wine (vedi "Aprire con un doppio clic"); `winrun`
-resta quando Wine non c'è. Una funzione importata che
+Terminale: le sue finestre sono finestre di justOS. Nell'immagine di disco,
+che ha Wine, il doppio clic passa invece da Wine (vedi "Aprire con un doppio
+clic"); `winrun` resta dove Wine non c'è (il CD live, `make WINE=0`) e dalla
+shell. Una funzione importata che
 `winrun` non conosce non ferma più il programma: lo stub lo dice una volta e
 restituisce 0.
 
@@ -190,8 +193,17 @@ Com'è fatto: `system/apps/winrun/src/pe.rs` (il caricatore),
 
 `winrun` basta ai programmi piccoli. I programmi Windows veri (controlli
 comuni, registro, processi, installatori) li esegue **Wine 10** di Debian,
-senza modifiche, sopra lo strato Linux. `make wine-image` costruisce
-`build/justos-wine.img` (5 GiB) con Wine dentro:
+senza modifiche, sopra lo strato Linux. Wine è **nell'immagine di disco di
+serie** (`make`, e `justos-img.zip` delle release), a 64 bit e con le DLL per
+i programmi a 32 bit: un doppio clic su un `.exe` nell'app File lo avvia
+senza installare nulla. Per questo l'immagine è da 5 GiB (vedi sotto).
+`make WINE=0` costruisce l'immagine di prima, senza Wine, da 1 GiB; i test
+usano quella (`build/justos-test.img`). Il **CD live non ha Wine**: il suo
+volume di sistema sta in memoria e non porta le librerie di Debian, quindi i
+programmi Windows (con Wine) girano solo dall'immagine di disco, installata
+su una chiavetta o in una macchina virtuale.
+
+Dalla shell:
 
 ```
 cd sys:/usr/lib/wine
@@ -202,9 +214,20 @@ cd sys:/usr/lib/wine
 ```
 
 La prima volta Wine prepara il disco `C:` (il suo prefisso, in
-`/home/.wine`): ci vuole circa un minuto, di più nell'emulatore. Con un doppio
-clic su un `.exe` nell'app File (vedi "Aprire con un doppio clic") Wine parte
-da solo.
+`/home/.wine`): ci vuole circa un minuto, di più nell'emulatore (in QEMU
+la finestra del Blocco note arriva in meno di due minuti), e una notifica lo
+dice. Con un doppio clic su un `.exe` nell'app File (vedi "Aprire con un
+doppio clic") Wine parte da solo.
+
+**Quanto spazio.** I file di Wine sono la gran parte dell'immagine: dei
+1,7 GiB occupati da un'immagine appena costruita, 1,3 GiB sono le DLL di
+Wine (a 64 e a 32 bit). Il disco `C:` che Wine prepara al primo avvio le
+copia in `system32` e `syswow64`: altri 1,4 GiB, 3,1 GiB in tutto. Per
+questo l'immagine è da 5 GiB: dopo restano circa 1,8 GiB per i file e i
+programmi dell'utente. `make SIZE=8G` la fa più grande. Preparare il disco
+`C:` già quando si costruisce l'immagine risparmierebbe i due minuti del
+primo avvio, ma servirebbe Wine sulla macchina che costruisce e l'immagine
+porterebbe 1,4 GiB in più: per ora non si fa.
 
 Le finestre passano per il driver Wayland di Wine e diventano **finestre di
 justOS**. Wine disegna da sé la cornice di Windows, perché Wayland non gliene
@@ -351,9 +374,9 @@ parte, la sua icona salta nel dock finché non arriva la finestra.
 
 | File | Cosa succede | Stato |
 |---|---|---|
-| `.exe` con finestre, con Wine (solo nell'immagine di `make wine-image`) | parte con Wine, senza Terminale; la prima volta Wine prepara l'ambiente Windows (circa 2 minuti nell'emulatore, lo dice una notifica) | verificato: il Blocco note a 64 bit e un secondo programma |
+| `.exe` con finestre, con Wine (nell'immagine di disco di serie; non nel CD live né con `make WINE=0`) | parte con Wine, senza Terminale; la prima volta Wine prepara l'ambiente Windows (circa 2 minuti nell'emulatore, lo dice una notifica) | verificato: il Blocco note a 64 bit e un secondo programma |
 | `.exe` a 32 bit, `.msi`, `.bat`, con Wine | stessa strada (`msiexec /i` per gli `.msi`; i `.bat` e i programmi da console girano nel Terminale) | non verificato con un doppio clic (a 32 bit funziona dalla shell) |
-| `.exe` senza Wine | il piccolo `winrun`, come prima; `.msi` e `.bat` dicono che serve Wine | non verificato con un doppio clic |
+| `.exe` senza Wine (CD live, `make WINE=0`) | il piccolo `winrun`, come prima; `.msi` e `.bat` dicono che serve Wine | non verificato con un doppio clic |
 | programma Linux con finestra (collegato a GTK, Qt, SDL, Wayland o X11) | parte senza Terminale | verificato |
 | programma Linux da riga di comando | si apre nel Terminale | come prima |
 | `.desktop` | parte il programma del suo `Exec` | verificato |
@@ -384,7 +407,7 @@ Wine e Firefox vedono solo i file del volume di sistema (`sys:`).
   (`SIGSTOP`, `SIGTSTP`) non ci sono ancora. Le finestre si disegnano con il processore
   (niente OpenGL o Vulkan, niente `linux-dmabuf`) e non c'è un server X11:
   servono programmi che parlano Wayland.
-- **Windows a 32 bit**: solo con Wine (`make wine-image`); `winrun` esegue solo programmi a 64 bit.
+- **Windows a 32 bit**: solo con Wine (nell'immagine di disco, non nel CD live); `winrun` esegue solo programmi a 64 bit.
 
 ## Provarlo
 

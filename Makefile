@@ -1,13 +1,16 @@
 # justOS build.
 #
-#   make            build the bootable disk image (build/justos.img)
+#   make            build the bootable disk image (build/justos.img), with
+#                   Wine for Windows programs; WINE=0: without it, 1 GiB
 #   make iso        build a live CD (build/justos.iso), BIOS and UEFI
 #   make run-iso    start the live CD in QEMU, with no hard disk
 #   make run        start it in QEMU (PC with IDE disk)
 #   make run-q35    start it in QEMU (modern PC: AHCI/SATA disk)
 #   make run-nvme   start it in QEMU with the system disk on NVMe
 #   make run-uefi   start it in QEMU with UEFI firmware (OVMF) instead of a BIOS
-#   make test       boot headless and run a scripted session
+#   make test       boot headless and run a scripted session. The tests boot
+#                   an image without Wine (build/justos-test.img, or the
+#                   IMAGE given on the command line), not build/justos.img
 #   make test-uefi  the same, started by UEFI firmware
 #   make test-iso   the same session on the live CD, with BIOS and with UEFI
 #   make test-drivers  boot once per emulated disk, network card and USB
@@ -39,8 +42,11 @@ PROFILE  ?= release
 CARGO    ?= cargo
 QEMU     ?= qemu-system-x86_64
 MEMORY   ?= 1G
-# The disk image: the EFI partition holds two system slots of SLOT_SIZE.
-SIZE     ?= 1G
+# Wine 10 runs Windows programs (a double click on a .exe): it is in the
+# disk image unless WINE=0.
+WINE     ?= 1
+# The disk image's size (SIZE, below, after WINE): the EFI partition holds
+# two system slots of SLOT_SIZE.
 SLOT_SIZE ?= 24M
 # UEFI firmware for QEMU: code (read-only) and a template of its variables.
 OVMF_CODE ?= /usr/share/OVMF/OVMF_CODE_4M.fd
@@ -66,15 +72,44 @@ LINUX_DIST ?= trixie
 # Packages left out although others depend on them (comma-separated):
 # libraries the programs run without.
 LINUX_SKIP ?=
-# Wine 10 for Windows programs (make wine-image). It runs without the
-# multimedia, camera, scanner, smart card, sound server and OpenCL
-# libraries its packages pull in.
+# Wine 10 for Windows programs (unless WINE=0), 64-bit; debroot.py adds
+# the DLLs for 32-bit programs (WoW64) from libwine's i386 package. It
+# runs without the multimedia, camera, scanner, smart card, sound server
+# and OpenCL libraries its packages pull in.
 WINE_PKGS := wine wine64 libwine fonts-wine
 WINE_SKIP := libavcodec61,libavformat61,libavutil59,libcapi20-3t64,libgphoto2-6t64,libgphoto2-port12t64,libgstreamer-plugins-base1.0-0,libgstreamer1.0-0,libpcap0.8t64,libpcsclite1,libpulse0,libusb-1.0-0,ocl-icd-libopencl1,libopencl1,libopencl-1.2-1
+comma    := ,
+# With Wine and without, the Linux tree and the system volume's files are
+# kept apart, so that the image and the tests' image (without Wine) do not
+# undo each other's, even when make builds both at once (make -j image
+# test). With Wine the image needs room for the files (1.7 GiB, 1.3 of
+# them Wine's DLLs) and for the C: drive Wine makes at its first start,
+# which copies the DLLs again (1.4 GiB more, measured): 5 GiB leaves about
+# 1.8 GiB for the user's files after that.
+ifeq ($(WINE),0)
+SIZE     ?= 1G
 LINUX    := $(BUILD)/linux
 ROOT     := $(BUILD)/root
+LIVE_ROOT := $(BUILD)/liveroot-nowine
+PKGS     := $(LINUX_PKGS)
+SKIP     := $(LINUX_SKIP)
+else
+SIZE     ?= 5G
+LINUX    := $(BUILD)/winelinux
+ROOT     := $(BUILD)/wineroot
 LIVE_ROOT := $(BUILD)/liveroot
+PKGS     := $(LINUX_PKGS) $(WINE_PKGS)
+SKIP     := $(if $(LINUX_SKIP),$(LINUX_SKIP)$(comma))$(WINE_SKIP)
+endif
 IMAGE    := $(BUILD)/justos.img
+# The tests boot an image without Wine: quicker to build and to copy, and
+# they need nothing of it. An IMAGE given on the command line ("make test
+# IMAGE=build/justos-t.img") is the one the tests build and boot.
+ifeq ($(origin IMAGE),command line)
+TEST_IMAGE := $(IMAGE)
+else
+TEST_IMAGE := $(BUILD)/justos-test.img
+endif
 ISO      := $(BUILD)/justos.iso
 # Size of the live CD's system volume (it lives in memory).
 LIVE_SIZE ?= 48M
@@ -88,7 +123,7 @@ ifeq ($(PROFILE),release)
 CARGO_PROFILE := --release
 endif
 
-.PHONY: photos all uefi system tools root linux-root image wine-image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-compat test-audio test-display test-acpi test-net test-linux test-wayland test-gtk test-update shots assets check updates clean $(PACKAGES)
+.PHONY: photos all uefi system tools live-root root linux-root image wine-image test-image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-compat test-audio test-display test-acpi test-net test-linux test-wayland test-gtk test-update shots assets check updates clean $(PACKAGES)
 
 all: image
 
@@ -117,28 +152,32 @@ $(PACKAGES): $(BUILD)/drivers/%.jdp: system tools
 # in build/debcache, so this runs offline once they are there).
 $(LINUX)/usr/PACKAGES: tools/linux/debroot.py Makefile
 	tools/linux/debroot.py --out $(LINUX) --cache $(BUILD)/debcache --dist $(LINUX_DIST) \
-		$(if $(LINUX_SKIP),--skip $(LINUX_SKIP)) $(LINUX_PKGS)
+		$(if $(SKIP),--skip $(SKIP)) $(PKGS)
 
 linux-root:
 	rm -f $(LINUX)/usr/PACKAGES
 	$(MAKE) $(LINUX)/usr/PACKAGES
 
-# The files of the system volume: rootfs/ plus the programs and the Linux
-# libraries. The live CD's volume ($(LIVE_ROOT)) has justOS's own files
-# without the Linux libraries: it is read into memory at boot, and
-# Debian's tree (GTK) is several times the rest.
-root: system tools $(LINUX)/usr/PACKAGES
-	rm -rf $(ROOT) $(LIVE_ROOT)
-	mkdir -p $(ROOT)/apps
-	cp -r rootfs/. $(ROOT)/
-	for app in $(APPS); do cp $(TARGET)/$$app $(ROOT)/apps/$$app.app; done
-	for p in $(STORE); do mkdir -p $(ROOT)/store/$$p && cp $(TARGET)/$$p $(ROOT)/store/$$p/app \
-		&& cp system/store/$$p/info system/store/$$p/icon.qoi $(ROOT)/store/$$p/; done
-	cp system/kernel/assets/fonts.bin $(ROOT)/system/fonts.bin
-	mkdir -p $(ROOT)/usr/share/fonts/truetype/justos
-	cp tools/assets/fonts/GoogleSansFlex.ttf tools/assets/fonts/OFL.txt $(ROOT)/usr/share/fonts/truetype/justos/
-	gzip -dc system/kernel/assets/fonts@2x.bin.gz > $(ROOT)/system/fonts@2x.bin
-	cp -a $(ROOT) $(LIVE_ROOT)
+# justOS's own files: rootfs/, the programs, the store and the fonts. They
+# are the whole system volume of the live CD ($(LIVE_ROOT)), without the
+# Linux libraries: it is read into memory at boot, and Debian's tree (GTK,
+# Firefox, Wine) is many times the rest.
+live-root: system tools
+	rm -rf $(LIVE_ROOT)
+	mkdir -p $(LIVE_ROOT)/apps
+	cp -r rootfs/. $(LIVE_ROOT)/
+	for app in $(APPS); do cp $(TARGET)/$$app $(LIVE_ROOT)/apps/$$app.app; done
+	for p in $(STORE); do mkdir -p $(LIVE_ROOT)/store/$$p && cp $(TARGET)/$$p $(LIVE_ROOT)/store/$$p/app \
+		&& cp system/store/$$p/info system/store/$$p/icon.qoi $(LIVE_ROOT)/store/$$p/; done
+	cp system/kernel/assets/fonts.bin $(LIVE_ROOT)/system/fonts.bin
+	mkdir -p $(LIVE_ROOT)/usr/share/fonts/truetype/justos
+	cp tools/assets/fonts/GoogleSansFlex.ttf tools/assets/fonts/OFL.txt $(LIVE_ROOT)/usr/share/fonts/truetype/justos/
+	gzip -dc system/kernel/assets/fonts@2x.bin.gz > $(LIVE_ROOT)/system/fonts@2x.bin
+
+# The disk image's system volume: justOS's files and the Linux libraries.
+root: live-root $(LINUX)/usr/PACKAGES
+	rm -rf $(ROOT)
+	cp -a $(LIVE_ROOT) $(ROOT)
 	# Debian's files, under justOS's: rootfs/ wins where both have one.
 	cp -a $(LINUX)/. $(ROOT)/
 	cp -r rootfs/. $(ROOT)/
@@ -150,17 +189,18 @@ image: $(BUILD)/stage1.bin $(BUILD)/stage2.bin uefi system tools $(PACKAGES) roo
 		--stage1 $(BUILD)/stage1.bin --stage2 $(BUILD)/stage2.bin --efi $(EFI_APP) \
 		--kernel $(TARGET)/just-kernel --drivers $(BUILD)/drivers --files $(ROOT)
 
-# An image with Wine too (build/justos-wine.img, 3 GiB): Windows programs
-# (docs/compat.md#wine). Its Linux tree is kept apart from the usual one.
-wine-image:
-	$(MAKE) image LINUX=$(BUILD)/winelinux ROOT=$(BUILD)/wineroot LIVE_ROOT=$(BUILD)/winelive \
-		IMAGE=$(BUILD)/justos-wine.img SIZE=5G LINUX_PKGS="$(LINUX_PKGS) $(WINE_PKGS)" LINUX_SKIP=$(WINE_SKIP)
+# Wine is in the usual image now; the old name still builds it.
+wine-image: image
+
+# The image the tests boot: without Wine, 1 GiB.
+test-image:
+	$(MAKE) image WINE=0 IMAGE=$(TEST_IMAGE)
 
 # This justOS as a system update (a slot image).
 $(BUILD)/justos-$(VERSION).slot: system tools $(PACKAGES)
 	$(JUSTTOOL) slot $@ --kernel $(TARGET)/just-kernel --drivers $(BUILD)/drivers --version $(VERSION)
 
-iso: $(BUILD)/stage1.bin $(BUILD)/stage2.bin uefi system tools $(PACKAGES) root
+iso: $(BUILD)/stage1.bin $(BUILD)/stage2.bin uefi system tools $(PACKAGES) live-root
 	$(JUSTTOOL) iso $(ISO) --size $(LIVE_SIZE) --version $(VERSION) \
 		--stage1 $(BUILD)/stage1.bin --stage2 $(BUILD)/stage2.bin --efi $(EFI_APP) \
 		--kernel $(TARGET)/just-kernel --drivers $(BUILD)/drivers --files $(LIVE_ROOT)
@@ -185,48 +225,48 @@ run-uefi: image
 	$(QEMU) $(QEMU_COMMON) -drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 		-drive if=pflash,format=raw,file=$(BUILD)/ovmf-vars.fd -drive file=$(IMAGE),format=raw,if=ide
 
-test: image
-	scripts/test.sh $(IMAGE)
+test: test-image
+	scripts/test.sh $(TEST_IMAGE)
 
-test-uefi: image
-	UEFI=1 OVMF_CODE=$(OVMF_CODE) OVMF_VARS=$(OVMF_VARS) scripts/test.sh $(IMAGE)
+test-uefi: test-image
+	UEFI=1 OVMF_CODE=$(OVMF_CODE) OVMF_VARS=$(OVMF_VARS) scripts/test.sh $(TEST_IMAGE)
 
-test-drivers: image
-	scripts/test-drivers.sh $(IMAGE)
+test-drivers: test-image
+	scripts/test-drivers.sh $(TEST_IMAGE)
 
 test-iso: iso
 	DISK=cdrom scripts/test.sh $(ISO)
 	UEFI=1 DISK=cdrom OVMF_CODE=$(OVMF_CODE) OVMF_VARS=$(OVMF_VARS) scripts/test.sh $(ISO)
 
-test-compat: image
-	scripts/test-compat.sh $(IMAGE)
+test-compat: test-image
+	scripts/test-compat.sh $(TEST_IMAGE)
 
-test-audio: image
-	scripts/test-audio.sh $(IMAGE)
+test-audio: test-image
+	scripts/test-audio.sh $(TEST_IMAGE)
 
-test-display: image
-	scripts/test-display.sh $(IMAGE)
+test-display: test-image
+	scripts/test-display.sh $(TEST_IMAGE)
 
-test-acpi: image
-	scripts/test-acpi.sh $(IMAGE)
+test-acpi: test-image
+	scripts/test-acpi.sh $(TEST_IMAGE)
 
-test-net: image
-	scripts/test-net.sh $(IMAGE)
+test-net: test-image
+	scripts/test-net.sh $(TEST_IMAGE)
 
-test-linux: image
-	scripts/test-linux.sh $(IMAGE)
+test-linux: test-image
+	scripts/test-linux.sh $(TEST_IMAGE)
 
-test-wayland: image
-	scripts/test-wayland.sh $(IMAGE)
+test-wayland: test-image
+	scripts/test-wayland.sh $(TEST_IMAGE)
 
-test-gtk: image
-	scripts/test-gtk.sh $(IMAGE)
+test-gtk: test-image
+	scripts/test-gtk.sh $(TEST_IMAGE)
 
-test-update: image
-	OVMF_CODE=$(OVMF_CODE) OVMF_VARS=$(OVMF_VARS) scripts/test-update.sh $(IMAGE)
+test-update: test-image
+	OVMF_CODE=$(OVMF_CODE) OVMF_VARS=$(OVMF_VARS) scripts/test-update.sh $(TEST_IMAGE)
 
-shots: image
-	scripts/gui-shots.py $(IMAGE) scripts/gui/tour.txt $(BUILD)/shots
+shots: test-image
+	scripts/gui-shots.py $(TEST_IMAGE) scripts/gui/tour.txt $(BUILD)/shots
 
 assets:
 	tools/assets/gen_fonts.py system/kernel/assets/fonts.bin
@@ -248,9 +288,9 @@ check:
 	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p justdk -p justfs -p justgfx -p justimage -p justmath -p justtls -p justzip -p justjson -p justdex -p justaml
 	cd tools && $(CARGO) test --release
 
-updates: root tools $(BUILD)/justos-$(VERSION).slot
+updates: live-root tools $(BUILD)/justos-$(VERSION).slot
 	rm -rf $(BUILD)/updates
-	$(JUSTTOOL) updates $(ROOT)/store $(BUILD)/updates --key $(UPDATES_KEY) --base-url $(UPDATES_URL) --system $(VERSION) \
+	$(JUSTTOOL) updates $(LIVE_ROOT)/store $(BUILD)/updates --key $(UPDATES_KEY) --base-url $(UPDATES_URL) --system $(VERSION) \
 		--slot $(BUILD)/justos-$(VERSION).slot
 
 clean:

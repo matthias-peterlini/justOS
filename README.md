@@ -166,12 +166,12 @@ a che punto è ogni famiglia, senza giri di parole:
 | Da dove | Stato | Cosa gira |
 |---|---|---|
 | **Linux** | 🟢 funziona | programmi statici e dinamici con la glibc di Debian, GTK 3, Wayland (il compositor è nel kernel). **Firefox ESR è di serie** e le app Linux con un file `.desktop` compaiono in Applicazioni. Non c'è un server X11 né l'accelerazione 3D |
-| **Windows** | 🟡 in parte | `.exe` a 64 bit piccoli con `winrun`, scritto da zero. I programmi veri con **Wine 10** (`make wine-image`), a 64 e a 32 bit, con finestre di justOS. Mancano DirectX accelerato e l'audio; i programmi grandi e recenti spesso non partono ancora |
+| **Windows** | 🟡 in parte | **Wine 10 è di serie nell'immagine di disco**: un doppio clic su un `.exe` lo avvia, a 64 e a 32 bit, con finestre di justOS (la prima volta Wine prepara il disco `C:` in un paio di minuti). Il CD live non ha Wine e usa `winrun`, scritto da zero, per i `.exe` a 64 bit piccoli. Mancano DirectX accelerato e l'audio; i programmi grandi e recenti spesso non partono ancora |
 | **Android** | 🟡 agli inizi | bytecode Dalvik (`.dex`, `.apk`, `.jar`) con un interprete scritto da zero e una piccola parte del framework. Il driver binder c'è; le app vere del Play Store non girano ancora |
 | **macOS** | 🔴 no | i pacchetti `.pkg` si aprono e si estraggono, ma i programmi Mach-O non si eseguono: servirebbero le librerie di Apple |
 
-Nell'app File un doppio clic avvia i programmi Linux con finestra e, nell'immagine
-con Wine, i `.exe` (senza Terminale); le pagine web si aprono in Firefox. I
+Nell'app File un doppio clic avvia i programmi Linux con finestra e, con
+l'immagine di disco, i `.exe` con Wine (senza Terminale); le pagine web si aprono in Firefox. I
 `.deb` di Debian e Ubuntu (xz, zstd) non si installano ancora e le app per macOS
 dicono che non funzionano. La tabella dei casi, con cosa è verificato, è in
 [docs/compat.md](docs/compat.md#aprire-con-un-doppio-clic).
@@ -192,12 +192,16 @@ sistema: justOS non aggira nessun controllo. I dettagli sono in
    - **VMware** e **Hyper-V** (prima generazione) vanno bene allo stesso modo.
 3. **Scegli** nome, tastiera e sfondo: dopo c'è la scrivania.
 
-Il CD live gira in memoria, quindi le modifiche si perdono allo spegnimento.
-Per tenerle, o per avviare un PC vero, c'è
-[`justos-img.zip`](https://github.com/matthias-peterlini/justOS/releases/latest/download/justos-img.zip):
-è un'immagine di disco da 256 MiB, che si scrive su una chiavetta USB con
-balenaEtcher, Rufus in modalità DD o `dd`. Parte con BIOS e con UEFI;
-Secure Boot va disattivato.
+Il CD live gira in memoria, quindi le modifiche si perdono allo spegnimento,
+e non ha né Firefox né Wine (le librerie di Debian non stanno in memoria).
+Per tenere le modifiche, per i programmi Windows o per avviare un PC vero, c'è
+[`justos-img.zip`](https://github.com/matthias-peterlini/justOS/releases/latest/download/justos-img.zip)
+(circa 570 MiB): scompattata è un'immagine di disco da 5 GiB, con Firefox e
+Wine, che si scrive su una chiavetta USB da almeno 8 GB con balenaEtcher
+(che legge anche lo zip), Rufus in modalità DD o `dd`. Parte con BIOS e con
+UEFI; Secure Boot va disattivato. In una macchina virtuale si usa come disco:
+per esempio `qemu-system-x86_64 -m 2G -drive file=justos.img,format=raw`
+(Wine è provato con 2 GiB di memoria).
 
 ### Scorciatoie da sapere
 
@@ -214,7 +218,7 @@ Secure Boot va disattivato.
 
 | | |
 |---|---|
-| **Di serie** | Firefox, File, Editor di testo, Note, Promemoria, Calendario, Orologio, Calcolatrice, Foto, Musica, Anteprima, Terminale, Monitor attività, Impostazioni, Info sistema |
+| **Di serie** | Firefox, File, Editor di testo, Note, Promemoria, Calendario, Orologio, Calcolatrice, Foto, Musica, Anteprima, Terminale, Monitor attività, Impostazioni, Info sistema; Wine per i programmi Windows (Firefox e Wine nell'immagine di disco, non nel CD live) |
 | **Nel Negozio** | 2048, Campo minato, Serpente, Sudoku, Tris e Disegno; BusyBox e Lua per il Terminale; programmi Linux e Windows da GitHub. Le app si aggiornano da sole, da un indice firmato |
 | **Doppio clic** | un programma parte; un pacchetto `.deb`, `.tar.gz`, `.zip` o `.pkg` si installa da solo |
 
@@ -300,15 +304,20 @@ di MinGW-w64 (`gcc-mingw-w64-x86-64`), se ci sono, per i suoi programmi di
 prova.
 
 ```sh
-make            # l'immagine di disco build/justos.img (BIOS e UEFI)
-make iso        # il CD live build/justos.iso
+make            # l'immagine di disco build/justos.img (BIOS e UEFI), con Wine
+make WINE=0     # la stessa senza Wine, da 1 GiB
+make iso        # il CD live build/justos.iso (senza Firefox e Wine)
 make run        # avvia justOS in QEMU (anche run-uefi, run-q35, run-nvme, run-iso)
 ```
 
-L'immagine è da 1 GiB perché porta Firefox; `make SIZE=2G` ne cambia la
-dimensione, `make run MEMORY=2G` dà più memoria alla macchina virtuale
-(di norma 1 GiB, quanto serve a Firefox). `make wine-image` costruisce
-`build/justos-wine.img`, con Wine per i programmi Windows.
+L'immagine è da 5 GiB perché porta Firefox e Wine, e Wine al primo avvio
+prepara il suo disco `C:` (vedi [docs/compat.md](docs/compat.md#wine));
+senza Wine (`WINE=0`) è da 1 GiB. Il file è sparso: sul disco occupa quanto
+i dati, circa 1,8 GiB. `make SIZE=8G` ne cambia la dimensione, `make run
+MEMORY=2G` dà più memoria alla macchina virtuale (di norma 1 GiB, quanto
+serve a Firefox; Wine è provato con 2 GiB). La prima volta `make` scarica
+dagli archivi di Debian circa 380 MiB di pacchetti, che restano in
+`build/debcache`.
 
 <details>
 <summary><b>I test</b>: girano tutti in QEMU, senza schermo</summary>
@@ -329,6 +338,12 @@ make test-gtk       # un programma GTK 3 con il tema di justOS
 make shots          # usa l'interfaccia (ogni app, il Negozio) e salva le schermate
 make check          # test delle librerie e dello strumento host
 ```
+
+I test avviano un'immagine senza Wine, più piccola e più veloce da copiare:
+`build/justos-test.img` (la costruiscono da soli, non serve prima `make`),
+oppure quella data con `IMAGE=` (`make test IMAGE=build/prova.img`). Gli
+script in `scripts/` prendono qualunque immagine, anche quella con Wine:
+`scripts/test-compat.sh build/justos.img`.
 
 </details>
 

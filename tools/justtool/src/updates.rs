@@ -6,7 +6,7 @@
 //! justtool pubkey <key file>
 //! ```
 //!
-//! `<store dir>` holds the built store (`build/root/store/<id>/{app,info,
+//! `<store dir>` holds the built store (`build/liveroot/store/<id>/{app,info,
 //! icon.qoi}`); its justOS apps go in the index. The out folder gets each as
 //! `<id>-<version>.app` (and `.qoi`), `index.json` and `index.json.sig`;
 //! publish it at `<url>`. The key file is a private key: 32 bytes in hex.

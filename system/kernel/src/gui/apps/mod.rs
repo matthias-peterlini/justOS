@@ -294,7 +294,8 @@ pub struct Start {
 
 /// Where programs started from the desktop run, unless they say otherwise.
 const HOME: &str = "sys:/home";
-/// Wine (in the image made by `make wine-image`), and its C: drive (the
+/// Wine (in the disk image unless it was built with `make WINE=0`; not on
+/// the live CD), and its C: drive (the
 /// prefix: `$HOME/.wine`, or what `export WINEPREFIX=` set).
 const WINE: &str = "sys:/usr/lib/wine/wine64";
 const FIREFOX: &str = "sys:/usr/bin/firefox-esr";

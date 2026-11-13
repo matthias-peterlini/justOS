@@ -39,8 +39,14 @@ jobs:
         run: |
           mkdir -p dist
           cp build/justos.iso dist/justos.iso
-          # The disk image is mostly empty: compressed it is a few MiB.
+          # The disk image (5 GiB, with Wine) is mostly empty: zipped it is
+          # about 570 MiB, under GitHub's 2 GiB limit for a release file.
           (cd build && zip -9 ../dist/justos-img.zip justos.img)
+          size=$(stat -c %s dist/justos-img.zip)
+          if [ "$size" -ge 2147483648 ]; then
+            echo "::error::justos-img.zip is $size bytes: over the 2 GiB a release file may have"
+            exit 1
+          fi
           (cd dist && sha256sum justos.iso justos-img.zip > SHA256SUMS)
           ls -l dist
 

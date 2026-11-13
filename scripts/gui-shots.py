@@ -152,7 +152,9 @@ def main():
     os.makedirs(out, exist_ok=True)
     work = tempfile.mkdtemp()
     disk = os.path.join(work, "disk.img")
-    shutil.copy(image, disk)
+    # The image is mostly empty space (the one with Wine is 5 GiB): the copy
+    # keeps the holes.
+    subprocess.run(["cp", "--sparse=always", image, disk], check=True)
     sock = os.path.join(work, "qmp.sock")
     ser = os.path.join(work, "serial.sock")
     qemu = os.environ.get("QEMU", "qemu-system-x86_64")
@@ -290,7 +292,7 @@ def main():
         proc.kill()
         proc.wait()
         if os.environ.get("KEEP"):
-            shutil.copy(disk, os.environ["KEEP"])
+            subprocess.run(["cp", "--sparse=always", disk, os.environ["KEEP"]], check=True)
         shutil.rmtree(work, ignore_errors=True)
 
 
