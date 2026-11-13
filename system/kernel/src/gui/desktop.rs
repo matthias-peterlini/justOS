@@ -3508,10 +3508,14 @@ impl Desktop {
                 w.draw(c, blur, f, r);
             }
         }
-        for f in &self.fx {
+        for f in self.fx.iter_mut() {
             let (dst, opacity) = f.place();
             if r.overlaps(&dst) {
                 c.draw_scaled(&f.snap, dst, opacity);
+                // Time has passed since the frame event that asked for this
+                // drawing: remember where the picture really went, so that
+                // the next frame clears all of it.
+                f.last = f.last.union(&dst.grow(2));
             }
         }
         if self.dock_shown() && r.overlaps(&self.dock_zone()) {
