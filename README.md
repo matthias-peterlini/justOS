@@ -174,6 +174,12 @@ a che punto è ogni famiglia, senza giri di parole:
 | **Android** | 🟡 agli inizi | bytecode Dalvik (`.dex`, `.apk`, `.jar`) con un interprete scritto da zero e una piccola parte del framework. Il driver binder c'è; le app vere del Play Store non girano ancora |
 | **macOS** | 🔴 no | i pacchetti `.pkg` si aprono e si estraggono, ma i programmi Mach-O non si eseguono: servirebbero le librerie di Apple |
 
+Nell'app File un doppio clic avvia i programmi Linux con finestra e, nell'immagine
+con Wine, i `.exe` (senza Terminale); le pagine web si aprono in Firefox. I
+`.deb` di Debian e Ubuntu (xz, zstd) non si installano ancora e le app per macOS
+dicono che non funzionano. La tabella dei casi, con cosa è verificato, è in
+[docs/compat.md](docs/compat.md#aprire-con-un-doppio-clic).
+
 I programmi con licenza chiedono l'accesso con il tuo account, come sul loro
 sistema: justOS non aggira nessun controllo. I dettagli sono in
 [docs/compat.md](docs/compat.md).

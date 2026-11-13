@@ -138,6 +138,10 @@ ricerca) da soli: il launcher legge i file `.desktop` di
 quelli con `NoDisplay` o `Terminal` restano fuori) e prende l'icona PNG dal
 tema `hicolor`. La stessa icona va nel dock mentre il programma è aperto.
 
+Le pagine web (`.html`) e i link si aprono in Firefox quando c'è. Se Firefox
+è già aperto, una seconda pagina non gli si può ancora passare (manca D-Bus):
+una notifica lo dice. Firefox vede solo i file del volume di sistema.
+
 ## Programmi Windows
 
 I programmi Windows li esegue `winrun`, un programma di justOS
@@ -169,7 +173,9 @@ e con finestre:
 | disegno (`gdi32`) | penne, pennelli e caratteri, rettangoli, ellissi, linee, poligoni, testo e `DrawText`, DC in memoria con `BitBlt` |
 
 Un `.exe` con finestre (sottosistema GUI) si apre con un doppio clic senza
-Terminale: le sue finestre sono finestre di justOS. Una funzione importata che
+Terminale: le sue finestre sono finestre di justOS. Nell'immagine con Wine il
+doppio clic passa invece da Wine (vedi "Aprire con un doppio clic"); `winrun`
+resta quando Wine non c'è. Una funzione importata che
 `winrun` non conosce non ferma più il programma: lo stub lo dice una volta e
 restituisce 0.
 
@@ -196,7 +202,9 @@ cd sys:/usr/lib/wine
 ```
 
 La prima volta Wine prepara il disco `C:` (il suo prefisso, in
-`/home/.wine`): ci vuole circa un minuto.
+`/home/.wine`): ci vuole circa un minuto, di più nell'emulatore. Con un doppio
+clic su un `.exe` nell'app File (vedi "Aprire con un doppio clic") Wine parte
+da solo.
 
 Le finestre passano per il driver Wayland di Wine e diventano **finestre di
 justOS**. Wine disegna da sé la cornice di Windows, perché Wayland non gliene
@@ -325,21 +333,46 @@ sottofondo, con una notifica alla fine (`system/kernel/src/store.rs`,
 
 | Pacchetto | Cosa succede |
 |---|---|
-| `.deb` (Debian, Ubuntu) | si apre l'archivio `ar`, poi `data.tar.gz` (o `data.tar`); il programma in `usr/bin` (o simile) si installa se è un ELF x86-64 statico. `data.tar.xz` e `.zst` non sono ancora supportati |
+| `.deb` (Debian, Ubuntu) | si apre l'archivio `ar`, poi `data.tar.gz` (o `data.tar`); il programma in `usr/bin` (o simile) si installa se è un ELF x86-64 statico. `data.tar.xz` e `.zst` (quelli di Debian e Ubuntu) non sono ancora supportati: un doppio clic lo dice con una notifica |
 | `.tar.gz`, `.tgz`, `.tar`, `.zip`, `.gz` | il primo programma Linux statico o Windows x64 dentro si installa |
 | `.pkg` (macOS) | si apre l'archivio `xar`, poi il `Payload` (cpio, anche compresso gzip); i file vanno in `sys:/home/Applicazioni macOS/<nome>`. I `Payload` compressi con LZMA (`pbzx`, i più recenti) non sono ancora supportati |
 
 Dal Terminale fa lo stesso `install <file>`, per esempio
 `install sys:/home/Scaricati/ripgrep_14.1.0-1_amd64.deb`.
 
-Un doppio clic su un programma (ELF o `.exe`, riconosciuti dai primi byte
-anche senza estensione) lo avvia nel Terminale.
+I programmi (ELF o `.exe`, riconosciuti dai primi byte anche senza
+estensione) si avviano con un doppio clic come descritto qui sotto.
+
+### Aprire con un doppio clic
+
+Nell'app File un doppio clic sceglie cosa fare dal tipo del file
+(`for_file` in `system/kernel/src/gui/apps/mod.rs`). Mentre un programma lento
+parte, la sua icona salta nel dock finché non arriva la finestra.
+
+| File | Cosa succede | Stato |
+|---|---|---|
+| `.exe` con finestre, con Wine (solo nell'immagine di `make wine-image`) | parte con Wine, senza Terminale; la prima volta Wine prepara l'ambiente Windows (circa 2 minuti nell'emulatore, lo dice una notifica) | verificato: il Blocco note a 64 bit e un secondo programma |
+| `.exe` a 32 bit, `.msi`, `.bat`, con Wine | stessa strada (`msiexec /i` per gli `.msi`; i `.bat` e i programmi da console girano nel Terminale) | non verificato con un doppio clic (a 32 bit funziona dalla shell) |
+| `.exe` senza Wine | il piccolo `winrun`, come prima; `.msi` e `.bat` dicono che serve Wine | non verificato con un doppio clic |
+| programma Linux con finestra (collegato a GTK, Qt, SDL, Wayland o X11) | parte senza Terminale | verificato |
+| programma Linux da riga di comando | si apre nel Terminale | come prima |
+| `.desktop` | parte il programma del suo `Exec` | verificato |
+| AppImage | si estrae e parte da lì (`--appimage-extract-and-run`: FUSE non c'è); ci vuole un po' | verificato con una AppImage |
+| `.deb` con `data.tar.xz` o `.zst` (quelli di Debian e Ubuntu) | una notifica dice che non si installa ancora (manca il decompressore) | non funziona |
+| `.deb` con gzip | va all'installatore, come prima | come prima |
+| `.html`, `.htm` e link | si aprono in Firefox, se c'è; sennò nell'editor o nel Browser | verificato con un file .html; se Firefox è già aperto una seconda pagina non gli si può passare (manca D-Bus) (la notifica prevista non è comparsa nelle prove) |
+| `.dmg`, programmi Mach-O, cartelle `.app` di macOS | "Le app per macOS non funzionano su justOS." | non funziona |
+| `.pkg` | l'installatore lo scompatta, come prima | come prima |
+| `.apk`, `.dex`, `.jar` | invariato (vedi sopra) | come prima |
+
+Wine e Firefox vedono solo i file del volume di sistema (`sys:`).
 
 ### Cosa non può girare
 
 - **macOS**: i programmi sono in formato Mach-O e usano le librerie di
   sistema di Apple (Cocoa, Metal…), che non si possono ridistribuire: un
-  `.pkg` si scompatta, ma il programma non parte. Lo stesso vale per i `.dmg`.
+  `.pkg` si scompatta, ma il programma non parte. Lo stesso vale per i `.dmg`
+  e per le cartelle `.app`: un doppio clic lo dice con un messaggio.
 - **Gran parte delle app Android del Play Store**: girano le app che
   costruiscono l'interfaccia nel codice. Mancano i layout XML e le risorse
   (`R.layout`, `R.string`: `setContentView(R.layout.x)` si ferma con un
