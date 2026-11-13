@@ -276,7 +276,7 @@ fn main(_args: &str) -> i32 {
     let mut n = 0;
     loop {
         win.clear(); // trasparente: si vede il vetro
-        win.text_centered(Font::Display, 160, 40, &alloc::format!("{n}"), ui::TEXT);
+        win.text_centered(Font::Display, 160, 40, &alloc::format!("{n}"), ui::text());
         let f = win.fonts;
         ui::button(&mut win.canvas, f, Rect::new(110, 130, 100, 36), "+1", true, false);
         win.present();

@@ -209,12 +209,12 @@ impl Game {
 
     fn draw(&self, win: &mut Window) {
         win.clear();
-        win.text(Font::Heading, X0, 18, "Sudoku", ui::TEXT);
+        win.text(Font::Heading, X0, 18, "Sudoku", ui::text());
         let f = win.fonts;
         let labels: Vec<&str> = LEVELS.iter().map(|l| l.0).collect();
         ui::segmented(&mut win.canvas, f, self.levels(), &labels, self.level);
         let grid = Rect::new(X0, Y0, GRID, GRID);
-        win.canvas.fill_round(grid.grow(4), 12, 0xF0F7_F7FA);
+        ui::well_pane(&mut win.canvas, grid.grow(4), 12);
         let sel = self.selected;
         let sel_digit = sel.map(|i| self.board[i]).unwrap_or(0);
         for i in 0..81 {
@@ -225,20 +225,20 @@ impl Game {
                 sr == r || sc == c || (sr / 3 == r / 3 && sc / 3 == c / 3)
             });
             if sel == Some(i) {
-                win.canvas.fill(cell, 0xFFBB_D8FF);
+                win.canvas.fill(cell, 0x47FF_5A1F);
             } else if sel_digit != 0 && self.board[i] == sel_digit {
-                win.canvas.fill(cell, 0xFFCF_E2FF);
+                win.canvas.fill(cell, 0x24FF_5A1F);
             } else if related {
-                win.canvas.fill(cell, 0xFFE6_EEF9);
+                win.canvas.fill(cell, ui::hover());
             }
             let d = self.board[i];
             if d != 0 {
                 let color = if self.given[i] != 0 {
-                    0xFF1C_1C1E
+                    ui::text()
                 } else if self.conflict(i) || d != self.solution[i] {
-                    0xFFE5_3935
+                    ui::RED
                 } else {
-                    0xFF1E_5FD8
+                    ui::ACCENT
                 };
                 let (lh, _) = win.fonts.metrics(Font::Title);
                 win.text_centered(Font::Title, cell.x + CELL / 2, cell.y + (CELL - lh) / 2, &format!("{d}"), color);
@@ -246,42 +246,42 @@ impl Game {
                 for n in 1..=9u8 {
                     if self.notes[i] & (1 << n) != 0 {
                         let k = (n - 1) as i32;
-                        win.text_centered(Font::Small, cell.x + 9 + (k % 3) * 17, cell.y + 2 + (k / 3) * 16, &format!("{n}"), 0xFF6B_7280);
+                        win.text_centered(Font::Small, cell.x + 9 + (k % 3) * 17, cell.y + 2 + (k / 3) * 16, &format!("{n}"), ui::text_dim());
                     }
                 }
             }
         }
         for k in 0..=9 {
             let w = if k % 3 == 0 { 3 } else { 1 };
-            let col = if k % 3 == 0 { 0xFF2C_2C2E } else { 0xFFB8_BCC4 };
+            let col = if k % 3 == 0 { ui::text_faint() } else { ui::cell() };
             win.canvas.fill(Rect::new(X0 + k * CELL - w / 2, Y0, w, GRID), col);
             win.canvas.fill(Rect::new(X0, Y0 + k * CELL - w / 2, GRID, w), col);
         }
         // The side: time, mistakes, digits, buttons.
         let s = self.side();
         let secs = (self.done.unwrap_or(justui::now_ms()) - self.started) / 1000;
-        win.canvas.fill_round(Rect::new(s.x, s.y, s.w, 100), 14, ui::PANEL);
-        win.text(Font::Small, s.x + 14, s.y + 12, "TEMPO", ui::TEXT_FAINT);
-        win.text(Font::Heading, s.x + 14, s.y + 28, &format!("{}:{:02}", secs / 60, secs % 60), ui::TEXT);
-        win.text(Font::Small, s.x + 14, s.y + 66, &format!("Errori: {}", self.mistakes), ui::TEXT_DIM);
+        win.canvas.fill_round(Rect::new(s.x, s.y, s.w, 100), 14, ui::cell());
+        win.text(Font::Small, s.x + 14, s.y + 12, "TEMPO", ui::text_faint());
+        win.text(Font::Heading, s.x + 14, s.y + 28, &format!("{}:{:02}", secs / 60, secs % 60), ui::text());
+        win.text(Font::Small, s.x + 14, s.y + 66, &format!("Errori: {}", self.mistakes), ui::text_dim());
         for d in 1..=9 {
             let r = self.pad(d);
             let left = 9 - self.board.iter().filter(|&&x| x as usize == d).count();
-            win.canvas.fill_round(r, 12, if left == 0 { 0x14FF_FFFF } else { 0x33FF_FFFF });
+            win.canvas.fill_round(r, 12, if left == 0 { ui::pane() } else { ui::cell() });
             let (lh, _) = win.fonts.metrics(Font::Title);
-            win.text_centered(Font::Title, r.x + r.w / 2, r.y + (r.h - lh) / 2, &format!("{d}"), if left == 0 { ui::TEXT_FAINT } else { ui::TEXT });
+            win.text_centered(Font::Title, r.x + r.w / 2, r.y + (r.h - lh) / 2, &format!("{d}"), if left == 0 { ui::text_faint() } else { ui::text() });
         }
         let [erase, pencil, new] = self.buttons();
         ui::button(&mut win.canvas, f, erase, "Cancella", false, false);
-        ui::button_color(&mut win.canvas, f, pencil, if self.pencil { "Matita: sì" } else { "Matita: no" }, if self.pencil { ui::ACCENT } else { 0x26FF_FFFF }, ui::TEXT);
+        ui::button(&mut win.canvas, f, pencil, if self.pencil { "Matita: sì" } else { "Matita: no" }, self.pencil, false);
         ui::button(&mut win.canvas, f, new, "Nuova partita", true, false);
         if let Some(t) = self.done {
             let area = Rect::new(0, 0, W, H);
             let card = ui::overlay(&mut win.canvas, area, 300, 140);
             win.text_centered(Font::Title, card.x + 150, card.y + 20, "Risolto!", ui::GREEN);
             let secs = (t - self.started) / 1000;
-            win.text_centered(Font::Body, card.x + 150, card.y + 66, &format!("In {}:{:02} con {} errori", secs / 60, secs % 60, self.mistakes), ui::TEXT_DIM);
-            win.text_centered(Font::Small, card.x + 150, card.y + 102, "Clic per una nuova partita", ui::TEXT_FAINT);
+            win.text_centered(Font::Body, card.x + 150, card.y + 66, &format!("In {}:{:02} con {} errori", secs / 60, secs % 60, self.mistakes), ui::text_dim());
+            win.text_centered(Font::Small, card.x + 150, card.y + 102, "Clic per una nuova partita", ui::text_faint());
         }
     }
 }

@@ -326,8 +326,9 @@ fn new_dc(hwnd: u64) -> u64 {
         brush: OBJ_BASE,
         pen: OBJ_BASE + 7,
         font: OBJ_BASE + 13,
-        text: 0,
-        bk: 0x00FF_FFFF,
+        // Text in the theme's colours, as on a window's background.
+        text: sys_color(8),
+        bk: sys_color(5),
         opaque: true,
         x: 0,
         y: 0,
@@ -344,18 +345,28 @@ fn rgb(c: u32) -> u32 {
     0xFF00_0000 | (c & 0xFF) << 16 | (c & 0xFF00) | (c >> 16 & 0xFF)
 }
 
-/// The system colours (`COLOR_*`), as COLORREFs.
+/// The system colours (`COLOR_*`), as COLORREFs: those of the justOS theme
+/// in use (dark or light), as Wine's are.
 fn sys_color(i: u32) -> u32 {
-    match i {
-        0 | 4 | 5 => 0x00FF_FFFF,          // scrollbar, menu, window
-        1..=3 => 0x00A0_6000,              // desktop, captions
-        6..=9 | 18 => 0x0000_0000,         // frame, menu text, window text
-        13 => 0x00D7_7800,                 // highlight
-        14 => 0x00FF_FFFF,                 // highlight text
-        16 => 0x00A0_A0A0,                 // shadow
-        17 => 0x006D_6D6D,                 // grey text
-        _ => 0x00F0_F0F0,                  // 3D face
-    }
+    let c = match i {
+        0 | 4 | 5 | 24 => ui::well(),  // scrollbar, menu, window, tooltip
+        1..=3 => ui::panel_top(),      // desktop, captions
+        7..=9 | 18 | 23 => ui::text(), // menu, window, caption, button, tooltip text
+        6 | 16 | 17 => ui::text_dim(), // frame, shadow, grey text
+        13 => ui::ACCENT,              // highlight
+        14 => ui::WHITE,               // highlight text
+        _ => ui::panel_bottom(),       // 3D face
+    };
+    (c & 0xFF) << 16 | (c & 0xFF00) | (c >> 16 & 0xFF)
+}
+
+/// Paints a window's background: its class brush (the theme's window
+/// colour when it has none), in the rounded shape of the window's well.
+fn erase(c: &mut Canvas, brush: u64) {
+    let bg = brush_color(brush, None).unwrap_or_else(|| sys_color(5));
+    c.reset_clip();
+    c.px.fill(0);
+    c.fill_round(c.bounds(), 18, rgb(bg));
 }
 
 /// The colour a brush handle paints with: a brush object or `COLOR_x + 1`.
@@ -561,9 +572,7 @@ fn create_window(class: String, title: String, style: u32, w: i32, h: i32, param
     let title = if title.is_empty() { String::from("Windows") } else { title };
     let window = if style & 0x0004_0000 != 0 { Window::resizable(&title, cw, ch) } else { Window::new(&title, cw, ch) };
     let Ok(mut window) = window else { return 0 };
-    // The class background (white when there is none, as Windows shows it).
-    let bg = brush_color(brush, None).unwrap_or(0x00FF_FFFF);
-    window.canvas.px.fill(rgb(bg));
+    erase(&mut window.canvas, brush);
     window.present();
     let s = st();
     s.ever_had_window = true;
@@ -842,8 +851,7 @@ fn translate(hwnd: u64, ev: Event) {
         }
         Event::Resize { w, h } => {
             if let Some(win) = win(hwnd) {
-                let bg = brush_color(win.brush, None).unwrap_or(0x00FF_FFFF);
-                win.window.canvas.px.fill(rgb(bg));
+                erase(&mut win.window.canvas, win.brush);
                 win.dirty = true;
             }
             post(hwnd, WM_SIZE, 0, point(w, h));
@@ -1031,7 +1039,7 @@ fn new_or_reused_dc(hwnd: u64) -> u64 {
     let s = st();
     if let Some(i) = s.dcs.iter().position(|d| d.hwnd == hwnd && d.bitmap == 0) {
         let fresh = Dc { hwnd, ..s.dcs[i] };
-        s.dcs[i] = Dc { brush: OBJ_BASE, pen: OBJ_BASE + 7, font: OBJ_BASE + 13, text: 0, bk: 0x00FF_FFFF, opaque: true, ..fresh };
+        s.dcs[i] = Dc { brush: OBJ_BASE, pen: OBJ_BASE + 7, font: OBJ_BASE + 13, text: sys_color(8), bk: sys_color(5), opaque: true, ..fresh };
         return HDC_BASE + i as u64;
     }
     new_dc(hwnd)
@@ -1542,7 +1550,7 @@ fn message_box(text: &str, caption: &str, kind: u32) -> i32 {
         w.clear();
         let mut y = 28;
         for l in &lines {
-            w.text(Font::Body, 24, y, l, ui::TEXT);
+            w.text(Font::Body, 24, y, l, ui::text());
             y += lh;
         }
         for (i, (label, _)) in buttons.iter().enumerate() {

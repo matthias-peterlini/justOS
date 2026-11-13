@@ -472,6 +472,46 @@ enum Ending {
     Restart,
 }
 
+/// A program launched whose first window has not come yet (Firefox takes
+/// most of a minute): its icon waits in the dock, hopping, where its
+/// window's icon will be.
+struct Starting {
+    /// The program file: launching it again meanwhile starts no second copy.
+    path: String,
+    /// The window kind its windows will have (their icon), and its name.
+    kind: String,
+    icon: String,
+    label: String,
+    pid: u32,
+    /// When it was launched, and when the hops started (uptime, ms).
+    since: u64,
+    hop: u64,
+    /// How high the icon was drawn last.
+    lift: i32,
+}
+
+/// How long a program may take to show its first window before its icon
+/// leaves the dock.
+const START_TIMEOUT_MS: u64 = 120_000;
+/// A starting program's icon: one hop, the rest after it, and how high.
+const HOP_MS: u64 = 620;
+const HOP_REST_MS: u64 = 480;
+const HOP_H: i32 = 12;
+
+/// How high a starting program's icon is now, its hops having begun at
+/// `hop`: the arc of a ball, then a pause on the dock.
+fn start_lift(hop: u64) -> i32 {
+    let t = time::uptime_ms().saturating_sub(hop) % (HOP_MS + HOP_REST_MS);
+    if t >= HOP_MS {
+        return 0;
+    }
+    let p = (t * 1000 / HOP_MS) as i64;
+    (HOP_H as i64 * 4 * p * (1000 - p) / 1_000_000) as i32
+}
+
+/// How far each new window goes right and down from the one opened before.
+const CASCADE: i32 = 28;
+
 struct Desktop {
     w: i32,
     h: i32,
@@ -490,10 +530,13 @@ struct Desktop {
     mag: Glide,
     /// An icon bouncing because its app is starting.
     bounce: Option<(String, Anim)>,
+    /// Programs launched that have no window yet.
+    starting: Vec<Starting>,
     mouse: (i32, i32),
     minute: u64,
     second: u64,
-    cascade: i32,
+    /// The window opened last: the next one goes a step from it.
+    last_new: Option<u32>,
     /// The window under the pointer that was told about it last.
     hovered: Option<u32>,
     ending: Option<(Ending, Anim)>,
@@ -622,6 +665,22 @@ impl Desktop {
                 label: apps::app_name(w.app.kind(), &w.app.title()),
                 kind: kind.into(),
                 launch: None,
+                split: first,
+            });
+            first = false;
+        }
+        // Programs starting, where their first window's icon will go.
+        for s in &self.starting {
+            if v.iter().any(|d| d.kind == s.kind) {
+                continue;
+            }
+            v.push(DockItem {
+                id: String::new(),
+                icon: s.icon.clone(),
+                label: s.label.clone(),
+                kind: s.kind.clone(),
+                // Pressed again: it hops (no second copy).
+                launch: Some(Launch::Spawn(s.path.clone())),
                 split: first,
             });
             first = false;
@@ -787,6 +846,20 @@ impl Desktop {
         items.iter().position(|d| d.kind == kind).map(|i| rects[i]).unwrap_or(Rect::new(bg.x + bg.w / 2 - 20, bg.y, 40, 40))
     }
 
+    /// What the hopping icons of programs starting may paint.
+    fn starting_zone(&self) -> Rect {
+        let items = self.dock_items();
+        let (rects, bg) = self.dock_layout(&items);
+        let mut zone = Rect::EMPTY;
+        for (it, r) in items.iter().zip(&rects) {
+            if self.starting.iter().any(|s| s.kind == it.kind) {
+                let top = r.y - HOP_H - 4;
+                zone = zone.union(&Rect::new(r.x - 4, top, r.w + 8, bg.bottom() - top));
+            }
+        }
+        zone
+    }
+
     /// Where windows go: under the clock, above the dock.
     fn work_area(&self) -> Rect {
         let top = 10 + clock_height() + 8;
@@ -882,15 +955,15 @@ impl Desktop {
         }
         let work = self.work_area();
         let (aw, ah) = Window::outer_size(app.size().0, app.size().1);
-        // A window taller than that (a Windows dialog on a small screen)
-        // covers the clock too, rather than losing its bottom.
-        let area = if ah > work.h { Rect::new(work.x, 4, work.w, work.bottom() - 4) } else { work };
+        // A window taller than that that cannot be made smaller (a Windows
+        // dialog on a small screen) covers the clock too, rather than
+        // losing its bottom; any other fits in the work area.
+        let area = if ah > work.h && !app.resizable() { Rect::new(work.x, 4, work.w, work.bottom() - 4) } else { work };
         let (aw, full_h) = (aw.min(area.w), ah.min(area.h));
-        let x = (area.x + (area.w - aw) / 2 + 120 + self.cascade * 26).min(area.right() - aw).max(area.x);
-        let y = (area.y + 14 + self.cascade * 24).min(area.bottom() - full_h).max(area.y);
-        self.cascade = (self.cascade + 1) % 6;
+        let (x, y) = self.place_new(aw, full_h, area);
         let id = self.next_id;
         self.next_id += 1;
+        self.last_new = Some(id);
         let mut win = Window::new(id, app, x, y);
         win.space = self.space;
         win.rect.w = aw;
@@ -898,6 +971,12 @@ impl Desktop {
         let kind = String::from(win.app.kind());
         if let Some(prev) = self.windows.last() {
             l.damage(prev.bounds());
+        }
+        // A program that was starting has its window: its icon in the dock
+        // is the window's now.
+        if self.starting.iter().any(|s| s.kind == kind) {
+            l.damage(self.dock_zone());
+            self.starting.retain(|s| s.kind != kind);
         }
         self.windows.push(win);
         self.start_fx(l, id, FxKind::Open);
@@ -909,6 +988,28 @@ impl Desktop {
 
     fn bounce_icon(&mut self, kind: &str) {
         self.bounce = Some((String::from(kind), Anim::new(650)));
+    }
+
+    /// Where a new window `w` x `h` goes in `area`: in the middle (a little
+    /// above it), or [`CASCADE`] right and down from the window opened
+    /// before it while that one is still out on this desktop, so that the
+    /// start of that one's title row still shows. Past the bottom it stays
+    /// at the bottom (there is little room below most windows); past the
+    /// right edge it goes back to the middle. Its title row is always
+    /// inside the area.
+    fn place_new(&self, w: i32, h: i32, area: Rect) -> (i32, i32) {
+        // Of the room left, two fifths above and three below.
+        let middle = (area.x + (area.w - w) / 2, area.y + (area.h - h) * 2 / 5);
+        let prev = self.last_new.and_then(|id| self.window(id)).filter(|p| p.shown(self.space) && !p.full() && p.snapped.is_none());
+        let (mut x, mut y) = match prev {
+            Some(p) => (p.rect.x + CASCADE, p.rect.y + CASCADE),
+            None => middle,
+        };
+        y = y.min(area.bottom() - h);
+        if x < area.x || y < area.y || x + w > area.right() {
+            (x, y) = middle;
+        }
+        (x.clamp(area.x, (area.right() - w).max(area.x)), y.clamp(area.y, (area.bottom() - h).max(area.y)))
     }
 
     fn open_id(&mut self, l: &mut Looper, id: &'static str) {
@@ -1349,19 +1450,78 @@ impl Desktop {
 
     /// Starts a program that opens a window of its own.
     fn spawn(&mut self, l: &mut Looper, path: &str) {
+        // Still starting: no second copy, its icon just hops again.
+        if let Some(s) = self.starting.iter_mut().find(|s| s.path == path) {
+            s.hop = time::uptime_ms();
+            l.damage(self.starting_zone());
+            return;
+        }
         let name = apps::program_name(path);
         let home = fs::abs("sys:/home").unwrap_or_else(|_| Path::root("sys"));
         match fs::abs(path).map_err(|_| justdk::syscall::Error::NotFound).and_then(|p| crate::user::spawn(&p, "", home)) {
-            Ok(_) => {
-                self.bounce = Some((format!("@{path}"), Anim::new(900)));
+            Ok(pid) => {
                 // A big Linux program (Firefox) takes a while to show its
                 // window: say that it is on its way.
-                if let Some(e) = apps::linux_app_for(path) {
-                    self.notify(l, e.name, String::from("Si sta avviando: la finestra arriva tra poco."), e.icon);
+                let linux = apps::linux_app_for(path);
+                if let Some(e) = &linux {
+                    self.notify(l, e.name.clone(), String::from("Si sta avviando: la finestra arriva tra poco."), e.icon.clone());
+                }
+                // The icon its windows will have (and so their kind, see
+                // `window::icon_for` and `window::create`), when known.
+                let icon = match linux {
+                    Some(e) => Some(e.icon),
+                    None if path.to_ascii_lowercase().ends_with(".app") => {
+                        let file = path.rsplit('/').next().unwrap_or(path);
+                        Some(apps::package_icon(&file[..file.len() - 4]))
+                    }
+                    None => None,
+                };
+                match icon {
+                    // Its icon waits in the dock, hopping, until its first
+                    // window comes. One already open just hops once.
+                    Some(icon) if !self.windows.iter().any(|w| w.app.kind() == icon) => {
+                        let now = time::uptime_ms();
+                        l.damage(self.dock_zone());
+                        self.starting.push(Starting { path: String::from(path), kind: icon.clone(), icon, label: name, pid, since: now, hop: now, lift: 0 });
+                        l.damage(self.dock_zone());
+                    }
+                    Some(icon) => self.bounce_icon(&icon),
+                    None => self.bounce = Some((format!("@{path}"), Anim::new(900))),
                 }
             }
             Err(e) => self.notify(l, name, format!("Non si è potuto avviare: {}", e.as_str()), String::from("window")),
         }
+    }
+
+    /// Programs starting: the icon of one goes when it ended without a
+    /// window (saying so) or after [`START_TIMEOUT_MS`]; [`Desktop::open`]
+    /// takes it when its window comes.
+    fn check_starting(&mut self, l: &mut Looper) {
+        if self.starting.is_empty() {
+            return;
+        }
+        let now = time::uptime_ms();
+        // Which go, and whether because the program ended.
+        let ended: Vec<(usize, bool)> = self
+            .starting
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| {
+                let gone = !crate::user::is_running(s.pid);
+                (gone || now.saturating_sub(s.since) >= START_TIMEOUT_MS).then_some((i, gone))
+            })
+            .collect();
+        if ended.is_empty() {
+            return;
+        }
+        l.damage(self.dock_zone());
+        for &(i, gone) in ended.iter().rev() {
+            let s = self.starting.remove(i);
+            if gone {
+                self.notify(l, s.label, String::from("Non si è avviato."), s.icon);
+            }
+        }
+        l.damage(self.dock_zone());
     }
 
     fn launch(&mut self, l: &mut Looper, e: Launch) {
@@ -2552,6 +2712,10 @@ impl Desktop {
                     lift = (height * 4 * phase * (1000 - phase) / 1_000_000) as i32;
                 }
             }
+            // A program starting: it hops until its window comes.
+            if let Some(s) = self.starting.iter().find(|s| s.kind == it.kind) {
+                lift = start_lift(s.hop);
+            }
             if self.carry.as_ref().is_some_and(|c| c.dock == Some(i)) {
                 // It takes the files carried over it.
                 c.fill_round(r.grow(6), 18, ui::sel());
@@ -3164,6 +3328,7 @@ impl View for Desktop {
             || self.popup.as_ref().is_some_and(|p| !p.settled)
             || self.mag.moving()
             || self.bounce.is_some()
+            || !self.starting.is_empty()
             || self.notes.iter().any(|n| n.moving())
             || self.ending.is_some()
             || self.windows.iter().any(|w| w.shown(self.space) && w.app.animating())
@@ -3359,6 +3524,7 @@ impl Desktop {
                 for app in super::apps::prompt::take_new() {
                     self.open(l, app, false);
                 }
+                self.check_starting(l);
                 while let Some((title, body, icon)) = super::take_notification() {
                     self.notify(l, title, body, icon);
                 }
@@ -3419,6 +3585,17 @@ impl Desktop {
                     if a.done() {
                         self.bounce = None;
                     }
+                }
+                // Icons of programs starting hop: drawn again only when
+                // one moved.
+                let mut hopped = false;
+                for s in self.starting.iter_mut() {
+                    let lift = start_lift(s.hop);
+                    hopped |= lift != s.lift;
+                    s.lift = lift;
+                }
+                if hopped {
+                    l.damage(self.starting_zone());
                 }
                 if self.notes.iter().any(|n| n.moving()) {
                     l.damage(self.notes_zone());
@@ -3576,10 +3753,11 @@ pub fn run(d: &mut Display) {
         hover: None,
         mag: Glide::new(0),
         bounce: None,
+        starting: Vec::new(),
         mouse: (-1, -1),
         minute: u64::MAX,
         second: 0,
-        cascade: 0,
+        last_new: None,
         hovered: None,
         ending: None,
         was_full: false,

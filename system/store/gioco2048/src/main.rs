@@ -195,18 +195,18 @@ impl Game {
         win.text(Font::Display, 24, 18, "2048", 0xFFED_C22E);
         for (k, (label, v)) in [("PUNTI", self.score), ("RECORD", self.best)].iter().enumerate() {
             let r = Rect::new(W - 24 - 90 - (1 - k as i32) * 98, 14, 90, 44);
-            win.canvas.fill_round(r, 10, ui::PANEL);
-            win.text_centered(Font::Small, r.x + r.w / 2, r.y + 3, label, ui::TEXT_DIM);
-            win.text_centered(Font::Strong, r.x + r.w / 2, r.y + 20, &format!("{v}"), ui::TEXT);
+            win.canvas.fill_round(r, 10, ui::cell());
+            win.text_centered(Font::Small, r.x + r.w / 2, r.y + 3, label, ui::text_dim());
+            win.text_centered(Font::Strong, r.x + r.w / 2, r.y + 20, &format!("{v}"), ui::text());
         }
-        win.text(Font::Body, 26, 74, "Unisci le tessere fino a 2048", ui::TEXT_DIM);
+        win.text(Font::Body, 26, 74, "Unisci le tessere fino a 2048", ui::text_dim());
         let f = win.fonts;
         ui::button(&mut win.canvas, f, new_button(), "Nuova partita", false, self.hover_new);
         let board = Rect::new((W - BOARD) / 2, 120, BOARD, BOARD);
-        win.canvas.fill_round(board, 14, 0x40_00_00_00);
+        win.canvas.fill_round(board, 14, ui::cell());
         for r in 0..N {
             for c in 0..N {
-                win.canvas.fill_round(cell_rect(r, c), 8, 0x26FF_FFFF);
+                win.canvas.fill_round(cell_rect(r, c), 8, ui::well());
             }
         }
         let el = justui::now_ms() - self.since;
@@ -242,14 +242,14 @@ impl Game {
             let area = Rect::new(0, 0, W, H);
             let card = ui::overlay(&mut win.canvas, area, 300, 150);
             win.text_centered(Font::Title, card.x + 150, card.y + 22, "Hai vinto!", 0xFFED_C22E);
-            win.text_centered(Font::Body, card.x + 150, card.y + 68, "Continua per un punteggio più alto", ui::TEXT_DIM);
-            win.text_centered(Font::Small, card.x + 150, card.y + 104, "Premi un tasto freccia", ui::TEXT_FAINT);
+            win.text_centered(Font::Body, card.x + 150, card.y + 68, "Continua per un punteggio più alto", ui::text_dim());
+            win.text_centered(Font::Small, card.x + 150, card.y + 104, "Premi un tasto freccia", ui::text_faint());
         } else if self.over {
             let area = Rect::new(0, 0, W, H);
             let card = ui::overlay(&mut win.canvas, area, 300, 150);
-            win.text_centered(Font::Title, card.x + 150, card.y + 22, "Fine partita", ui::TEXT);
-            win.text_centered(Font::Body, card.x + 150, card.y + 68, &format!("{} punti", self.score), ui::TEXT_DIM);
-            win.text_centered(Font::Small, card.x + 150, card.y + 104, "Invio per ricominciare", ui::TEXT_FAINT);
+            win.text_centered(Font::Title, card.x + 150, card.y + 22, "Fine partita", ui::text());
+            win.text_centered(Font::Body, card.x + 150, card.y + 68, &format!("{} punti", self.score), ui::text_dim());
+            win.text_centered(Font::Small, card.x + 150, card.y + 104, "Invio per ricominciare", ui::text_faint());
         }
     }
 

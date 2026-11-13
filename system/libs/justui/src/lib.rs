@@ -7,7 +7,9 @@
 //! back as [`Event`]s.
 //!
 //! The canvas starts transparent: whatever is left transparent shows the
-//! window's frosted glass, as in the built-in apps.
+//! window's content well, as in the built-in apps. Draw on it in the colours
+//! of [`ui`], which follow the theme the user chose (dark or light): a
+//! program that paints a background of its own paints it in [`ui::well`].
 //!
 //! Sizes and positions are in units. On a high-density screen the canvas
 //! has two pixels per unit (and text comes from fonts drawn at twice the
@@ -16,8 +18,8 @@
 //! ```ignore
 //! let mut win = Window::new("Ciao", 400, 300)?;
 //! loop {
-//!     win.canvas.px.fill(0);
-//!     win.text(Font::Title, 20, 20, "Ciao!", ui::TEXT);
+//!     win.clear();
+//!     win.text(Font::Title, 20, 20, "Ciao!", ui::text());
 //!     win.present();
 //!     match win.wait() {
 //!         Event::Close => break,
@@ -155,6 +157,7 @@ impl Window {
         // An older system has no WIN_SCALE: one pixel per unit.
         let scale = check(call(sys::WIN_SCALE, handle, 0, 0, 0, 0)).map_or(1, |s| s.clamp(1, 2) as i32);
         let fonts = fonts_for(scale)?;
+        ui::refresh_theme();
         Ok(Window { handle, canvas: Canvas::new_layer_at(w, h, scale), fonts })
     }
 
@@ -183,13 +186,16 @@ impl Window {
         call(sys::WIN_TITLE, self.handle, title.as_ptr() as u64, title.len() as u64, 0, 0);
     }
 
-    /// The next event, waiting up to `ms` milliseconds (0: only look).
+    /// The next event, waiting up to `ms` milliseconds (0: only look). The
+    /// colours of [`ui`] then are those of the theme in use, should the user
+    /// have switched it in the meantime.
     pub fn event(&mut self, ms: u64) -> Option<Event> {
         let mut raw = [0u64; 4];
         let got = call(sys::WIN_EVENT, self.handle, raw.as_mut_ptr() as u64, ms.max(1), 0, 0);
         if got != 1 {
             return None;
         }
+        ui::refresh_theme();
         let ev = match raw[0] {
             sys::WIN_EV_PRESS if raw[3] == 2 => Event::Menu { x: raw[1] as i32, y: raw[2] as i32 },
             sys::WIN_EV_PRESS => Event::Press { x: raw[1] as i32, y: raw[2] as i32, double: raw[3] == 1 },
@@ -225,7 +231,7 @@ impl Window {
         }
     }
 
-    /// Clears the canvas to transparent (the glass shows).
+    /// Clears the canvas to transparent (the window's well shows).
     pub fn clear(&mut self) {
         self.canvas.px.fill(0);
         self.canvas.reset_clip();

@@ -123,17 +123,17 @@ impl Game {
 
     fn draw(&self, win: &mut Window) {
         win.clear();
-        win.text(Font::Heading, PAD + 4, 14, "Serpente", ui::TEXT);
+        win.text(Font::Heading, PAD + 4, 14, "Serpente", ui::text());
         let s = format!("Mele {}   ·   Record {}", self.score, self.best);
         let f = win.fonts;
         let w = f.width(Font::Strong, &s);
-        win.text(Font::Strong, W - PAD - 4 - w, 18, &s, ui::TEXT_DIM);
+        win.text(Font::Strong, W - PAD - 4 - w, 18, &s, ui::text_dim());
         let field = Rect::new(PAD, TOP, COLS * CELL, ROWS * CELL);
-        win.canvas.fill_round(field, 12, 0x6612_1A14);
+        win.canvas.fill_round(field, 12, ui::cell());
         for y in 0..ROWS {
             for x in 0..COLS {
                 if (x + y) % 2 == 0 {
-                    win.canvas.fill(Rect::new(PAD + x * CELL, TOP + y * CELL, CELL, CELL), 0x0AFF_FFFF);
+                    win.canvas.fill(Rect::new(PAD + x * CELL, TOP + y * CELL, CELL, CELL), ui::pane());
                 }
             }
         }
@@ -163,19 +163,19 @@ impl Game {
         match self.state {
             State::Ready => {
                 let card = ui::overlay(&mut win.canvas, area, 320, 120);
-                win.text_centered(Font::Heading, card.x + 160, card.y + 24, "Pronto?", ui::TEXT);
-                win.text_centered(Font::Body, card.x + 160, card.y + 66, "Premi una freccia per partire", ui::TEXT_DIM);
+                win.text_centered(Font::Heading, card.x + 160, card.y + 24, "Pronto?", ui::text());
+                win.text_centered(Font::Body, card.x + 160, card.y + 66, "Premi una freccia per partire", ui::text_dim());
             }
             State::Paused => {
                 let card = ui::overlay(&mut win.canvas, area, 260, 100);
-                win.text_centered(Font::Heading, card.x + 130, card.y + 22, "In pausa", ui::TEXT);
-                win.text_centered(Font::Small, card.x + 130, card.y + 62, "Spazio per riprendere", ui::TEXT_FAINT);
+                win.text_centered(Font::Heading, card.x + 130, card.y + 22, "In pausa", ui::text());
+                win.text_centered(Font::Small, card.x + 130, card.y + 62, "Spazio per riprendere", ui::text_faint());
             }
             State::Over => {
                 let card = ui::overlay(&mut win.canvas, area, 300, 140);
-                win.text_centered(Font::Title, card.x + 150, card.y + 20, "Fine partita", ui::TEXT);
-                win.text_centered(Font::Body, card.x + 150, card.y + 66, &format!("{} mele", self.score), ui::TEXT_DIM);
-                win.text_centered(Font::Small, card.x + 150, card.y + 102, "Invio o clic per ricominciare", ui::TEXT_FAINT);
+                win.text_centered(Font::Title, card.x + 150, card.y + 20, "Fine partita", ui::text());
+                win.text_centered(Font::Body, card.x + 150, card.y + 66, &format!("{} mele", self.score), ui::text_dim());
+                win.text_centered(Font::Small, card.x + 150, card.y + 102, "Invio o clic per ricominciare", ui::text_faint());
             }
             State::Running => {}
         }

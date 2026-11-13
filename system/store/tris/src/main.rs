@@ -145,17 +145,17 @@ impl Game {
 
     fn draw(&self, win: &mut Window) {
         win.clear();
-        win.text_centered(Font::Title, W / 2, 16, "Tris", ui::TEXT);
+        win.text_centered(Font::Title, W / 2, 16, "Tris", ui::text());
         let score = format!("Tu {}  ·  Pari {}  ·  justOS {}", self.wins.0, self.wins.1, self.wins.2);
-        win.text_centered(Font::Body, W / 2, 62, &score, ui::TEXT_DIM);
+        win.text_centered(Font::Body, W / 2, 62, &score, ui::text_dim());
         let f = win.fonts;
         ui::segmented(&mut win.canvas, f, level_rect(), &["Facile", "Difficile"], self.hard as usize);
         let now = justui::now_ms();
         for k in 1..3 {
             let x = GRID_X + k * CELL;
-            win.canvas.fill_round(Rect::new(x - 2, GRID_Y + 8, 4, 3 * CELL - 16), 2, 0x55FF_FFFF);
+            win.canvas.fill_round(Rect::new(x - 2, GRID_Y + 8, 4, 3 * CELL - 16), 2, ui::text_faint());
             let y = GRID_Y + k * CELL;
-            win.canvas.fill_round(Rect::new(GRID_X + 8, y - 2, 3 * CELL - 16, 4), 2, 0x55FF_FFFF);
+            win.canvas.fill_round(Rect::new(GRID_X + 8, y - 2, 3 * CELL - 16, 4), 2, ui::text_faint());
         }
         for i in 0..9 {
             let r = cell_rect(i);
@@ -168,7 +168,7 @@ impl Game {
                     win.canvas.line(cx - s, cy + s, cx + s, cy - s, 7, 0xFF5A_C8FA);
                 }
                 Cell::O => {
-                    win.canvas.arc(cx, cy, s + 4, 8, 1000, ui::YELLOW);
+                    win.canvas.arc(cx, cy, s + 4, 8, 1000, ui::ORANGE);
                 }
                 Cell::Empty => {
                     if self.hover == Some(i) && self.turn_player && self.over.is_none() {
@@ -182,19 +182,19 @@ impl Game {
             Some((w, line)) => {
                 if let Some(l) = line {
                     let (a, b) = (cell_rect(l[0]), cell_rect(l[2]));
-                    win.canvas.line(a.x + a.w / 2, a.y + a.h / 2, b.x + b.w / 2, b.y + b.h / 2, 6, 0xCCFF_FFFF);
+                    win.canvas.line(a.x + a.w / 2, a.y + a.h / 2, b.x + b.w / 2, b.y + b.h / 2, 6, ui::text());
                 }
                 let msg = match w {
                     Cell::X => "Hai vinto!",
                     Cell::O => "Vince justOS",
                     Cell::Empty => "Pareggio",
                 };
-                win.text_centered(Font::Heading, W / 2, GRID_Y + 3 * CELL - 4, msg, ui::TEXT);
+                win.text_centered(Font::Heading, W / 2, GRID_Y + 3 * CELL - 4, msg, ui::text());
                 ui::button(&mut win.canvas, f, again_rect(), "Ancora", true, false);
             }
             None => {
                 let msg = if self.turn_player { "Tocca a te (X)" } else { "justOS ci pensa…" };
-                win.text_centered(Font::Body, W / 2, GRID_Y + 3 * CELL + 14, msg, ui::TEXT_FAINT);
+                win.text_centered(Font::Body, W / 2, GRID_Y + 3 * CELL + 14, msg, ui::text_faint());
             }
         }
     }

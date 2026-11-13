@@ -131,6 +131,12 @@ pub const WIN_DROPPED: u64 = 40;
 /// high-density screen (where a frame drawn with twice the pixels each way
 /// is sharp). `WIN_EV_RESIZE` says when it changes.
 pub const WIN_SCALE: u64 = 41;
+/// () -> the theme the user chose for windows (Impostazioni, Aspetto):
+/// `THEME_DARK` or `THEME_LIGHT`. Programs draw their content in its
+/// colours (justui's `ui` does).
+pub const THEME: u64 = 42;
+pub const THEME_DARK: u64 = 0;
+pub const THEME_LIGHT: u64 = 1;
 
 pub const PORT_MSG_MAX: u64 = 64 << 10;
 pub const PORT_QUEUE_MAX: usize = 64;

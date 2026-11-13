@@ -184,9 +184,9 @@ sistema: justOS non aggira nessun controllo. I dettagli sono in
 2. **Avvialo** in una macchina virtuale:
    - **QEMU**:
      ```sh
-     qemu-system-x86_64 -m 512M -cdrom justos.iso -device ich9-intel-hda -device hda-output
+     qemu-system-x86_64 -m 1G -cdrom justos.iso -device ich9-intel-hda -device hda-output
      ```
-   - **VirtualBox**: una macchina "Other/Unknown (64-bit)" con 512 MiB di memoria, senza disco, con `justos.iso` nel lettore CD.
+   - **VirtualBox**: una macchina "Other/Unknown (64-bit)" con 1 GiB di memoria, senza disco, con `justos.iso` nel lettore CD.
    - **VMware** e **Hyper-V** (prima generazione) vanno bene allo stesso modo.
 3. **Scegli** nome, tastiera e sfondo: dopo c'è la scrivania.
 
@@ -309,8 +309,8 @@ make run        # avvia justOS in QEMU (anche run-uefi, run-q35, run-nvme, run-i
 ```
 
 L'immagine è da 1 GiB perché porta Firefox; `make SIZE=2G` ne cambia la
-dimensione, `make run MEMORY=1G` dà più memoria alla macchina virtuale
-(Firefox vuole almeno 1 GiB). `make wine-image` costruisce
+dimensione, `make run MEMORY=2G` dà più memoria alla macchina virtuale
+(di norma 1 GiB, quanto serve a Firefox). `make wine-image` costruisce
 `build/justos-wine.img`, con Wine per i programmi Windows.
 
 <details>

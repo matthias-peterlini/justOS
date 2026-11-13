@@ -163,6 +163,15 @@ pub fn scale(pid: u32, handle: u64) -> Result<u64, sys::Error> {
     Ok(super::scale() as u64)
 }
 
+/// `THEME`: the theme windows are drawn in, for programs to draw theirs in.
+pub fn theme() -> u64 {
+    if super::ui::theme() == super::ui::Theme::Light {
+        sys::THEME_LIGHT
+    } else {
+        sys::THEME_DARK
+    }
+}
+
 pub fn set_title(pid: u32, handle: u64, title: &str) -> Result<(), sys::Error> {
     let win = get(handle, pid).ok_or(sys::Error::BadHandle)?;
     win.lock().title = String::from(title);

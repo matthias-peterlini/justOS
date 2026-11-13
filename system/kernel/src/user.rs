@@ -1562,6 +1562,7 @@ fn call(n: u64, a: [u64; 5]) -> Result<u64, Error> {
             crate::gui::window::present(task::current_pid(), a[0], pixels, w as i32, h as i32, scale as i32).map(|_| 0)
         }
         sys::WIN_SCALE => crate::gui::window::scale(task::current_pid(), a[0]),
+        sys::THEME => Ok(crate::gui::window::theme()),
         sys::WIN_EVENT => {
             let out = user_slice(a[1], 32)?;
             match crate::gui::window::next_event(task::current_pid(), a[0], a[2])? {

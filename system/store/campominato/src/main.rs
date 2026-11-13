@@ -193,28 +193,28 @@ impl Game {
         let ww = win.width();
         let flags = self.flag.iter().filter(|&&f| f).count();
         let left = self.mines as i64 - flags as i64;
-        win.canvas.fill_round(Rect::new(PAD, 14, 92, 34), 10, ui::PANEL);
-        win.text(Font::Strong, PAD + 12, 21, &format!("Mine {left}"), ui::TEXT);
-        win.canvas.fill_round(Rect::new(PAD + 102, 14, 80, 34), 10, ui::PANEL);
+        win.canvas.fill_round(Rect::new(PAD, 14, 92, 34), 10, ui::cell());
+        win.text(Font::Strong, PAD + 12, 21, &format!("Mine {left}"), ui::text());
+        win.canvas.fill_round(Rect::new(PAD + 102, 14, 80, 34), 10, ui::cell());
         let s = self.seconds();
-        win.text(Font::Strong, PAD + 114, 21, &format!("{}:{:02}", s / 60, s % 60), ui::TEXT);
+        win.text(Font::Strong, PAD + 114, 21, &format!("{}:{:02}", s / 60, s % 60), ui::text());
         let f = win.fonts;
         let labels: Vec<&str> = LEVELS.iter().map(|l| l.0).collect();
         ui::segmented(&mut win.canvas, f, self.level_btns(ww), &labels, self.level);
-        let colors = [0, 0xFF5A_A9FF, 0xFF5D_E28A, 0xFFFF_6961, 0xFFBF_8CFF, 0xFFFF_B340, 0xFF64_D2FF, 0xFFF5_F2F8, 0xFFAE_AEB2];
+        let colors = [0, 0xFF5A_A9FF, 0xFF5D_E28A, 0xFFFF_6961, 0xFFBF_8CFF, 0xFFFF_B340, 0xFF64_D2FF, ui::text(), 0xFFAE_AEB2];
         for i in 0..self.w * self.h {
             let (x, y) = (self.grid_x() + (i % self.w) as i32 * CELL, TOP + (i / self.w) as i32 * CELL);
             let r = Rect::new(x + 1, y + 1, CELL - 2, CELL - 2);
             let show_mine = self.mine[i] && (self.state == State::Lost);
             if self.open[i] || show_mine {
-                let bg = if self.boom == Some(i) { 0xFFFF_453A } else { 0x1AFF_FFFF };
+                let bg = if self.boom == Some(i) { 0xFFFF_453A } else { ui::pane() };
                 win.canvas.fill_round(r, 5, bg);
                 if self.mine[i] {
                     let (cx, cy) = (r.x + r.w / 2, r.y + r.h / 2);
-                    win.canvas.fill_circle(cx, cy, 8, 0xFF1C_1C1E);
+                    win.canvas.fill_circle(cx, cy, 8, ui::text());
                     for k in 0..4 {
                         let (dx, dy) = [(1, 0), (0, 1), (1, 1), (1, -1)][k];
-                        win.canvas.line(cx - dx * 11, cy - dy * 11, cx + dx * 11, cy + dy * 11, 2, 0xFF1C_1C1E);
+                        win.canvas.line(cx - dx * 11, cy - dy * 11, cx + dx * 11, cy + dy * 11, 2, ui::text());
                     }
                     win.canvas.fill_circle(cx - 3, cy - 3, 2, 0xFFFF_FFFF);
                 } else {
@@ -225,10 +225,11 @@ impl Game {
                 }
             } else {
                 let hover = self.hover == Some(i) && matches!(self.state, State::Ready | State::Playing);
-                win.canvas.fill_round(r, 5, if hover { 0x66FF_FFFF } else { 0x40FF_FFFF });
+                let g = ui::knob_grad();
+                ui::tile(&mut win.canvas, r, 6, if hover { (ui::lighten(g.0, 40), ui::lighten(g.1, 40)) } else { g });
                 if self.flag[i] {
                     let (cx, cy) = (r.x + r.w / 2, r.y + r.h / 2);
-                    win.canvas.fill(Rect::new(cx - 1, cy - 9, 2, 18), 0xFFFF_FFFF);
+                    win.canvas.fill(Rect::new(cx - 1, cy - 9, 2, 18), ui::knob_glyph());
                     win.canvas.triangle([(cx + 1, cy - 9), (cx + 10, cy - 4), (cx + 1, cy + 1)], 0xFFFF_453A);
                     if self.state == State::Lost && !self.mine[i] {
                         win.canvas.line(r.x + 4, r.y + 4, r.right() - 5, r.bottom() - 5, 2, 0xFFFF_453A);
@@ -242,8 +243,8 @@ impl Game {
             let (title, color) = if self.state == State::Won { ("Hai vinto!", ui::GREEN) } else { ("Boom!", ui::RED) };
             win.text_centered(Font::Title, card.x + 140, card.y + 22, title, color);
             let line = if self.state == State::Won { format!("In {} secondi", self.seconds()) } else { format!("Mancavano {} celle", self.remaining()) };
-            win.text_centered(Font::Body, card.x + 140, card.y + 66, &line, ui::TEXT_DIM);
-            win.text_centered(Font::Small, card.x + 140, card.y + 100, "Clic per un'altra partita", ui::TEXT_FAINT);
+            win.text_centered(Font::Body, card.x + 140, card.y + 66, &line, ui::text_dim());
+            win.text_centered(Font::Small, card.x + 140, card.y + 100, "Clic per un'altra partita", ui::text_faint());
         }
     }
 

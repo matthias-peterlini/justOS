@@ -1,5 +1,6 @@
 //! An app's screen in a window: an app bar with the title and, below it,
-//! the activity's views, laid out and drawn in the light Material look.
+//! the activity's views, laid out as Material lays them out and drawn in
+//! the system's look (its theme's colours, its buttons and fields).
 
 use alloc::format;
 use alloc::rc::Rc;
@@ -7,12 +8,9 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use justdex::android::{view, ViewKind};
 use justdex::{Ref, Throw, Vm};
-use justui::{Event, Font, Fonts, Key, Rect, Window};
+use justui::{ui, Event, Font, Fonts, Key, Rect, Window};
 
-const BG: u32 = 0xFFFA_FAFA;
-const PRIMARY: u32 = 0xFF62_00EE;
-const TEXT: u32 = 0xFF21_2121;
-const HINT: u32 = 0xFF9E_9E9E;
+const PRIMARY: u32 = ui::ACCENT;
 const BAR_H: i32 = 56;
 const GAP: i32 = 8;
 const MARGIN: i32 = 16;
@@ -68,7 +66,7 @@ impl Screen {
         let [pl, pt, pr, pb] = info.padding.map(|p| p / 2);
         let inner = Rect::new(x + pl, y + pt, (w - pl - pr).max(1), 0);
         let kind = info.kind;
-        let color = info.text_color.unwrap_or(TEXT);
+        let color = info.text_color.unwrap_or_else(ui::text);
         let font = font_for(info.text_size, info.bold);
         let center = info.gravity & 0x7 == 1 || info.gravity & 0x11 == 0x11;
         let (lh, _) = f.metrics(font);
@@ -168,46 +166,33 @@ impl Screen {
                 // In a column a button is as wide as its label; in a row it fills its cell.
                 let bw = if self.in_row { inner.w } else { tw.clamp(88, inner.w) };
                 let r = Rect::new(inner.x, inner.y, bw, 40);
-                c.shadow(r, 4, 3, 40);
-                c.fill_round(r, 4, if enabled { bg.unwrap_or(PRIMARY) } else { 0xFFBD_BDBD });
-                let (blh, _) = f.metrics(Font::Strong);
-                let fg = if info_has_color(v) { color } else { 0xFFFF_FFFF };
-                f.draw_centered(c, Font::Strong, r.x + r.w / 2, r.y + (40 - blh) / 2, &label, fg);
+                match bg {
+                    Some(b) if enabled => ui::button_color(c, f, r, &label, b, if info_has_color(v) { color } else { ui::WHITE }),
+                    _ => ui::button(c, f, r, &label, enabled, false),
+                }
             }
             ViewKind::Edit if show => {
                 let focused = self.focus.as_ref().is_some_and(|x| Rc::ptr_eq(x, v));
-                let (elh, _) = f.metrics(font);
-                let ty = inner.y + (40 - elh) / 2;
-                if text.is_empty() {
-                    f.draw(c, font, inner.x + 2, ty, &hint, HINT);
-                } else {
-                    let shown = f.fit(font, &text, inner.w - 6);
-                    f.draw(c, font, inner.x + 2, ty, &shown, color);
-                }
-                if focused {
-                    let cx = inner.x + 3 + if text.is_empty() { 0 } else { f.width(font, &f.fit(font, &text, inner.w - 6)) };
-                    c.fill(Rect::new(cx, ty, 2, elh), PRIMARY);
-                }
-                c.fill(Rect::new(inner.x, inner.y + 40, inner.w, if focused { 2 } else { 1 }), if focused { PRIMARY } else { HINT });
+                ui::text_field(c, f, Rect::new(inner.x, inner.y, inner.w, 40), &text, &hint, focused);
             }
             ViewKind::Check if show => {
                 let b = Rect::new(inner.x + 2, inner.y + 7, 18, 18);
                 if checked {
-                    c.fill_round(b, 2, PRIMARY);
-                    c.line(b.x + 4, b.y + 9, b.x + 8, b.y + 13, 2, 0xFFFF_FFFF);
-                    c.line(b.x + 8, b.y + 13, b.x + 14, b.y + 5, 2, 0xFFFF_FFFF);
+                    c.fill_round_grad(b, 5, ui::ORANGE_GRAD.0, ui::ORANGE_GRAD.1);
+                    c.line(b.x + 4, b.y + 9, b.x + 8, b.y + 13, 2, ui::WHITE);
+                    c.line(b.x + 8, b.y + 13, b.x + 14, b.y + 5, 2, ui::WHITE);
                 } else {
-                    c.stroke_round(b, 2, 2, 0xFF75_7575);
+                    c.stroke_round(b, 5, 2, ui::text_faint());
                 }
                 f.draw(c, font, inner.x + 32, inner.y + (32 - lh) / 2, &text, color);
             }
             ViewKind::Progress if show => {
-                let r = Rect::new(inner.x, inner.y + 4, inner.w, 4);
-                c.fill(r, 0xFFD1_C4E9);
-                c.fill(Rect::new(r.x, r.y, (r.w as i64 * progress.clamp(0, max) as i64 / max as i64) as i32, 4), PRIMARY);
+                let r = Rect::new(inner.x, inner.y + 3, inner.w, 6);
+                c.fill_round(r, 3, ui::cell());
+                c.fill_round(Rect::new(r.x, r.y, (r.w as i64 * progress.clamp(0, max) as i64 / max as i64) as i32, 6), 3, PRIMARY);
             }
             ViewKind::Image if show => {
-                c.fill_round(Rect::new(inner.x, inner.y, 64, 64), 8, 0xFFE0_E0E0);
+                c.fill_round(Rect::new(inner.x, inner.y, 64, 64), 12, ui::cell());
             }
             _ => {}
         }
@@ -221,8 +206,8 @@ impl Screen {
         let (w, h) = (self.win.width(), self.win.height());
         let f = self.fonts;
         self.hits.clear();
-        self.win.canvas.reset_clip();
-        self.win.canvas.fill(Rect::new(0, 0, w, h), BG);
+        // Transparent: the window's well shows, in the theme's colour.
+        self.win.clear();
         if let Some(root) = vm.ui.content.clone() {
             self.content_h = self.place(&root, MARGIN, 0, w - 2 * MARGIN, false);
             let room = h - BAR_H - 2 * MARGIN;
@@ -231,14 +216,13 @@ impl Screen {
             self.place(&root, MARGIN, BAR_H + MARGIN - self.scroll, w - 2 * MARGIN, true);
             self.win.canvas.reset_clip();
         }
-        // The app bar.
-        let bar = Rect::new(0, 0, w, BAR_H);
-        self.win.canvas.fill(bar, PRIMARY);
-        self.win.canvas.fill(Rect::new(0, BAR_H, w, 3), 0x3000_0000);
+        // The app bar: the title over a thin line (the content is clipped
+        // below it).
+        self.win.canvas.fill(Rect::new(MARGIN, BAR_H - 1, w - 2 * MARGIN, 1), ui::line());
         let title = vm.ui.title.clone().unwrap_or_else(|| self.name.clone());
         let (lh, _) = f.metrics(Font::Heading);
         let shown = f.fit(Font::Heading, &title, w - 2 * MARGIN);
-        f.draw(&mut self.win.canvas, Font::Heading, MARGIN, (BAR_H - lh) / 2, &shown, 0xFFFF_FFFF);
+        f.draw(&mut self.win.canvas, Font::Heading, MARGIN, (BAR_H - lh) / 2, &shown, ui::text());
         if let Some((t, _)) = &self.toast {
             let lines = f.wrap(Font::Body, t, w - 96);
             let (blh, _) = f.metrics(Font::Body);
@@ -256,11 +240,11 @@ impl Screen {
             let (blh, _) = f.metrics(Font::Body);
             let (slh, _) = f.metrics(Font::Strong);
             let card = Rect::new(r.x, r.y, r.w, slh + lines.len() as i32 * blh + 40);
-            self.win.canvas.fill(Rect::new(0, BAR_H, w, h - BAR_H), 0x8000_0000);
-            self.win.canvas.fill_round(card, 8, 0xFFFF_FFFF);
-            f.draw(&mut self.win.canvas, Font::Strong, card.x + 16, card.y + 14, &format!("{} si è arrestata", self.name), 0xFFB0_0020);
+            self.win.canvas.fill(Rect::new(0, BAR_H, w, h - BAR_H), ui::shadow_strength(0x80) << 24);
+            ui::panel(&mut self.win.canvas, card, 18);
+            f.draw(&mut self.win.canvas, Font::Strong, card.x + 16, card.y + 14, &format!("{} si è arrestata", self.name), ui::RED);
             for (i, l) in lines.iter().enumerate() {
-                f.draw(&mut self.win.canvas, Font::Body, card.x + 16, card.y + 22 + slh + i as i32 * blh, l, TEXT);
+                f.draw(&mut self.win.canvas, Font::Body, card.x + 16, card.y + 22 + slh + i as i32 * blh, l, ui::text());
             }
         }
         self.win.present();

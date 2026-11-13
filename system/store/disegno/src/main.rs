@@ -91,10 +91,9 @@ fn buttons() -> [Rect; 3] {
     [Rect::new(W - 300, 12, 88, 32), Rect::new(W - 204, 12, 88, 32), Rect::new(W - 108, 12, 92, 32)]
 }
 
-/// Draws the tool's little picture.
-fn tool_icon(c: &mut Canvas, t: Tool, r: Rect, color: u32) {
+/// Draws the tool's little picture in `fg`.
+fn tool_icon(c: &mut Canvas, t: Tool, r: Rect, color: u32, fg: u32) {
     let (cx, cy) = (r.x + r.w / 2, r.y + r.h / 2);
-    let fg = 0xFFF5_F2F8;
     match t {
         Tool::Pencil => {
             c.line(cx - 10, cy + 10, cx + 8, cy - 8, 4, fg);
@@ -306,23 +305,35 @@ impl App {
         for (i, &col) in COLORS.iter().enumerate() {
             let r = color_rect(i);
             if col == self.color {
-                c.fill_circle(r.x + 13, r.y + 13, 16, 0xFFFF_FFFF);
+                c.fill_circle(r.x + 13, r.y + 13, 16, ui::text());
             }
             c.fill_circle(r.x + 13, r.y + 13, 12, col);
         }
         for (i, &s) in SIZES.iter().enumerate() {
             let r = size_rect(i);
-            c.fill_round(r, 9, if i == self.size { 0x40FF_FFFF } else { 0x1AFF_FFFF });
-            c.fill_circle(r.x + 15, r.y + 15, (s / 2 + 1).min(9), 0xFFF5_F2F8);
+            if i == self.size {
+                ui::tile(c, r, 9, ui::knob_grad());
+            } else {
+                c.fill_round(r, 9, ui::cell());
+            }
+            c.fill_circle(r.x + 15, r.y + 15, (s / 2 + 1).min(9), ui::text());
         }
         let [undo, clear, save] = buttons();
         ui::button(c, f, undo, "Annulla", false, self.hover == Some(undo));
         ui::button(c, f, clear, "Pulisci", false, self.hover == Some(clear));
-        ui::button_color(c, f, save, "Salva", if self.hover == Some(save) { 0xFF40_9CFF } else { ui::ACCENT }, 0xFFFF_FFFF);
+        ui::button(c, f, save, "Salva", true, self.hover == Some(save));
         for (i, (t, _)) in TOOLS.iter().enumerate() {
             let r = tool_rect(i);
-            c.fill_round(r, 12, if *t == self.tool { ui::ACCENT } else if self.hover == Some(r) { 0x33FF_FFFF } else { 0x1AFF_FFFF });
-            tool_icon(c, *t, r, self.color);
+            let chosen = *t == self.tool;
+            if chosen {
+                ui::tile(c, r, 12, ui::ORANGE_GRAD);
+            } else {
+                c.fill_round(r, 12, ui::cell());
+                if self.hover == Some(r) {
+                    c.fill_round(r, 12, ui::sel());
+                }
+            }
+            tool_icon(c, *t, r, self.color, if chosen { ui::WHITE } else { ui::text() });
         }
         let p = paper_rect();
         c.shadow(p, 6, 10, 80);
@@ -333,13 +344,13 @@ impl App {
             let w = f.width(Font::Small, label) + 16;
             let tip = Rect::new(r.right() + 8, r.y + 12, w, 24);
             c.fill_round(tip, 8, 0xE61E_1626);
-            f.draw(c, Font::Small, tip.x + 8, tip.y + 3, label, ui::TEXT);
+            f.draw(c, Font::Small, tip.x + 8, tip.y + 3, label, ui::WHITE);
         }
         if !self.note.is_empty() && justui::now_ms() < self.note_until {
             let w = f.width(Font::Body, &self.note) + 32;
             let r = Rect::new(p.x + (p.w - w) / 2, p.bottom() - 52, w, 36);
             c.fill_round(r, 18, 0xE61E_1626);
-            f.draw_centered(c, Font::Body, r.x + w / 2, r.y + 8, &self.note, ui::TEXT);
+            f.draw_centered(c, Font::Body, r.x + w / 2, r.y + 8, &self.note, ui::WHITE);
         }
     }
 
