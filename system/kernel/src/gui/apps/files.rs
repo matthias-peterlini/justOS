@@ -124,7 +124,6 @@ pub fn icon_for(name: &str, dir: bool) -> &'static str {
         "zip" | "tar" | "gz" | "xz" | "jdp" | "7z" => "file-archive",
         "py" | "rs" | "c" | "h" | "js" | "sh" | "toml" | "json" | "html" | "css" => "file-code",
         "mp3" | "wav" | "ogg" | "flac" => "file-audio",
-        "jt" | "jpk" => "file-script",
         "exe" => "file-exe",
         "app" => "window",
         _ => "file",

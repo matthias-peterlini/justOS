@@ -114,7 +114,8 @@ pub const PROC_NAME: u64 = 36;
 pub const APP_ID: u64 = 37;
 /// (id, len, name, len): from now on the program runs as app `id` (shown
 /// as `name`), in its sandbox. One way: an app cannot become another
-/// (`Denied`). For runners such as `just` before they start a package.
+/// (`Denied`). For programs that run others' code, before they start the
+/// package as the app it names.
 pub const APP_ENTER: u64 = 38;
 /// (mode, name, len, buf, cap) -> length of the path chosen: the system's
 /// file picker, outside the app. `PICK_OPEN` a file to open, `PICK_SAVE` a

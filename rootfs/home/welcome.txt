@@ -12,5 +12,4 @@ Per cominciare:
 Le tue cose stanno nella home: Documenti, Immagini, Musica, Note...
 La cartella Musica ha già tre brani da ascoltare.
 
-Per chi programma: il Terminale (tra le applicazioni) ha la shell di justOS;
-in sys:/home/justscript ci sono esempi nel linguaggio JustScript.
+Per chi programma: il Terminale (tra le applicazioni) ha la shell di justOS.

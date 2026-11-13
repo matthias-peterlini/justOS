@@ -48,8 +48,8 @@ Ogni app installata ha un `app_id` (`kernel/src/sandbox.rs`, chiamate 37–39
 in `justdk::syscall`, libreria `justrt::app`):
 
 - le app native in `sys:/apps` lo prendono dalla chiave `app_id=` del loro
-  `<nome>.info` (altrimenti `dev.justos.<nome>`), i pacchetti `.jpk` da
-  `just`, che chiama `APP_ENTER` prima di eseguirli; i processi figli
+  `<nome>.info` (altrimenti `dev.justos.<nome>`); un programma che esegue
+  codice altrui può diventare un'app con `APP_ENTER`; i processi figli
   ereditano l'app del padre. Gli id sono minuscoli e `just.` è riservato.
 - file: la propria cartella `sys:/home/.apps/<app_id>` (anche la cartella di
   partenza), in sola lettura i caratteri, i certificati, i suoni e le app;
@@ -129,7 +129,7 @@ chiamate `WIN_CREATE`/`WIN_PRESENT`/`WIN_EVENT`.
 
 | Cosa | Stato |
 |---|---|
-| Browser | 🟡 Browser con `justweb`: HTML, CSS, immagini, moduli, cookie, HTTPS (`justtls`), JavaScript (`justjs`, interprete senza JIT) |
+| Browser | ✅ Firefox ESR, di serie, sullo strato Linux |
 | WebGL, DRM (Widevine) | ⬜ / ⛔ |
 | Negozio grafico con installazione in un clic | ✅ (`sys:/store`, pacchetti `.app`) |
 | Aggiornamenti delle app in background | ✅ indice firmato Ed25519, servizio `just.updates`, sezione Aggiornamenti del Negozio |
@@ -137,21 +137,11 @@ chiamate `WIN_CREATE`/`WIN_PRESENT`/`WIN_EVENT`.
 | Programmi Linux (ELF) | ✅ statici e dinamici con la glibc di Debian, finestre Wayland, GTK 3, Firefox ESR (`kernel/src/linux`, `make test-linux`, `make test-gtk`) |
 | Programmi Windows (PE) | 🟡 Wine 10 per i programmi a 64 bit, console e finestre (`make wine-image`); `winrun` per quelli semplici |
 | Android (DEX/APK) | 🟡 `dalvik`, programmi semplici; driver binder e `/dev/ashmem` per il sistema Android vero (`kernel/src/linux/binder.rs`, `ashmem.rs`) |
-| JustScript con IDE (JustStudio) | ✅ |
 
-**Il browser, onestamente.** Un motore moderno (Chromium/Blink, WebKit,
-Gecko) è decine di milioni di righe di C++ e chiede: thread POSIX, memoria
-virtuale con `mmap`/`mprotect` (il JIT di JavaScript), socket, font con
-FreeType/HarfBuzz, una GPU per il compositing. La strada praticabile:
-
-1. completare lo strato Linux finché `musl` + programmi C++ complessi
-   girano (librerie condivise con `ld.so`, thread, `futex`, `mmap` con
-   permessi, `epoll`, socket);
-2. portare **WebKitGTK** o **Servo** sopra quello strato, disegnando in una
-   finestra `WIN_*` (Servo è Rust e più piccolo: è la scommessa migliore);
-3. ✅ JavaScript intanto: `justjs`, un interprete scritto da zero in Rust,
-   con il DOM di `justweb` (eventi, timer, `fetch`); basta per i siti
-   semplici, non per le applicazioni web pesanti.
+**Il browser.** justOS non ha un motore web suo: il browser è Firefox ESR,
+quello di Debian, che gira senza modifiche sullo strato Linux (librerie
+condivise, thread, `mmap`, socket, finestre Wayland). Senza accelerazione
+grafica disegna in software, e WebGL non c'è.
 
 **Widevine non si può avere**: Google lo concede solo ai produttori di
 browser e sistemi con cui ha un contratto, ed è un binario chiuso per
@@ -303,7 +293,7 @@ mostra i permessi dichiarati nel manifest di ogni app.
 | 2 | ✅ sandbox, permessi, aggiornamenti delle app, trascinamento | fatto |
 | 3 | ✅ interprete AML, batteria, temperatura, sospensione | fatto |
 | 4 | ✅ aggiornamenti A/B, HiDPI; indice dei file | 2–3 mesi |
-| 5 | strato Linux completo (JavaScript in `justweb`: fatto), poi Servo | 6–12 mesi |
+| 5 | strato Linux completo (Firefox gira già) | 6–12 mesi |
 | 6 | Wi-Fi (un chip), Bluetooth HID e audio | 6–9 mesi |
 | 7 | accelerazione grafica (virgl, poi hardware vero) | 12 mesi e oltre |
 

@@ -25,8 +25,7 @@ jobs:
       - name: Tools
         run: |
           sudo apt-get update
-          # MinGW links just-stub, the runtime of justc's .exe programs.
-          sudo apt-get install -y nasm gcc-mingw-w64-x86-64
+          sudo apt-get install -y nasm
           # rust-toolchain.toml picks the toolchain, targets and rust-src.
           rustup show
 

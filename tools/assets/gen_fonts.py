@@ -20,7 +20,7 @@ typeface of the justOS design; a variable font, rendered at the weight and
 optical size each use asks for) and DejaVu Sans Mono (Bitstream Vera
 licence); see system/kernel/assets/LICENSES.md.
 
-Usage: tools/assets/gen_fonts.py [--web | --sharp] [output]
+Usage: tools/assets/gen_fonts.py [--sharp] [output]
 """
 import struct
 import sys
@@ -93,27 +93,11 @@ def render(path, size, chars, weight=None, optical=None):
     return ascent, ascent + descent, glyphs
 
 
-# The faces of web pages (the browser), in sys:/system/webfonts.bin: every
-# size a page is likely to ask for, regular and bold, and a monospaced face.
-# The size field carries the style in its high bits (0x1000 bold, 0x2000
-# monospaced); the file is gzipped.
-WEB_TEXT = ([chr(c) for c in range(0x20, 0x7F)] + [chr(c) for c in range(0xA0, 0x180)]
-            + list("ƒˆ˜‐‑‒–—―‘’‚‛“”„†‡•…‰′″‹›€™←↑→↓↔−∞≈≠≤≥✓✔✕✗★☆♥◆●○■□▲▶▼◀"))
-WEB_SIZES = [10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 28, 30, 32, 36, 40, 44, 48]
-WEB_FONTS = ([(SANS, s, WEB_TEXT, s, 400) for s in WEB_SIZES]
-             + [(SANS, s, WEB_TEXT, 0x1000 | s, 700) for s in WEB_SIZES]
-             + [(DEJAVU, s, WEB_TEXT, 0x2000 | s, None) for s in (11, 12, 13, 14, 16)])
-
-
 def main():
-    mode = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] in ("--web", "--sharp") else None
-    web, sharp = mode == "--web", mode == "--sharp"
-    args = sys.argv[2:] if mode else sys.argv[1:]
-    default = {"--web": "rootfs/system/webfonts.bin", "--sharp": "system/kernel/assets/fonts@2x.bin.gz"}
-    out = args[0] if args else default.get(mode, "system/kernel/assets/fonts.bin")
-    if web:
-        fonts = [(p, s, c, tag, wt, None) for p, s, c, tag, wt in WEB_FONTS]
-    elif sharp:
+    sharp = len(sys.argv) > 1 and sys.argv[1] == "--sharp"
+    args = sys.argv[2:] if sharp else sys.argv[1:]
+    out = args[0] if args else ("system/kernel/assets/fonts@2x.bin.gz" if sharp else "system/kernel/assets/fonts.bin")
+    if sharp:
         fonts = [(p, s * 2, c, s * 2, wt, s) for p, s, c, wt in FONTS]
     else:
         fonts = [(p, s, c, s, wt, None) for p, s, c, wt in FONTS]
@@ -128,7 +112,7 @@ def main():
             tables += struct.pack("<IBBbbBBI", code, w, h, x, y, adv, 0, len(data))
             data += mask
     blob = bytes(header + tables + data)
-    if web or sharp:
+    if sharp:
         import gzip
         blob = gzip.compress(blob, 9, mtime=0)
     with open(out, "wb") as f:

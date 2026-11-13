@@ -102,7 +102,7 @@ Presa a modello da macOS:
   volume si spostano, tra volumi diversi si copiano; tenendo **Ctrl** (o
   Alt) si copia sempre e compare un **+** verde, con **Maiusc** si sposta
   sempre. Rilasciati sul Cestino del dock ci finiscono dentro; sull'icona di
-  un'app (Editor, Foto, Musica, JustStudio, File) si aprono lì; sul
+  un'app (Editor, Foto, Musica, File) si aprono lì; sul
   Terminale ne scrivono il percorso; nell'Editor si aprono. Le app del
   Negozio che lo chiedono (Disegno) ricevono i file, solo in lettura.
 - **Schermata**: il tasto **Stamp** (o *Schermata* nel menu J▮) salva
@@ -186,8 +186,8 @@ Come sceglie i colori un'app:
 - vanno bene colori fissi solo per ciò che è uguale in entrambi i temi:
   l'arancione (`ui::ORANGE`, `ORANGE_GRAD`), il rosso e il verde di stato,
   i riquadri colorati, le immagini dell'app. Se un colore deve essere più
-  scuro nel tema chiaro (il rosso dei festivi in Calendario, i colori
-  della sintassi in JustStudio) l'app guarda `ui::theme()` e ne ha due;
+  scuro nel tema chiaro (il rosso dei festivi in Calendario) l'app guarda
+  `ui::theme()` e ne ha due;
 - i componenti comuni (`ui::button`, `toggle`, `slider`, `segmented`,
   `search_field`, `text_field`) e le superfici (`panel`, `well_pane`,
   `tile`) seguono già il tema.
@@ -248,10 +248,8 @@ si ridisegna a ogni fotogramma.
 
 | App | Cosa fa |
 |---|---|
-| Browser | schede, barra degli indirizzi (indirizzi o ricerche DuckDuckGo), avanti/indietro, ricarica, pagina iniziale con la ricerca e qualche sito a un clic, trova nella pagina (Ctrl+F), moduli, `<select>`, cookie; i file non visualizzabili vanno in `Scaricati` |
 | File | sfoglia i volumi: risorse a sinistra, cartelle e file a destra; doppio clic apre una cartella o il file con l'app giusta; **schede** (Ctrl+T o il **+**, Ctrl+W chiude, Ctrl+Tab passa alla successiva, *Apri in una nuova scheda* sulle cartelle); tasto destro per aprire, rinominare (anche F2), spostare nel Cestino (Canc), creare una cartella; nel Cestino eliminare o svuotare; **selezione multipla** (Ctrl+clic, Maiusc+clic, Ctrl+A) e **trascinamento** tra cartelle, schede e finestre |
 | Editor di testo | file di testo con selezione, copia e incolla, scorrimento; Nuovo, Apri, Salva (Ctrl+N, Ctrl+O, Ctrl+S) con la scelta del file; alla chiusura salva da solo |
-| JustStudio | l'IDE di JustScript, preinstallato: esplora i progetti di `sys:/home/justscript`, editor con numeri di riga, colori della sintassi, rientro automatico ed errori sottolineati mentre si scrive; **anteprima dal vivo** della `view` (il programma gira nella finestra e risponde a pulsanti, interruttori, cursori e campi), console con l'output di `print()`, pannello Problemi (un clic porta alla riga); Esegui (F5), Compila in `.jpk` (Ctrl+B) e Nel terminale passano da `justc`. I file `.jt` si aprono qui |
 | Note | note in `sys:/home/Note`, la prima riga è il titolo, ricerca, si salvano mentre si scrive |
 | Promemoria | cose da fare, spuntate con un clic (`sys:/home/Promemoria.txt`) |
 | Calendario | un mese alla volta con le feste italiane (anche Pasqua e Pasquetta) e i propri eventi («9:30 Riunione»), salvati in `sys:/home/Calendario.txt` |
@@ -265,40 +263,6 @@ si ridisegna a ogni fotogramma.
 | Monitor attività | i programmi in esecuzione, il processore e la memoria nell'ultimo minuto; un programma si può terminare |
 | Info sistema | panoramica, dispositivi con i loro driver, dischi con lo spazio libero |
 | Terminale | la shell di justOS: l'unico posto dove si vedono le righe di comando |
-
-### Il motore web
-
-Le pagine del Browser le disegna `justweb` (`system/libs/justweb`),
-scritto da zero come il resto: tokenizer e albero HTML con le regole di
-chiusura implicita, CSS con selettori, media query, `@import`, `@supports`,
-annidamento, variabili, `calc()`/`min()`/`max()`/`clamp()`; layout a blocchi
-e in linea, float, flexbox, grid, tabelle, liste, campi dei moduli; immagini
-PNG, JPEG (anche progressive) e GIF.
-
-JavaScript lo esegue `justjs` (`system/libs/justjs`), un interprete ad albero
-scritto da zero in Rust `no_std`: ES2020 circa (classi, closure,
-destrutturazione, spread, template, generatori, `async`/`await`, Promise,
-Map/Set, espressioni regolari, JSON, Date, Intl essenziale). `justweb`
-(`script.rs`) gli dà la pagina: `document` e i nodi (alberi, selettori,
-`innerHTML`, `classList`, `style`, `dataset`), eventi con cattura e
-propagazione, timer, `location`/`history`, `localStorage`, `fetch` e
-`XMLHttpRequest`. Gli script di una pagina girano su un thread loro (stack
-da 2 MiB), che poi ogni 15 ms passa agli script i clic, i tasti e i timer
-scaduti; un ciclo infinito viene interrotto dopo un tetto di passi e la
-pagina resta usabile. Ciò che gli script scrivono in `console` va nel
-giornale (`log`). Limiti: niente JIT (le pagine pesanti sono lente), `await`
-è sincrono, niente canvas, WebSocket, worker e moduli ES.
-
-Ogni pagina si carica su un thread suo (pagina, fogli di stile, poi le
-immagini quattro alla volta) e viene impaginata di nuovo quando arrivano le
-immagini o la finestra cambia misura; i caratteri delle pagine (Google Sans
-Flex in varie misure, normale e grassetto, e DejaVu Sans Mono) sono in
-`sys:/system/webfonts.bin`. Per provarlo sull'host:
-
-```sh
-cd system && cargo run --release --target x86_64-unknown-linux-gnu \
-    -p justweb --example render -- pagina.html 1024 pagina.ppm
-```
 
 ## Il Negozio e le app installabili
 

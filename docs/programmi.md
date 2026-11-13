@@ -30,11 +30,6 @@ sistema con il risultato, e i percorsi che passa; `where <tid> [campioni]`
 guarda più volte dove si trova un thread (la libreria e lo scostamento, e la
 chiamata di sistema in cui aspetta) e dice i punti più frequenti.
 
-I programmi si possono scrivere anche in JustScript: la shell avvia i
-sorgenti `.jt` e i pacchetti `.jpk` attraverso il runner `just`, e cerca anche
-questi in `sys:/apps` (`notes` è `sys:/apps/notes.jt`). Vedi
-[justscript.md](justscript.md).
-
 Oltre ai programmi nativi, justOS avvia anche **programmi Linux e Windows**
 per x86-64: un eseguibile ELF collegato staticamente è un programma Linux, un
 `.exe` è un programma Windows (avviato da `winrun`). Il comando `install` copia
@@ -214,10 +209,9 @@ Un'app nella sandbox può creare solo porte con il proprio nome
 
 Un programma installato in `sys:/apps` con un `<nome>.info` di tipo `native`
 (come quelli del Negozio) è un'**app**: ha un `app_id`, dalla chiave
-`app_id=org.esempio.saluto` del `.info` o, se manca, `dev.justos.<nome>`. I
-pacchetti `.jpk` lo prendono dal manifest. Gli strumenti di sistema
-(`sys:/apps/*.app` senza `.info`) non sono nella sandbox. I processi avviati
-da un'app restano nella sua sandbox.
+`app_id=org.esempio.saluto` del `.info` o, se manca, `dev.justos.<nome>`.
+Gli strumenti di sistema (`sys:/apps/*.app` senza `.info`) non sono nella
+sandbox. I processi avviati da un'app restano nella sua sandbox.
 
 Un'app può:
 

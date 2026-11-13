@@ -9,7 +9,7 @@ use alloc::format;
 use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
-use justc_core::float;
+use justmath as float;
 
 enum Flow {
     Next(usize),

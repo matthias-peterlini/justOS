@@ -142,33 +142,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "jpk-bundler"
-version = "0.7.0"
-dependencies = [
- "justc-core",
-]
-
-[[package]]
 name = "just-kernel"
 version = "0.7.0"
 dependencies = [
- "just-vm",
  "justaml",
- "justc-core",
  "justdk",
  "justfs",
  "justgfx",
+ "justimage",
  "justjson",
  "justtls",
- "justweb",
  "justzip",
-]
-
-[[package]]
-name = "just-vm"
-version = "0.5.0"
-dependencies = [
- "justc-core",
 ]
 
 [[package]]
@@ -176,24 +160,10 @@ name = "justaml"
 version = "0.7.0"
 
 [[package]]
-name = "justc"
-version = "0.5.0"
-dependencies = [
- "jpk-bundler",
- "just-vm",
- "justc-core",
- "justrt",
-]
-
-[[package]]
-name = "justc-core"
-version = "0.5.0"
-
-[[package]]
 name = "justdex"
 version = "1.0.0"
 dependencies = [
- "justc-core",
+ "justmath",
  "justzip",
 ]
 
@@ -217,14 +187,19 @@ name = "justgfx"
 version = "0.7.0"
 
 [[package]]
-name = "justjs"
+name = "justimage"
 version = "0.7.0"
 dependencies = [
- "justc-core",
+ "justgfx",
+ "justzip",
 ]
 
 [[package]]
 name = "justjson"
+version = "0.7.0"
+
+[[package]]
+name = "justmath"
 version = "0.7.0"
 
 [[package]]
@@ -259,15 +234,6 @@ name = "justvirtio"
 version = "0.7.0"
 dependencies = [
  "justdrv",
-]
-
-[[package]]
-name = "justweb"
-version = "0.7.0"
-dependencies = [
- "justgfx",
- "justjs",
- "justzip",
 ]
 
 [[package]]
@@ -426,7 +392,7 @@ dependencies = [
 name = "winrun"
 version = "1.0.0"
 dependencies = [
- "justc-core",
+ "justmath",
  "justrt",
  "justui",
 ]

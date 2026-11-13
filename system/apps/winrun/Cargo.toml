@@ -15,7 +15,7 @@ bench = false
 [dependencies]
 justrt.workspace = true
 justui.workspace = true
-justc-core.workspace = true
+justmath.workspace = true
 
 [lints]
 workspace = true

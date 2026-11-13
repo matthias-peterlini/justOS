@@ -391,7 +391,7 @@ fn carry_rect(x: i32, y: i32) -> Rect {
 
 /// Does a dock icon take files dropped on it?
 fn takes_files(item: &DockItem) -> bool {
-    matches!(item.kind.as_str(), "trash" | "files" | "textedit" | "photos" | "viewer" | "music" | "juststudio")
+    matches!(item.kind.as_str(), "trash" | "files" | "textedit" | "photos" | "viewer" | "music")
 }
 
 struct Launcher {

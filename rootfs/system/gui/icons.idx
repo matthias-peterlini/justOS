@@ -20,11 +20,9 @@ music
 photos
 store
 text-editor
-browser
 settings
 terminal
 files
-justscript
 messages
 camera
 info
@@ -49,7 +47,6 @@ file-image
 file-archive
 file-code
 file-audio
-file-script
 file-exe
 g-volume
 g-wifi

@@ -13,7 +13,7 @@ use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
-use justc_core::float;
+use justmath as float;
 use core::cmp::Ordering;
 
 const OBJ: &str = "Ljava/lang/Object;";

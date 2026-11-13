@@ -1386,7 +1386,7 @@ fn ellipse_span(r: Rect, y: i32) -> Option<(i32, i32)> {
     if t < 0 {
         return None;
     }
-    let half = (a * justc_core::float::sqrt(t as f64) / b as f64 / 2.0) as i32;
+    let half = (a * justmath::sqrt(t as f64) / b as f64 / 2.0) as i32;
     let cx = r.x + r.w / 2;
     Some((cx - half, cx + half + (r.w & 1)))
 }

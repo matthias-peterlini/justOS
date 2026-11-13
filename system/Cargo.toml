@@ -9,17 +9,14 @@ publish = false
 authors = ["Matthias Peterlini"]
 
 [workspace.dependencies]
-justc-core = { path = "libs/justc-core" }
-just-vm = { path = "libs/just-vm" }
-jpk-bundler = { path = "libs/jpk-bundler" }
 justdk = { path = "libs/justdk" }
 justfs = { path = "libs/justfs" }
 justgfx = { path = "libs/justgfx" }
+justimage = { path = "libs/justimage" }
+justmath = { path = "libs/justmath" }
 justtls = { path = "libs/justtls" }
 justzip = { path = "libs/justzip" }
 justjson = { path = "libs/justjson" }
-justweb = { path = "libs/justweb" }
-justjs = { path = "libs/justjs" }
 justui = { path = "libs/justui" }
 justdrv = { path = "libs/justdrv" }
 justrt = { path = "libs/justrt" }

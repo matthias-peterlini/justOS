@@ -302,12 +302,6 @@ pub fn glass(c: &mut Canvas, _blur: &Canvas, r: Rect, rad: i32, _tint: u32) {
     panel(c, r, rad);
 }
 
-/// A card: a [`panel`] with a deeper shadow.
-pub fn card(c: &mut Canvas, _blur: &Canvas, r: Rect, rad: i32, _tint: u32) {
-    drop_shadow(c, r, rad, 18, 80);
-    panel(c, r, rad);
-}
-
 /// Was light frosted glass (the dock, widgets); now a [`panel`] of the
 /// theme, with a shadow if asked.
 pub fn light_glass(c: &mut Canvas, _blur: &Canvas, r: Rect, rad: i32, shadow: bool) {

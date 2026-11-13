@@ -2,8 +2,6 @@
 //! opens which file.
 
 mod about;
-mod juststudio;
-mod browser;
 mod calculator;
 mod calendar;
 mod clock;
@@ -43,17 +41,14 @@ pub fn open_with(kind: &str, path: &str) -> Option<Box<dyn App>> {
         "textedit" if !dir => Box::new(textedit::TextEdit::new(Some(path))),
         "photos" | "viewer" if ext == "qoi" => Box::new(Viewer::new(path)),
         "music" if ext == "wav" => Box::new(music::Music::with_file(path)),
-        "juststudio" if !dir => Box::new(juststudio::JustStudio::new(Some(path))),
         _ => return None,
     })
 }
 
 /// The built-in apps: id, name, icon, window kind.
-pub const BUILT_IN: [(&str, &str, &str); 18] = [
-    ("browser", "Browser", "browser"),
+pub const BUILT_IN: [(&str, &str, &str); 16] = [
     ("files", "File", "files"),
     ("textedit", "Editor di testo", "text-editor"),
-    ("juststudio", "JustStudio", "code"),
     ("notes", "Note", "notes"),
     ("reminders", "Promemoria", "reminders"),
     ("calendar", "Calendario", "calendar"),
@@ -80,7 +75,6 @@ pub fn open(id: &str) -> Option<Box<dyn App>> {
         "store" => Box::new(store::Store::new()),
         "calculator" => Box::new(calculator::Calculator::new()),
         "textedit" | "textedit-new" => Box::new(textedit::TextEdit::new(None)),
-        "juststudio" => Box::new(juststudio::JustStudio::new(None)),
         "notes" => Box::new(notes::Notes::new()),
         "reminders" => Box::new(reminders::Reminders::new()),
         "calendar" => Box::new(calendar::Calendar::new()),
@@ -88,7 +82,6 @@ pub fn open(id: &str) -> Option<Box<dyn App>> {
         "photos" => Box::new(photos::Photos::new()),
         "music" => Box::new(music::Music::new()),
         "monitor" => Box::new(monitor::Monitor::new()),
-        "browser" => Box::new(browser::Browser::new(None)),
         "trash" => {
             if let Ok(p) = fs::abs("sys:/home/Cestino") {
                 if !fs::exists(&p) {
@@ -428,12 +421,19 @@ fn firefox_open() -> bool {
     fs::abs(&real_path(FIREFOX)).is_ok_and(|p| crate::user::running(&p))
 }
 
-/// A web address: in Firefox when the system has it (and it is not open
-/// already), else in the Browser.
+/// A web address: in Firefox, the system's browser, when the system has it
+/// and it is not open already (a second one could not hand it the page);
+/// else a notification says why it does not open.
 pub fn open_url(url: &str) -> Opener {
-    match firefox(url).filter(|_| !firefox_open()) {
+    // The notification's title: the site.
+    let site = url.split_once("://").map_or(url, |(_, rest)| rest).split('/').next().unwrap_or(url);
+    match firefox(url) {
+        Some(s) if firefox_open() => {
+            let icon = s.icon.unwrap_or_else(|| String::from("window"));
+            Opener::Tell(String::from(site), String::from("Firefox è già aperto: apri l'indirizzo da lì, oppure chiudilo e riprova."), icon)
+        }
         Some(s) => Opener::Start(s),
-        None => Opener::App(Box::new(browser::Browser::new(Some(url)))),
+        None => Opener::Tell(String::from(site), String::from("Serve Firefox per aprire le pagine web."), String::from("window")),
     }
 }
 
@@ -878,10 +878,6 @@ pub fn for_file(path: &str) -> Opener {
         // the system has it; else a program with a window of its own needs
         // no terminal.
         "exe" | "msi" | "bat" | "cmd" | "lnk" => windows(path, ext),
-        // JustScript sources open in the IDE, which runs them too.
-        "jt" => Opener::App(Box::new(juststudio::JustStudio::new(Some(path)))),
-        // A JustScript package runs through `just`, like a program.
-        "jpk" => Opener::Run(quoted),
         // Android apps get a window; Java programs (DEX) a terminal.
         "apk" => Opener::Spawn(String::from(path)),
         "dex" | "jar" => Opener::Run(quoted),

@@ -4,9 +4,9 @@
 
 ### Un sistema operativo per PC x86-64, scritto da zero in Rust.
 
-Boot loader, kernel, file system, driver, interfaccia grafica e linguaggio di
-programmazione: tutto progettato apposta. E sopra ci girano anche Firefox,
-i programmi Linux, quelli Windows e le app Android.
+Boot loader, kernel, file system, driver e interfaccia grafica: tutto
+progettato apposta. E sopra ci girano anche Firefox, i programmi Linux,
+quelli Windows e le app Android.
 
 [![Versione](https://img.shields.io/github/v/release/matthias-peterlini/justOS?label=versione&color=ff5a1f)](https://github.com/matthias-peterlini/justOS/releases/latest)
 [![Build](https://github.com/matthias-peterlini/justOS/actions/workflows/build.yml/badge.svg)](https://github.com/matthias-peterlini/justOS/actions/workflows/build.yml)
@@ -89,18 +89,18 @@ fotocamera e microfono, come su un telefono.
 
 **Esegue anche gli altri**
 
-Firefox è già installato. Programmi Linux, Windows a 64 e a 32 bit, Java
-e app Android girano accanto alle app di justOS, senza modifiche.
+Programmi Linux, Windows a 64 e a 32 bit, Java e app Android girano
+accanto alle app di justOS, senza modifiche.
 
 </td>
 </tr>
 <tr>
 <td valign="top">
 
-**Ha il suo linguaggio**
+**Driver da soli**
 
-JustScript, con compilatore e macchina virtuale, e l'IDE **JustStudio** con
-gli errori sottolineati mentre scrivi e l'anteprima dal vivo.
+I driver sono pacchetti a parte: il kernel riconosce l'hardware e carica
+quello giusto, all'avvio e a sistema avviato.
 
 </td>
 <td valign="top">
@@ -113,10 +113,10 @@ con un interprete ACPI scritto da zero.
 </td>
 <td valign="top">
 
-**Il web, a modo suo**
+**Il web con Firefox**
 
-Il Browser ha un motore HTML e CSS e un interprete JavaScript, anche
-questi scritti da zero.
+Firefox ESR è di serie: lo stesso di Debian, con le sue finestre sulla
+scrivania di justOS.
 
 </td>
 </tr>
@@ -128,10 +128,6 @@ questi scritti da zero.
 <tr>
 <td width="50%"><img src="docs/screenshots/centro-controllo.jpg" alt="Centro di controllo"><br><b>Centro di controllo</b>: account, rete, suono, volume e luminosità, spegni.</td>
 <td width="50%"><img src="docs/screenshots/finestre.jpg" alt="Musica, Note e File"><br><b>Finestre</b>: Musica, Note e File insieme.</td>
-</tr>
-<tr>
-<td><img src="docs/screenshots/schermo-intero.jpg" alt="JustStudio a schermo intero"><br><b>Schermo intero</b>: JustStudio prende tutto lo schermo, con l'ora nel titolo.</td>
-<td><img src="docs/screenshots/browser.jpg" alt="Browser"><br><b>Browser</b>: Wikipedia con il motore web di justOS.</td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/negozio.jpg" alt="Negozio"><br><b>Negozio</b>: giochi e app, installati con un clic.</td>
@@ -218,7 +214,7 @@ Secure Boot va disattivato.
 
 | | |
 |---|---|
-| **Di serie** | Firefox, Browser (il motore web di justOS), File, Editor di testo, Note, Promemoria, Calendario, Orologio, Calcolatrice, Foto, Musica, Anteprima, Terminale, Monitor attività, Impostazioni, Info sistema, JustStudio |
+| **Di serie** | Firefox, File, Editor di testo, Note, Promemoria, Calendario, Orologio, Calcolatrice, Foto, Musica, Anteprima, Terminale, Monitor attività, Impostazioni, Info sistema |
 | **Nel Negozio** | 2048, Campo minato, Serpente, Sudoku, Tris e Disegno; BusyBox e Lua per il Terminale; programmi Linux e Windows da GitHub. Le app si aggiornano da sole, da un indice firmato |
 | **Doppio clic** | un programma parte; un pacchetto `.deb`, `.tar.gz`, `.zip` o `.pkg` si installa da solo |
 
@@ -236,9 +232,7 @@ Secure Boot va disattivato.
 | **Sicurezza** | identità delle app, sandbox, permessi, password con sale e blocco automatico | [roadmap](docs/roadmap.md#le-basi-comuni) |
 | **Programmi** | in modalità utente, ognuno nel suo spazio di indirizzi, a riga di comando o con finestre proprie (`justui`) | [programmi](docs/programmi.md) |
 | **Compatibilità** | eseguibili ELF Linux (statici o dinamici con la glibc; GTK 3 e Firefox su Wayland), `.exe` Windows (console e finestre; con Wine 10 anche a 32 bit), programmi Java e app Android (`.dex`, `.apk`) | [compatibilità](docs/compat.md) |
-| **JustScript** | il linguaggio di justOS: sorgenti `.jt`, che `justc` compila in pacchetti `.jpk` (o in `.exe` autonomi per Windows, `-t windows`) e `just` esegue (`just main.jt`); JustStudio è l'IDE con anteprima dal vivo | [JustScript](docs/justscript.md#juststudio) |
 | **Rete** | ARP, IPv4, ICMP, UDP, TCP, DHCP, DNS; TLS 1.3 con certificati verificati e HTTP(S) | |
-| **Web** | `justweb` (HTML, CSS con flexbox, grid, tabelle e media query; PNG, JPEG e GIF) e `justjs` (JavaScript con il DOM, gli eventi, i timer e `fetch`) | [gui](docs/gui.md#il-motore-web) |
 | **Shell** | una quarantina di comandi, cronologia, completamento con Tab | qui sotto, nei primi passi |
 
 </details>
@@ -292,10 +286,6 @@ suspend 10             sospende il computer per 10 secondi
 install sudoku         un programma dal Negozio
 updates check          aggiornamenti delle app
 sysupdate              i due slot di sistema (check, install, rollback)
-cd sys:/home/justscript
-hello.jt               un programma JustScript (o: just hello.jt)
-justc build library    lo compila in un pacchetto .jpk
-justc build library -t windows    in un .exe che gira da solo su Windows
 shutdown / restart
 ```
 
@@ -304,9 +294,10 @@ shutdown / restart
 ## Compilare
 
 Servono Rust stable (`rustup` installa da solo la versione e i target
-giusti, grazie a `rust-toolchain.toml`), `nasm`, `qemu-system-x86_64`, il gcc
-di MinGW-w64 (`gcc-mingw-w64-x86-64`, collega il runtime degli `.exe` di
-`justc`) e, per provare l'avvio UEFI, OVMF.
+giusti, grazie a `rust-toolchain.toml`), `nasm`, `qemu-system-x86_64` e, per
+provare l'avvio UEFI, OVMF. `make test-compat` usa anche `musl-gcc` e il gcc
+di MinGW-w64 (`gcc-mingw-w64-x86-64`), se ci sono, per i suoi programmi di
+prova.
 
 ```sh
 make            # l'immagine di disco build/justos.img (BIOS e UEFI)
@@ -335,7 +326,6 @@ make test-compat    # programmi Linux, Windows (anche con finestre), Java e Andr
 make test-linux     # lo strato Linux: processi, segnali, socket, binder
 make test-wayland   # il compositor Wayland
 make test-gtk       # un programma GTK 3 con il tema di justOS
-make test-justscript # programmi JustScript
 make shots          # usa l'interfaccia (ogni app, il Negozio) e salva le schermate
 make check          # test delle librerie e dello strumento host
 ```
@@ -351,9 +341,9 @@ make check          # test delle librerie e dello strumento host
 | `boot/bios/`, `boot/uefi/` | JustBoot per BIOS e per UEFI |
 | `system/kernel/` | il kernel, con l'interfaccia grafica (`src/gui`) |
 | `system/drivers/` | i driver, uno per cartella, ognuno con il suo `driver.manifest` |
-| `system/apps/` | i programmi, tra cui `winrun` (programmi Windows), `dalvik` (Java e Android), `justc` e `just` (JustScript) |
+| `system/apps/` | i programmi, tra cui `winrun` (programmi Windows) e `dalvik` (Java e Android) |
 | `system/store/` | le app del Negozio (giochi e Disegno), con icona e scheda |
-| `system/libs/` | le librerie: ABI dei driver (`justdk`, `justdrv`), programmi (`justrt`), finestre (`justui`), disegno (`justgfx`), JustFS, USB, virtio, JustScript, TLS (`justtls`), web (`justweb`), JavaScript (`justjs`), Dalvik (`justdex`) |
+| `system/libs/` | le librerie: ABI dei driver (`justdk`, `justdrv`), programmi (`justrt`), finestre (`justui`), disegno (`justgfx`), immagini PNG, JPEG e GIF (`justimage`), matematica (`justmath`), JustFS, USB, virtio, TLS (`justtls`), Dalvik (`justdex`) |
 | `tools/justtool/` | strumento host: crea pacchetti, immagini e CD, legge e scrive volumi JustFS |
 | `tools/assets/` | i generatori di caratteri, icone, sfondi, suoni, musica e del banner di questa pagina |
 | `tools/qemu/` | modelli per QEMU di dispositivi che QEMU non ha (Realtek RTL8169, RTL8168, RTL8125) |

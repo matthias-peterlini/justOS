@@ -1,0 +1,10 @@
+[package]
+name = "justmath"
+description = "Maths for justOS: the f64 functions of std (sqrt, sin, exp, pow...) in plain Rust (no_std)"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true

@@ -7,7 +7,7 @@ publish.workspace = true
 authors.workspace = true
 
 [dependencies]
-justc-core.workspace = true
+justmath.workspace = true
 justzip.workspace = true
 
 [lints]

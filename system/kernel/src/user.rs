@@ -142,24 +142,18 @@ pub(crate) fn fs_error(e: fs::Error) -> Error {
 }
 
 /// Where a program name points: `edit` -> `sys:/apps/edit.app`, else
-/// `edit.jpk` or `edit.jt` there (JustScript programs), `edit.exe` (Windows),
-/// `edit.apk` (Android) or `edit` (Linux); paths are taken as they are.
+/// `edit.exe` there (Windows), `edit.apk` (Android) or `edit` (Linux);
+/// paths are taken as they are.
 pub fn find_program(name: &str, cwd: &Path) -> Option<Path> {
     let lower = name.to_ascii_lowercase();
-    if name.contains(':') || name.contains('/') || lower.ends_with(".app") || lower.ends_with(".exe") || is_script(name) || is_android(name) {
+    if name.contains(':') || name.contains('/') || lower.ends_with(".app") || lower.ends_with(".exe") || is_android(name) {
         let p = Path::parse(name, cwd).ok()?;
         return fs::stat(&p).ok().filter(|s| s.kind == justfs::Kind::File).map(|_| p);
     }
-    [".app", ".jpk", ".jt", ".exe", ".apk", ""].iter().find_map(|ext| {
+    [".app", ".exe", ".apk", ""].iter().find_map(|ext| {
         let p = fs::abs(&alloc::format!("sys:/apps/{lower}{ext}")).ok()?;
         fs::stat(&p).ok().filter(|s| s.kind == justfs::Kind::File).map(|_| p)
     })
-}
-
-/// JustScript packages and sources, which the `just` runner starts.
-fn is_script(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
-    lower.ends_with(".jpk") || lower.ends_with(".jt")
 }
 
 /// Android apps and Java programs in DEX form, which `dalvik` runs.
@@ -168,7 +162,6 @@ fn is_android(name: &str) -> bool {
     lower.ends_with(".apk") || lower.ends_with(".dex") || lower.ends_with(".jar")
 }
 
-const SCRIPT_RUNNER: &str = "sys:/apps/just.app";
 const WINDOWS_RUNNER: &str = "sys:/apps/winrun.app";
 const ANDROID_RUNNER: &str = "sys:/apps/dalvik.app";
 
@@ -205,13 +198,6 @@ fn app_for(path: &Path, cwd: Path) -> (Option<crate::sandbox::App>, Path) {
 pub fn spawn(path: &Path, args: &str, cwd: Path) -> Result<u32, Error> {
     let name = path.name();
     let (app, cwd) = app_for(path, cwd);
-    if is_script(name) {
-        // `just <file> <args>`, under the script's own name.
-        let runner = fs::abs(SCRIPT_RUNNER).map_err(fs_error)?;
-        let image = fs::read_file(&runner).map_err(fs_error)?;
-        let shown = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
-        return start(image, String::from(shown), &alloc::format!("{} {args}", quoted(path)), cwd, Kind::Native, path, app);
-    }
     let mut magic = [0u8; 4];
     fs::read_at(path, 0, &mut magic).map_err(fs_error)?;
     let runner = if magic[..2] == *b"MZ" {

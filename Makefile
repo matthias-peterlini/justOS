@@ -13,7 +13,6 @@
 #   make test-drivers  boot once per emulated disk, network card and USB
 #                   controller and check that its driver works (SLEEP=1:
 #                   after the machine slept and woke up; test-audio too)
-#   make test-justscript  run JustScript programs on justOS and check them
 #   make test-compat   run a Linux and a Windows program on justOS and check them
 #   make test-audio    play sounds on every emulated sound card and check them
 #   make test-display  switch the resolution on every emulated display, and
@@ -50,8 +49,6 @@ OVMF_VARS ?= /usr/share/OVMF/OVMF_VARS_4M.fd
 BUILD    := build
 TARGET   := system/target/x86_64-unknown-none/$(PROFILE)
 JUSTTOOL  := tools/target/release/justtool
-# The runtime of the Windows programs justc builds (justc build -t windows).
-WINDOWS_STUB := tools/target/x86_64-pc-windows-gnu/release/just-stub.exe
 EFI_APP  := boot/uefi/target/x86_64-unknown-uefi/release/BOOTX64.efi
 DRIVERS  := $(notdir $(wildcard system/drivers/*))
 PACKAGES := $(DRIVERS:%=$(BUILD)/drivers/%.jdp)
@@ -91,7 +88,7 @@ ifeq ($(PROFILE),release)
 CARGO_PROFILE := --release
 endif
 
-.PHONY: photos all uefi system tools root linux-root image wine-image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-justscript test-compat test-audio test-display test-acpi test-net test-linux test-wayland test-gtk test-update shots assets check updates clean $(PACKAGES)
+.PHONY: photos all uefi system tools root linux-root image wine-image iso run-iso test-iso run run-q35 run-nvme run-uefi test test-uefi test-drivers test-compat test-audio test-display test-acpi test-net test-linux test-wayland test-gtk test-update shots assets check updates clean $(PACKAGES)
 
 all: image
 
@@ -111,8 +108,6 @@ system:
 
 tools:
 	cd tools && $(CARGO) build --release
-	# Linked by the MinGW-w64 gcc (x86_64-w64-mingw32-gcc).
-	cd tools && $(CARGO) build --release -p just-stub --target x86_64-pc-windows-gnu
 
 $(PACKAGES): $(BUILD)/drivers/%.jdp: system tools
 	@mkdir -p $(BUILD)/drivers
@@ -137,10 +132,6 @@ root: system tools $(LINUX)/usr/PACKAGES
 	mkdir -p $(ROOT)/apps
 	cp -r rootfs/. $(ROOT)/
 	for app in $(APPS); do cp $(TARGET)/$$app $(ROOT)/apps/$$app.app; done
-	# The JustScript runner, a second program of justc.
-	cp $(TARGET)/just $(ROOT)/apps/just.app
-	mkdir -p $(ROOT)/system/justc
-	cp $(WINDOWS_STUB) $(ROOT)/system/justc/just-stub.exe
 	for p in $(STORE); do mkdir -p $(ROOT)/store/$$p && cp $(TARGET)/$$p $(ROOT)/store/$$p/app \
 		&& cp system/store/$$p/info system/store/$$p/icon.qoi $(ROOT)/store/$$p/; done
 	cp system/kernel/assets/fonts.bin $(ROOT)/system/fonts.bin
@@ -207,9 +198,6 @@ test-iso: iso
 	DISK=cdrom scripts/test.sh $(ISO)
 	UEFI=1 DISK=cdrom OVMF_CODE=$(OVMF_CODE) OVMF_VARS=$(OVMF_VARS) scripts/test.sh $(ISO)
 
-test-justscript: image
-	scripts/test-justscript.sh $(IMAGE)
-
 test-compat: image
 	scripts/test-compat.sh $(IMAGE)
 
@@ -243,7 +231,6 @@ shots: image
 assets:
 	tools/assets/gen_fonts.py system/kernel/assets/fonts.bin
 	tools/assets/gen_fonts.py --sharp system/kernel/assets/fonts@2x.bin.gz
-	tools/assets/gen_fonts.py --web rootfs/system/webfonts.bin
 	tools/assets/gen_certs.py rootfs
 	tools/assets/gen_pixicons.py rootfs/system/gui
 	tools/assets/gen_pixicons.py --store system/store
@@ -258,7 +245,7 @@ photos:
 	tools/assets/gen_thumbs.py rootfs/system/gui/wallpapers
 
 check:
-	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p justdk -p justfs -p justgfx -p justtls -p justzip -p justjson -p justc-core -p just-vm -p jpk-bundler -p justweb -p justjs -p justdex -p justaml
+	cd system && $(CARGO) test --target x86_64-unknown-linux-gnu -p justdk -p justfs -p justgfx -p justimage -p justmath -p justtls -p justzip -p justjson -p justdex -p justaml
 	cd tools && $(CARGO) test --release
 
 updates: root tools $(BUILD)/justos-$(VERSION).slot

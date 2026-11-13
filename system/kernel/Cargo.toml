@@ -19,9 +19,7 @@ justgfx.workspace = true
 justtls.workspace = true
 justzip.workspace = true
 justjson.workspace = true
-justweb.workspace = true
-justc-core.workspace = true
-just-vm.workspace = true
+justimage.workspace = true
 justaml.workspace = true
 
 [lints]

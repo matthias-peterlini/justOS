@@ -1385,7 +1385,7 @@ impl Shell {
         if let Ok(apps) = fs::abs("sys:/apps").and_then(|p| fs::list_dir(&p)) {
             let names: Vec<String> = apps
                 .iter()
-                .filter_map(|(e, _)| [".app", ".jpk", ".jt"].iter().find_map(|ext| e.name.strip_suffix(ext)).map(String::from))
+                .filter_map(|(e, _)| e.name.strip_suffix(".app").map(String::from))
                 .collect();
             if !names.is_empty() {
                 println!("Programs in sys:/apps: {BOLD}{}{RESET}", names.join("  "));

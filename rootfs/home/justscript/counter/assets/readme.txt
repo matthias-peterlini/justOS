@@ -1,1 +1,0 @@
-JustScript counter example asset

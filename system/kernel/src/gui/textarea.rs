@@ -34,25 +34,7 @@ pub struct TextArea {
     dragging: bool,
     /// The column the cursor tries to stay in when moving up and down.
     goal_x: Option<i32>,
-    /// Source code: line numbers, four spaces for Tab, and Enter keeps the
-    /// indentation (one level more after a line that opens a block).
-    pub code: bool,
-    /// A color for every character (syntax highlighting); ignored unless it
-    /// is as long as the text.
-    pub colors: Vec<u32>,
-    /// Character ranges underlined with a red wave (errors).
-    pub squiggles: Vec<(usize, usize)>,
-    /// Counts the changes to the text (to notice one).
-    pub edits: u64,
 }
-
-const GUTTER: i32 = 44;
-
-/// Words that open a block in JustScript: the next line goes one level in.
-const BLOCK_OPENERS: [&str; 22] = [
-    "fn", "if", "else", "elif", "while", "for", "loop", "match", "struct", "enum", "impl", "view", "window", "column", "row", "card",
-    "grid", "scroll", "group", "split", "accordion", "test",
-];
 
 impl TextArea {
     pub fn new(content: &str) -> TextArea {
@@ -71,55 +53,7 @@ impl TextArea {
             caret_at: None,
             dragging: false,
             goal_x: None,
-            code: false,
-            colors: Vec::new(),
-            squiggles: Vec::new(),
-            edits: 0,
         }
-    }
-
-    /// The character index of the cursor's line start and its line number
-    /// (from 1), for a status line.
-    pub fn cursor_line_col(&self) -> (usize, usize) {
-        let before = &self.text[..self.cursor];
-        let line = before.iter().filter(|&&c| c == '\n').count() + 1;
-        let col = before.iter().rev().take_while(|&&c| c != '\n').count() + 1;
-        (line, col)
-    }
-
-    /// Puts the cursor at the start of line `line` (from 1).
-    pub fn go_to_line(&mut self, line: usize) {
-        let mut n = 1;
-        let mut pos = 0;
-        for (i, &c) in self.text.iter().enumerate() {
-            if n >= line {
-                break;
-            }
-            if c == '\n' {
-                n += 1;
-                pos = i + 1;
-            }
-        }
-        self.cursor = pos;
-        self.anchor = None;
-        self.goal_x = None;
-        // Shown at the top third once drawn.
-        self.scroll = ((line as i32 - 6) * self.line_h()).max(0);
-    }
-
-    /// What Enter inserts in code: the line break and the indentation.
-    fn newline_indent(&self) -> String {
-        let start = self.text[..self.cursor].iter().rposition(|&c| c == '\n').map_or(0, |i| i + 1);
-        let line: String = self.text[start..self.cursor].iter().collect();
-        let indent: String = line.chars().take_while(|c| *c == ' ' || *c == '\t').collect();
-        let first = line.trim_start().split(|c: char| !(c.is_alphanumeric() || c == '_')).next().unwrap_or("");
-        let opens = BLOCK_OPENERS.contains(&first) && !line.trim_end().ends_with("->");
-        let mut s = String::from("\n");
-        s.push_str(&indent);
-        if opens {
-            s.push_str("    ");
-        }
-        s
     }
 
     pub fn text(&self) -> String {
@@ -133,7 +67,6 @@ impl TextArea {
         self.scroll = 0;
         self.layout_w = -1;
         self.dirty = false;
-        self.edits += 1;
     }
 
     pub fn is_empty(&self) -> bool {
@@ -198,7 +131,6 @@ impl TextArea {
     fn invalidate(&mut self) {
         self.layout_w = -1;
         self.dirty = true;
-        self.edits += 1;
         self.blink = true;
         self.ticks = 0;
     }
@@ -289,8 +221,7 @@ impl TextArea {
     }
 
     fn inner(&self, r: Rect) -> Rect {
-        let g = if self.code { GUTTER } else { 0 };
-        Rect::new(r.x + PAD + g, r.y + PAD - 4, r.w - 2 * PAD - g, r.h - 2 * PAD + 8)
+        Rect::new(r.x + PAD, r.y + PAD - 4, r.w - 2 * PAD, r.h - 2 * PAD + 8)
     }
 
     /// Keeps the cursor inside the visible part.
@@ -319,39 +250,10 @@ impl TextArea {
         let sel = self.selection();
         let first = (self.scroll / lh) as usize;
         let font = self.font;
-        let colored = self.code && self.colors.len() == self.text.len();
-        // The number of the logical line the first visible row belongs to.
-        let mut number = match self.lines.get(first) {
-            Some(&(s, _)) if self.code => self.text[..s].iter().filter(|&&c| c == '\n').count() + 1,
-            _ => 1,
-        };
         for (li, &(s, e)) in self.lines.iter().enumerate().skip(first) {
             let y = inner.y + li as i32 * lh - self.scroll;
             if y > r.bottom() {
                 break;
-            }
-            if self.code {
-                if s == 0 || self.text[s - 1] == '\n' {
-                    let here = (s..=e).contains(&self.cursor);
-                    let label = alloc::format!("{number}");
-                    text::draw_right(c, font, inner.x - 12, y + 1, &label, if here { ui::text() } else { ui::text_faint() });
-                }
-                if e < self.text.len() && self.text[e] == '\n' {
-                    number += 1;
-                }
-                for &(a, b) in &self.squiggles {
-                    if a < e.max(s + 1) && b > s {
-                        let x0 = inner.x + self.x_of(li, a.max(s));
-                        let x1 = (inner.x + self.x_of(li, b.min(e))).max(x0 + 8);
-                        let base = y + lh - 2;
-                        let mut x = x0;
-                        while x < x1 {
-                            let up = (x - x0) / 3 % 2 == 0;
-                            c.line(x, if up { base } else { base - 2 }, x + 3, if up { base - 2 } else { base }, 1, 0xFFFF_5A5F);
-                            x += 3;
-                        }
-                    }
-                }
             }
             if let Some((a, b)) = sel {
                 if a < e.max(s + 1) && b > s {
@@ -366,24 +268,7 @@ impl TextArea {
             let line: String = self.text[s..e].iter().map(|&ch| if ch == '\t' { ' ' } else { ch }).collect();
             // Tabs are four spaces wide.
             let mut x = inner.x;
-            if colored {
-                // Runs of one color.
-                let mut i = s;
-                while i < e {
-                    let color = self.colors[i];
-                    let mut j = i;
-                    let mut run = String::new();
-                    while j < e && self.colors[j] == color {
-                        match self.text[j] {
-                            '\t' => run.push_str("    "),
-                            ch => run.push(ch),
-                        }
-                        j += 1;
-                    }
-                    x += text::draw(c, font, x, y + 1, &run, color);
-                    i = j;
-                }
-            } else if self.text[s..e].contains(&'\t') {
+            if self.text[s..e].contains(&'\t') {
                 for &ch in &self.text[s..e] {
                     if ch == '\t' {
                         x += 4 * text::advance(font, ' ');
@@ -554,12 +439,7 @@ impl TextArea {
                 let mut b = [0u8; 4];
                 self.insert(ch.encode_utf8(&mut b));
             }
-            Key::Enter if self.code => {
-                let s = self.newline_indent();
-                self.insert(&s);
-            }
             Key::Enter => self.insert("\n"),
-            Key::Tab if self.code => self.insert("    "),
             Key::Tab => self.insert("\t"),
             Key::Backspace => {
                 if !self.delete_selection() && self.cursor > 0 {

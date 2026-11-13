@@ -277,15 +277,6 @@ def t_glyph(top, bottom, layers):
 
 LIGHT = ("#ffffff", "#e6eaee")
 
-JUSTSCRIPT = art(
-    "##........##",
-    "##........##",
-    ".##......##.",
-    ".###....###.",
-    "..########..",
-    "....####....",
-)
-
 LT = ["...##", "..##.", ".##..", "##...", ".##..", "..##.", "...##"]
 CODE = art(*hcat(LT, ["..", "..", "oo", "oo", "oo", "..", ".."], mirror(LT), gap=1))
 
@@ -561,7 +552,6 @@ DOC_IMAGE = ["......oo", "......oo", "..k.....", ".kkk..g.", "kkkkkggg", "kkkkkk
 DOC_ZIP = ["...gg...", "....gg..", "...gg...", "....gg..", "...gg...", "...oo...", "...oo..."]
 DOC_CODE = hcat(["..p", ".p.", "p..", ".p.", "..p"], ["..o", "..o", ".o.", "o..", "o.."], ["p..", ".p.", "..p", ".p.", "p.."])
 DOC_AUDIO = ["...PPPP.", "...P..P.", "...P..P.", ".PPP.PPP", ".PPP.PPP"]
-DOC_SCRIPT = ["kk......", ".kk.....", "..kk....", ".kk.....", "kk..oooo"]
 DOC_EXE = ["bbbbbbbb", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB"]
 
 
@@ -803,11 +793,9 @@ ICONS = [
     ("photos", app_svg("foto")),
     ("store", t("#7a9cff", "#3f51e6", STORE)),
     ("text-editor", t(*LIGHT, TEXT_EDITOR)),
-    ("browser", app_svg("browser")),
     ("settings", app_svg("impostazioni")),
     ("terminal", app_svg("terminale")),
     ("files", app_svg("file")),
-    ("justscript", t("#5ac8fa", "#1a7fe0", JUSTSCRIPT)),
     ("messages", app_svg("messaggi")),
     ("camera", app_svg("fotocamera")),
     ("info", info_icon),
@@ -832,7 +820,6 @@ ICONS = [
     ("file-archive", page(DOC_ZIP)),
     ("file-code", page(DOC_CODE)),
     ("file-audio", page(DOC_AUDIO)),
-    ("file-script", page(DOC_SCRIPT)),
     ("file-exe", page(DOC_EXE)),
     ("g-volume", lambda: glyph(G_VOLUME)),
     ("g-wifi", lambda: glyph(G_WIFI)),

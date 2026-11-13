@@ -1,8 +1,8 @@
 //! Who an app is, and what it may touch.
 //!
-//! An installed justOS app (a `.app` in `sys:/apps` with its `.info`, or an
-//! JustScript package that `just` starts with `APP_ENTER`) runs as its
-//! `app_id`, such as `dev.justos.disegno`, in a sandbox:
+//! An installed justOS app (a `.app` in `sys:/apps` with its `.info`, or a
+//! program that runs others' code and enters an app with `APP_ENTER`) runs
+//! as its `app_id`, such as `dev.justos.disegno`, in a sandbox:
 //!
 //! - its own folder, `sys:/home/.apps/<app_id>`, is all its, and it starts
 //!   there;
@@ -37,8 +37,7 @@ pub const DEVICES: [(&str, &str); 4] =
     [("camera", "la fotocamera"), ("microphone", "il microfono"), ("location", "la posizione"), ("network", "la rete")];
 
 /// What every app may read (paths in `sys:`, lowercase).
-const SHARED: [&str; 8] =
-    ["/apps", "/system/fonts.bin", "/system/fonts@2x.bin", "/system/webfonts.bin", "/system/certs.bin", "/system/gui", "/system/sounds", "/etc/ssl"];
+const SHARED: [&str; 7] = ["/apps", "/system/fonts.bin", "/system/fonts@2x.bin", "/system/certs.bin", "/system/gui", "/system/sounds", "/etc/ssl"];
 
 /// An app, as the sandbox knows it.
 #[derive(Clone, PartialEq, Eq, Debug)]

@@ -11,7 +11,7 @@ use crate::win::{alloc_bytes, c_len, console_write, format_c};
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
-use justc_core::float as m;
+use justmath as m;
 use core::ffi::c_void;
 
 /// The address of `name`, if it is one of the functions here.
