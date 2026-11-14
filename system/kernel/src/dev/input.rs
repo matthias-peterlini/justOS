@@ -34,6 +34,10 @@ pub enum Key {
     /// The logo key with Ctrl and Left or Right: the desktop beside.
     PrevDesktop,
     NextDesktop,
+    /// The sound keys of a keyboard: louder, softer, off and on.
+    VolumeUp,
+    VolumeDown,
+    Mute,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -162,6 +166,9 @@ fn key(usage: u32, value: i32) {
             0x50 => Some(Key::Left),
             0x51 => Some(Key::Down),
             0x52 => Some(Key::Up),
+            0x7F => Some(Key::Mute),
+            0x80 => Some(Key::VolumeUp),
+            0x81 => Some(Key::VolumeDown),
             _ => keymap::translate(s.layout, usage, shift, s.altgr, s.caps).map(Key::Char),
         };
         if s.capture {

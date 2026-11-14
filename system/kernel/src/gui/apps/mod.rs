@@ -303,7 +303,8 @@ const FIREFOX: &str = "sys:/usr/bin/firefox-esr";
 /// protocol (the names of its DT_NEEDED libraries start like this).
 const TOOLKITS: [&str; 6] = ["libwayland-client", "libgtk", "libgdk", "libQt", "libSDL", "libX11"];
 const MAC: &str = "Le app per macOS non funzionano su justOS.";
-const STARTING: &str = "Si sta avviando: la finestra arriva tra poco.";
+/// What a program starting says (the bar shows it shorter).
+pub const STARTING: &str = "Si sta avviando: la finestra arriva tra poco.";
 
 fn is_file(path: &str) -> bool {
     fs::abs(path).is_ok_and(|p| fs::exists(&p) && !fs::is_dir(&p))
@@ -480,11 +481,11 @@ fn wine(path: &str, ext: &str) -> Option<Opener> {
     };
     let first = !wine_ready();
     let note = if first {
-        Some("Prima apertura: preparo l'ambiente Windows…")
+        Some("Prima apertura: preparo Windows…")
     } else if terminal {
         None
     } else {
-        Some("Si sta avviando con Wine: la finestra arriva tra poco.")
+        Some("Si avvia con Wine…")
     };
     Some(Opener::Start(Start {
         program: String::from(WINE),
@@ -619,7 +620,7 @@ fn appimage(path: &str, kind: u8) -> Opener {
         // The window belongs to the program unpacked from it, whose name is
         // not known here: a window with no icon of its own.
         icon: Some(String::from("window")),
-        note: Some(String::from("Un'AppImage si estrae prima di partire: ci vuole un po'.")),
+        note: Some(String::from("Si estrae, ci vuole un po'…")),
         fail: Some(String::from("Questa AppImage non si è avviata: su justOS servono i programmi per Wayland, senza FUSE.")),
         slow: true,
     })

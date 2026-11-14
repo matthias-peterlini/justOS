@@ -41,7 +41,8 @@ Presa a modello da macOS:
   puntatore, quella di un'app che parte **rimbalza**, un quadratino arancione
   segna le app aperte; un clic su un'app aperta la porta davanti (o la riapre se è
   ridotta). Con molte app aperte le icone si rimpiccioliscono perché il
-  dock stia nello schermo.
+  dock stia nello schermo. Il dock cambia forma per mostrare quello che
+  succede (vedi [La barra dinamica](#la-barra-dinamica)).
 - **Stato e centro di controllo**: a destra nel dock, in un incavo, i
   simboli in pixel morbidi della rete (spento se non è collegata), del
   suono e, sui portatili, della batteria (colorata secondo la carica). Un
@@ -63,9 +64,10 @@ Presa a modello da macOS:
   **impostazioni** per parola («sfondo», «volume», «password», «processore»...)
   e i **file e le cartelle** della home per nome, che si aprono con l'app
   giusta. La home viene letta una volta sola all'apertura della ricerca.
-- **Notifiche** in alto a destra: un'app installata, un timer scaduto, un
-  file salvato, un programma che si è chiuso per un errore. Spariscono da sole
-  o con un clic.
+- **Notifiche**: un'app installata, un timer scaduto, un file salvato, un
+  programma che si è chiuso per un errore. Quelle brevi escono dal dock
+  (vedi [La barra dinamica](#la-barra-dinamica)), le altre in alto a
+  destra. Spariscono da sole o con un clic e restano nel centro notifiche.
 - **Tasto destro** sulla scrivania: cambiare sfondo, mostrare o
   nascondere i widget, impostazioni dello schermo, informazioni.
 - **Finestre**: un pannello opaco del tema (scuro o chiaro) con il nome
@@ -221,6 +223,47 @@ l'azione in `act`. Se cambia qualcosa dei colori, `act` restituisce
 `Action::RedrawAll`. Una sezione nuova si aggiunge a `Section` e a
 `SECTIONS` con nome, sfumatura e simbolo.
 
+### La barra dinamica
+
+Il dock in basso si adatta a quello che succede: invece di aprire
+finestrelle altrove, cambia forma per un momento e poi torna com'era. È
+fatto nello stesso stile a pixel morbidi del resto (pannello opaco, incavi,
+celle arancioni), non copia quello di altri sistemi. Il codice è in
+`system/kernel/src/gui/desktop/bar.rs`.
+
+| Cosa succede | Come cambia il dock |
+|---|---|
+| a riposo | come sempre: nessun pixel diverso |
+| un programma si avvia | la sua icona diventa una **capsula** con il nome, *Si sta avviando…* (o una nota: *Si avvia con Wine…*, *Prima apertura: preparo Windows…*, *Si estrae, ci vuole un po'…*) e una fila di celle che scorre; sparisce quando arriva la finestra, quando il programma finisce senza finestra o dopo 120 secondi. Aprirlo di nuovo mentre parte non ne avvia un secondo: la capsula torna davanti e l'icona rimbalza |
+| volume o luminosità | il dock diventa una **barra di livello** in basso al centro: il simbolo, 16 celle e il valore; resta 1,5 secondi dopo l'ultimo cambio. Un clic sulle celle sceglie il livello. Viene dai tasti del volume (su, giù, muto), dalle Impostazioni o da un'app; non compare con il centro di controllo aperto, che ha già i suoi cursori |
+| una notifica breve (titolo fino a 40 caratteri, testo fino a 60) | il dock **cresce verso l'alto** con una riga: icona, titolo, testo, *Chiudi* e, se viene da un'app, *Apri* arancione; resta 4,5 secondi, di più finché il puntatore ci sta sopra. Quelle lunghe, o con il dock nascosto, vanno in alto a destra come prima |
+| musica | l'icona di Musica diventa una capsula con il titolo, *Musica · 0:42* e un equalizzatore di 5 barre a 8 passi al secondo; un clic apre Musica |
+| timer dell'Orologio | capsula con il tempo che manca; quando suona pulsa in arancione per 30 secondi ed esce davanti alle altre |
+| a schermo intero | il dock è nascosto; se c'è un'attività resta una **pillola** sottile in basso al centro con l'ora e l'equalizzatore, le celle o il tempo del timer. Un clic apre l'app; portando il puntatore sul bordo in basso torna il dock |
+| due attività o più | nel dock ce n'è una (la più recente), le altre aspettano in una **bolla** a destra del dock, con il numero quando sono due o più; un clic sulla bolla le scambia |
+
+Come funziona:
+
+- Ogni attività (`Activity`) ha il suo tipo (`ActKind`: `Starting`, `Music`,
+  `Timer`, `Volume`, `Brightness`, `Note`), una scadenza facoltativa e un
+  `Morph`, un valore da 0 a 1000 che va verso l'obiettivo in 250 ms. La
+  forma del dock passa da una all'altra con questo valore: le capsule si
+  allargano dall'icona, la barra di livello e la riga della notifica
+  sfumano dal dock.
+- Le app dicono cosa fanno con `App::activity()` (`wm::Live::Music` o
+  `Live::Timer`); `Desktop::bar_tick`, dieci volte al secondo, le
+  confronta con quelle che ci sono, legge volume e luminosità e toglie le
+  scadute.
+- Si ridisegna il meno possibile: quando cambia la forma, il rettangolo
+  vecchio unito al nuovo (`damage_bar`, che ricorda l'ultimo disegnato);
+  altrimenti solo le barre dell'equalizzatore, le celle o le cifre del
+  timer.
+- Un'app nuova che vuole la sua capsula implementa `activity()` restituendo
+  una variante di `Live`; se serve un tipo nuovo, si aggiunge a `Live`, ad
+  `ActKind` e a `draw_capsule`.
+- Dalla shell `notify <titolo> <testo> [icona]` manda una notifica per
+  provarla.
+
 ### Le animazioni
 
 Tutto ciò che si muove segue il tempo, non i fotogrammi: su un computer lento
@@ -234,6 +277,7 @@ si vedono meno fotogrammi ma l'animazione dura uguale.
 | ingrandisci / ripristina | la finestra si allarga fino allo schermo e torna |
 | Applicazioni | lo sfondo si sfoca e scurisce, le icone arrivano con uno zoom |
 | dock | ingrandimento morbido delle icone, rimbalzo all'avvio di un'app |
+| barra dinamica | il dock cambia forma in 250 ms: capsule, barra di livello, riga della notifica, pillola, bolla |
 | menu e centro di controllo | si aprono in un attimo, dal dock verso l'alto |
 | notifiche | scivolano dentro da destra e poi via |
 | vista d'insieme | le finestre scivolano dal loro posto alla griglia, i desktop scendono dall'alto |

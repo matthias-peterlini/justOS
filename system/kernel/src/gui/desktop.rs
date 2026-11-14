@@ -27,6 +27,10 @@ use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::cell::Cell;
+
+mod bar;
+use bar::{Activity, Morph};
 
 const WEEKDAYS: [&str; 7] = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"];
 const WEEKDAYS_SHORT: [&str; 7] = ["lun", "mar", "mer", "gio", "ven", "sab", "dom"];
@@ -473,8 +477,8 @@ enum Ending {
 }
 
 /// A program launched whose first window has not come yet (Firefox takes
-/// most of a minute): its icon waits in the dock, hopping, where its
-/// window's icon will be.
+/// most of a minute): its icon waits in the dock where its window's icon
+/// will be, and the bar shows it starting (see [`bar`]).
 struct Starting {
     /// The program file: launching it again meanwhile starts no second copy.
     path: String,
@@ -483,13 +487,13 @@ struct Starting {
     icon: String,
     label: String,
     pid: u32,
-    /// When it was launched, and when the hops started (uptime, ms).
+    /// When it was launched (uptime, ms).
     since: u64,
-    hop: u64,
-    /// How high the icon was drawn last.
-    lift: i32,
     /// It may take minutes ([`SLOW_START_TIMEOUT_MS`]).
     slow: bool,
+    /// What it says while it starts, when it has more to say than that it
+    /// is starting (Wine preparing its C: drive).
+    note: Option<String>,
     /// What to say if it ends without a window (None: the usual words).
     fail: Option<String>,
 }
@@ -498,21 +502,6 @@ struct Starting {
 /// leaves the dock; one that says it is slow (Wine making its C: drive).
 const START_TIMEOUT_MS: u64 = 120_000;
 const SLOW_START_TIMEOUT_MS: u64 = 420_000;
-/// A starting program's icon: one hop, the rest after it, and how high.
-const HOP_MS: u64 = 620;
-const HOP_REST_MS: u64 = 480;
-const HOP_H: i32 = 12;
-
-/// How high a starting program's icon is now, its hops having begun at
-/// `hop`: the arc of a ball, then a pause on the dock.
-fn start_lift(hop: u64) -> i32 {
-    let t = time::uptime_ms().saturating_sub(hop) % (HOP_MS + HOP_REST_MS);
-    if t >= HOP_MS {
-        return 0;
-    }
-    let p = (t * 1000 / HOP_MS) as i64;
-    (HOP_H as i64 * 4 * p * (1000 - p) / 1_000_000) as i32
-}
 
 /// How far each new window goes right and down from the one opened before.
 const CASCADE: i32 = 28;
@@ -570,6 +559,23 @@ struct Desktop {
     carry: Option<Carry>,
     /// The charge shown in the bar, and whether it charges (a laptop).
     battery: Option<(u8, bool)>,
+    /// What the dock shows going on (see [`bar`]): programs starting,
+    /// music, timers, the volume, short notifications.
+    acts: Vec<Activity>,
+    /// The bubble beside the dock (a second activity): how far it is out,
+    /// and the icon it shows.
+    bubble: Morph,
+    bubble_icon: String,
+    /// The volume and the brightness last seen (None before the first look).
+    levels: Option<(u32, u32)>,
+    /// Where the bar was painted since its area was last damaged: its shape
+    /// changes with time, so it may have been painted where it is no more.
+    bar_painted: Cell<Rect>,
+    /// The part of the bar under the pointer (a notification's buttons, the
+    /// bubble).
+    bar_hover: Option<bar::BarHit>,
+    /// The step of the bar's moving cells (equaliser, progress) drawn last.
+    bar_phase: u64,
 }
 
 fn now() -> DateTime {
@@ -702,9 +708,10 @@ impl Desktop {
     }
 
     /// The dock's base layout, before magnification, with icons `icon`
-    /// units square: (x of each icon, total width). The mark comes first and
-    /// the status last, `status_w` wide.
-    fn dock_base(items: &[DockItem], status_w: i32, icon: i32) -> (Vec<i32>, i32) {
+    /// units square, each item `extras` wider for its capsule (see
+    /// [`bar`]): (x of each icon, total width). The mark comes first and the
+    /// status last, `status_w` wide.
+    fn dock_base(items: &[DockItem], status_w: i32, icon: i32, extras: &[i32]) -> (Vec<i32>, i32) {
         let mut xs = Vec::new();
         // The mark, as wide as an icon, and a separator after it.
         let mut x = DOCK_PAD + icon + DOCK_GAP + SEP_W;
@@ -713,16 +720,17 @@ impl Desktop {
                 x += SEP_W;
             }
             xs.push(x);
-            x += icon + DOCK_GAP;
+            x += icon + DOCK_GAP + extras.get(i).copied().unwrap_or(0);
         }
         (xs, x + status_w + DOCK_PAD)
     }
 
     /// The size of the dock's icons: [`ICON`], or less when so many windows
-    /// are open that the dock would not fit on the screen.
+    /// are open (or a capsule is so wide) that the dock would not fit on
+    /// the screen.
     fn dock_icon(&self, items: &[DockItem]) -> i32 {
-        let (_, total) = Self::dock_base(items, self.status_w(), ICON);
-        let room = self.w - 24;
+        let (_, total) = Self::dock_base(items, self.status_w(), ICON, &self.cap_extras(items));
+        let room = self.w - 24 - self.bubble_room(ICON);
         if total <= room || items.is_empty() {
             return ICON;
         }
@@ -745,9 +753,9 @@ impl Desktop {
     fn dock_rest(&self) -> Rect {
         let items = self.dock_items();
         let icon = self.dock_icon(&items);
-        let (_, total) = Self::dock_base(&items, self.status_w(), icon);
+        let (_, total) = Self::dock_base(&items, self.status_w(), icon, &self.cap_extras(&items));
         let dock_h = icon + 2 * DOCK_PAD + 4;
-        Rect::new((self.w - total) / 2, self.h - dock_h - 12, total, dock_h)
+        Rect::new((self.w - total - self.bubble_room(icon)) / 2, self.h - dock_h - 12, total, dock_h)
     }
 
     /// The justOS mark at the left end of the dock at rest (where the
@@ -775,19 +783,24 @@ impl Desktop {
     /// around the pointer, and the dock's background.
     fn dock_geometry(&self, items: &[DockItem]) -> (Rect, Vec<Rect>, Rect) {
         let icon = self.dock_icon(items);
-        let (apps, total) = Self::dock_base(items, self.status_w(), icon);
+        let extras = self.cap_extras(items);
+        let (apps, total) = Self::dock_base(items, self.status_w(), icon, &extras);
         // The mark grows like an icon.
         let xs: Vec<i32> = core::iter::once(DOCK_PAD).chain(apps).collect();
         let dock_h = icon + 2 * DOCK_PAD + 4;
-        let base_x = (self.w - total) / 2;
+        // The bubble beside the dock takes room at its right.
+        let bubble = self.bubble_room(icon);
+        let base_x = (self.w - total - bubble) / 2;
         let bottom = self.h - 12 - DOCK_PAD - 4;
         let mag = self.mag.value.clamp(0, 1000) as i64;
         let range = (icon + DOCK_GAP) as i64 * 5 / 2;
         let mx = self.mouse.0 as i64;
         let mut sizes: Vec<i32> = xs
             .iter()
-            .map(|&x| {
-                if mag == 0 {
+            .enumerate()
+            .map(|(k, &x)| {
+                // A capsule does not grow.
+                if mag == 0 || (k > 0 && extras[k - 1] > 0) {
                     return icon;
                 }
                 let c = (base_x + x + icon / 2) as i64;
@@ -797,7 +810,7 @@ impl Desktop {
             })
             .collect();
         // A full dock grows only as far as the screen's edges.
-        let room = (self.w - 8 - total).max(0);
+        let room = (self.w - 8 - total - bubble).max(0);
         let grown: i32 = sizes.iter().map(|s| s - icon).sum();
         if grown > room {
             for s in sizes.iter_mut() {
@@ -806,7 +819,7 @@ impl Desktop {
         }
         let extra: i32 = sizes.iter().map(|s| s - icon).sum();
         let total_now = total + extra;
-        let x0 = (self.w - total_now) / 2;
+        let x0 = (self.w - total_now - bubble) / 2;
         let mut rects = Vec::new();
         let mut shift = 0;
         for (i, &x) in xs.iter().enumerate() {
@@ -838,10 +851,12 @@ impl Desktop {
         self.dock_layout(&self.dock_items()).1
     }
 
-    /// The area the dock may paint (icons grow above it).
+    /// The area the dock may paint (icons grow above it), with the rest of
+    /// the bar (see [`bar`]).
     fn dock_zone(&self) -> Rect {
         let d = self.dock();
-        Rect::new(d.x - MAGNIFY * 4 - 30, d.y - MAGNIFY - 60, d.w + MAGNIFY * 8 + 60, d.h + MAGNIFY + 80)
+        let zone = Rect::new(d.x - MAGNIFY * 4 - 30, d.y - MAGNIFY - 60, d.w + MAGNIFY * 8 + 60, d.h + MAGNIFY + 80);
+        zone.union(&self.bar_extent(d))
     }
 
     /// The dock icon of a window kind (where it minimises to).
@@ -849,20 +864,6 @@ impl Desktop {
         let items = self.dock_items();
         let (rects, bg) = self.dock_layout(&items);
         items.iter().position(|d| d.kind == kind).map(|i| rects[i]).unwrap_or(Rect::new(bg.x + bg.w / 2 - 20, bg.y, 40, 40))
-    }
-
-    /// What the hopping icons of programs starting may paint.
-    fn starting_zone(&self) -> Rect {
-        let items = self.dock_items();
-        let (rects, bg) = self.dock_layout(&items);
-        let mut zone = Rect::EMPTY;
-        for (it, r) in items.iter().zip(&rects) {
-            if self.starting.iter().any(|s| s.kind == it.kind) {
-                let top = r.y - HOP_H - 4;
-                zone = zone.union(&Rect::new(r.x - 4, top, r.w + 8, bg.bottom() - top));
-            }
-        }
-        zone
     }
 
     /// Where windows go: under the clock, above the dock.
@@ -1359,6 +1360,10 @@ impl Desktop {
         if self.quiet {
             return;
         }
+        // A short one comes out of the bar instead of a banner.
+        if self.bar_note(l, &title, &body, &icon) {
+            return;
+        }
         self.notes.retain(|n| !n.gone());
         if self.notes.len() >= 3 {
             self.notes.remove(0);
@@ -1463,12 +1468,13 @@ impl Desktop {
         }
     }
 
-    /// A program still starting from `key`: its icon hops again (no second
-    /// copy). Whether there was one.
+    /// A program still starting from `key`: its capsule comes to the front
+    /// and its icon hops (no second copy). Whether there was one.
     fn hop_again(&mut self, l: &mut Looper, key: &str) -> bool {
-        let Some(s) = self.starting.iter_mut().find(|s| s.path == key) else { return false };
-        s.hop = time::uptime_ms();
-        l.damage(self.starting_zone());
+        let Some(kind) = self.starting.iter().find(|s| s.path == key).map(|s| s.kind.clone()) else { return false };
+        self.bar_front(l, &kind);
+        self.bounce_icon(&kind);
+        l.damage(self.dock_zone());
         true
     }
 
@@ -1491,14 +1497,17 @@ impl Desktop {
         let cwd = fs::abs(&s.cwd).unwrap_or_else(|_| Path::root("sys"));
         match fs::abs(&s.program).map_err(|_| justdk::syscall::Error::NotFound).and_then(|p| crate::user::spawn(&p, &s.args, cwd)) {
             Ok(pid) => {
-                if let Some(note) = s.note {
-                    self.notify(l, s.name.clone(), note, note_icon);
+                // Its icon waits in the dock, widened into a capsule that
+                // says it is starting, until its first window comes; then
+                // there is no notification. One already open just hops.
+                let capsule = s.icon.as_ref().is_some_and(|icon| !self.windows.iter().any(|w| w.app.kind() == icon));
+                if !capsule {
+                    if let Some(note) = s.note.clone() {
+                        self.notify(l, s.name.clone(), note, note_icon);
+                    }
                 }
                 match s.icon {
-                    // Its icon waits in the dock, hopping, until its first
-                    // window comes. One already open just hops once.
-                    Some(icon) if !self.windows.iter().any(|w| w.app.kind() == icon) => {
-                        let now = time::uptime_ms();
+                    Some(icon) if capsule => {
                         l.damage(self.dock_zone());
                         self.starting.push(Starting {
                             path: s.key,
@@ -1506,12 +1515,13 @@ impl Desktop {
                             icon,
                             label: s.name,
                             pid,
-                            since: now,
-                            hop: now,
-                            lift: 0,
+                            since: time::uptime_ms(),
                             slow: s.slow,
+                            note: s.note,
                             fail: s.fail,
                         });
+                        // The capsule comes now, not at the next tick.
+                        self.bar_tick(l);
                         l.damage(self.dock_zone());
                     }
                     Some(icon) => self.bounce_icon(&icon),
@@ -1748,6 +1758,10 @@ impl Desktop {
 
     /// The panel: over the status well, inside the screen, above the dock.
     fn control_panel(&self) -> Rect {
+        // Open, it stays where it opened while the bar changes shape.
+        if let Some(p) = self.popup.as_ref().filter(|p| p.kind == PopupKind::Control) {
+            return p.rect;
+        }
         let w = self.cc(CC_W);
         let h = 2 * self.cc(CC_PAD) + CC_ROWS.iter().map(|&r| self.cc(r)).sum::<i32>() + (CC_ROWS.len() as i32 - 1) * self.cc(CC_GAP);
         let rest = self.dock_rest();
@@ -1993,9 +2007,15 @@ impl Desktop {
             }
             return;
         }
+        // The bar's own parts: a notification's buttons, the bubble, the
+        // level, the pill over a full-screen window.
+        if self.bar_press(l, x, y) {
+            return;
+        }
         let items = self.dock_items();
         let (mark, rects, bg) = self.dock_geometry(&items);
-        if self.dock_shown() && mark.contains(x, y) {
+        let live = self.dock_live();
+        if live && mark.contains(x, y) {
             let mut items = alloc::vec![
                 ("Info su justOS", Some(MenuAct::About)),
                 ("", None),
@@ -2017,7 +2037,7 @@ impl Desktop {
             self.show_popup(l, p);
             return;
         }
-        if self.dock_shown() && self.status_pill(bg).contains(x, y) {
+        if live && self.status_pill(bg).contains(x, y) {
             let p = Popup { kind: PopupKind::Control, rect: self.control_rect(), items: Vec::new(), anim: Anim::new(180), up: true, settled: false };
             self.show_popup(l, p);
             return;
@@ -2032,8 +2052,10 @@ impl Desktop {
             self.show_popup(l, p);
             return;
         }
-        if self.dock_shown() && (bg.contains(x, y) || rects.iter().any(|r| r.contains(x, y))) {
-            if let Some(i) = rects.iter().position(|r| r.grow(DOCK_GAP / 2).contains(x, y)) {
+        if live && (bg.contains(x, y) || rects.iter().any(|r| r.contains(x, y))) {
+            // A capsule is pressed like its icon.
+            let wide = self.wide_rects(&items, &rects);
+            if let Some(i) = wide.iter().position(|r| r.grow(DOCK_GAP / 2).contains(x, y)) {
                 self.dock_press(l, &items[i]);
             }
             return;
@@ -2127,6 +2149,7 @@ impl Desktop {
                 self.close_popup(l);
                 return self.screenshot(l);
             }
+            Key::VolumeUp | Key::VolumeDown | Key::Mute => return self.volume_key(l, k.key),
             _ => {}
         }
         if self.popup.is_some() && k.key == Key::Escape {
@@ -2338,6 +2361,12 @@ impl Desktop {
             }
             return;
         }
+        // The bar's buttons, bubble and pill light up.
+        let bar_hover = self.bar_hit(x, y);
+        if bar_hover != self.bar_hover {
+            self.bar_hover = bar_hover;
+            l.damage(self.dock_zone());
+        }
         // Full screen: the dock comes up at the bottom edge.
         if self.full_screen() {
             let dock_zone = self.dock_zone();
@@ -2352,12 +2381,14 @@ impl Desktop {
         // The dock magnifies around the pointer.
         let zone = self.dock();
         let near = Rect::new(zone.x - 20, zone.y - MAGNIFY - 10, zone.w + 40, zone.h + MAGNIFY + 20);
-        let inside = near.contains(x, y) && self.popup.is_none() && self.dock_shown();
+        // Not while the bar shows the level or a notification over it.
+        let inside = near.contains(x, y) && self.popup.is_none() && self.dock_live() && self.note_t() == 0;
         self.mag.target = if inside { 1000 } else { 0 };
         let items = self.dock_items();
         let hover = if inside {
             let (rects, _) = self.dock_layout(&items);
-            rects.iter().position(|r| r.grow(DOCK_GAP / 2).contains(x, y) || (x >= r.x - DOCK_GAP / 2 && x < r.right() + DOCK_GAP / 2 && y > r.y - 4))
+            let wide = self.wide_rects(&items, &rects);
+            wide.iter().position(|r| r.grow(DOCK_GAP / 2).contains(x, y) || (x >= r.x - DOCK_GAP / 2 && x < r.right() + DOCK_GAP / 2 && y > r.y - 4))
         } else {
             None
         };
@@ -2687,8 +2718,15 @@ impl Desktop {
     fn draw_dock(&self, c: &mut Canvas) {
         let items = self.dock_items();
         let (mark, rects, bg) = self.dock_geometry(&items);
-        ui::drop_shadow(c, bg, DOCK_RAD, 16, 55);
-        ui::panel(c, bg, DOCK_RAD);
+        let extras = self.cap_extras(&items);
+        // The bar's panel, with a notification above the dock or on its way
+        // to being the level (then the dock's content is cut to it).
+        let Some(panel) = self.bar_frame(c, bg) else { return };
+        let level = self.level_t();
+        let saved = c.clip();
+        if level > 0 {
+            c.set_clip(saved.intersect(&panel));
+        }
         // The justOS mark on a dark tile, like an app's icon: it opens the
         // system menu.
         let menu = self.popup.as_ref().is_some_and(|p| p.kind == PopupKind::Menu && p.up);
@@ -2745,22 +2783,41 @@ impl Desktop {
                     lift = (height * 4 * phase * (1000 - phase) / 1_000_000) as i32;
                 }
             }
-            // A program starting: it hops until its window comes.
-            if let Some(s) = self.starting.iter().find(|s| s.kind == it.kind) {
-                lift = start_lift(s.hop);
-            }
             if self.carry.as_ref().is_some_and(|c| c.dock == Some(i)) {
                 // It takes the files carried over it.
                 c.fill_round(r.grow(6), 18, ui::sel());
                 c.stroke_round(r.grow(6), 18, 2, ui::ACCENT);
             }
-            res::draw_icon(c, &it.icon, r.w, r.x, r.y - lift);
             let open = self.windows.iter().any(|w| w.app.kind() == it.kind) && it.id != "trash";
-            if open {
-                c.fill_round(Rect::new(r.x + r.w / 2 - 2, bg.bottom() - 12, 5, 5), 1, ui::ORANGE);
+            match self.cap_of(&it.kind) {
+                // Widened into a capsule: its dot under its smaller tile,
+                // clear of the well.
+                Some(a) => {
+                    let tile = self.draw_capsule(c, &it.icon, a, r, extras[i], lift);
+                    if open {
+                        c.fill_round(Rect::new(tile.x + tile.w / 2 - 2, bg.bottom() - 9, 5, 5), 1, ui::ORANGE);
+                    }
+                }
+                None => {
+                    // A program starting whose capsule is not out (another
+                    // is): its icon waits, faded.
+                    if self.starting.iter().any(|s| s.kind == it.kind) {
+                        res::draw_icon_faded(c, &it.icon, r.w, r.x, r.y - lift, 150);
+                    } else {
+                        res::draw_icon(c, &it.icon, r.w, r.x, r.y - lift);
+                    }
+                    if open {
+                        c.fill_round(Rect::new(r.x + r.w / 2 - 2, bg.bottom() - 12, 5, 5), 1, ui::ORANGE);
+                    }
+                }
             }
         }
-        if let Some(i) = self.hover.filter(|&i| i < items.len()) {
+        c.set_clip(saved);
+        // The name over the icon under the pointer (a capsule says it).
+        if level > 0 || self.note_t() > 0 {
+            return;
+        }
+        if let Some(i) = self.hover.filter(|&i| i < items.len() && extras[i] == 0) {
             let r = rects[i];
             let label = &items[i].label;
             let w = text::width(Font::Strong, label) + 24;
@@ -3361,7 +3418,7 @@ impl View for Desktop {
             || self.popup.as_ref().is_some_and(|p| !p.settled)
             || self.mag.moving()
             || self.bounce.is_some()
-            || !self.starting.is_empty()
+            || self.bar_moving()
             || self.notes.iter().any(|n| n.moving())
             || self.ending.is_some()
             || self.windows.iter().any(|w| w.shown(self.space) && w.app.animating())
@@ -3519,6 +3576,10 @@ impl Desktop {
                     for w in self.widgets().iter().take(self.show_widgets()) {
                         l.damage(ui::with_shadow(*w));
                     }
+                    // The pill over a full-screen window shows the time too.
+                    if self.full_screen() {
+                        l.damage(self.dock_zone());
+                    }
                 }
                 let second = time::uptime_ms() / 5000;
                 if second != self.second {
@@ -3568,6 +3629,7 @@ impl Desktop {
                     self.notes.retain(|n| !n.gone());
                     l.damage(self.notes_zone());
                 }
+                self.bar_tick(l);
             }
             Event::Frame => {
                 // Windows in motion.
@@ -3619,16 +3681,9 @@ impl Desktop {
                         self.bounce = None;
                     }
                 }
-                // Icons of programs starting hop: drawn again only when
-                // one moved.
-                let mut hopped = false;
-                for s in self.starting.iter_mut() {
-                    let lift = start_lift(s.hop);
-                    hopped |= lift != s.lift;
-                    s.lift = lift;
-                }
-                if hopped {
-                    l.damage(self.starting_zone());
+                // The bar changing shape: where it is now and where it was.
+                if self.bar_moving() {
+                    self.damage_bar(l);
                 }
                 if self.notes.iter().any(|n| n.moving()) {
                     l.damage(self.notes_zone());
@@ -3735,8 +3790,8 @@ impl Desktop {
                 f.last = f.last.union(&dst.grow(2));
             }
         }
-        if self.dock_shown() && r.overlaps(&self.dock_zone()) {
-            self.draw_dock(c);
+        if r.overlaps(&self.dock_zone()) {
+            self.draw_bar(c);
         }
         if !clock_under && r.overlaps(&self.clock_zone()) {
             self.draw_clock(c);
@@ -3807,6 +3862,13 @@ pub fn run(d: &mut Display) {
         space_hud: None,
         carry: None,
         battery: None,
+        acts: Vec::new(),
+        bubble: Morph::new(),
+        bubble_icon: String::new(),
+        levels: None,
+        bar_painted: Cell::new(Rect::EMPTY),
+        bar_hover: None,
+        bar_phase: 0,
     };
     let mut l = Looper::new(d);
     l.damage_all(d);

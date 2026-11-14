@@ -5,7 +5,7 @@ use crate::dev::input::{Key, KeyEvent};
 use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::text::{self, Font};
 use crate::gui::ui;
-use crate::gui::wm::{Action, App};
+use crate::gui::wm::{Action, App, Live};
 use crate::time;
 use alloc::format;
 use alloc::string::String;
@@ -29,6 +29,9 @@ pub fn dial(step: i32) -> (i32, i32) {
     }
 }
 
+/// How long the dock shows a timer that rang.
+const RING_SHOWN_MS: u64 = 30_000;
+
 /// Cities and their offset from here in hours.
 const CITIES: [(&str, i64); 5] = [("Londra", -1), ("New York", -6), ("San Francisco", -9), ("Tokyo", 8), ("Sydney", 10)];
 
@@ -51,6 +54,8 @@ pub struct Clock {
     timer_end: Option<u64>,
     timer_left: Option<u64>,
     ringing: bool,
+    /// When it rang (uptime, ms): the dock shows it ringing for a while.
+    rang_at: u64,
     hover: Option<Rect>,
     last_sec: u64,
 }
@@ -128,6 +133,7 @@ impl Clock {
             timer_end: None,
             timer_left: None,
             ringing: false,
+            rang_at: 0,
             hover: None,
             last_sec: 0,
         }
@@ -165,6 +171,7 @@ impl Clock {
 
     fn ring(&mut self) {
         self.ringing = true;
+        self.rang_at = time::uptime_ms();
         self.timer_end = None;
         self.timer_left = None;
         if crate::dev::audio::available() {
@@ -393,5 +400,19 @@ impl App for Clock {
 
     fn frame(&mut self) -> bool {
         true
+    }
+
+    /// A timer running, or one that rang in the last half minute.
+    fn activity(&self) -> Option<Live> {
+        let now = time::uptime_ms();
+        let label = String::from("Timer");
+        match self.timer_end {
+            // Its end passed while the window was minimised (no ticks): it
+            // rings as soon as the window is back.
+            Some(end) if now >= end => Some(Live::Timer { left: fmt_left(0), label, ringing: true }),
+            Some(end) => Some(Live::Timer { left: fmt_left(end - now), label, ringing: false }),
+            None if self.ringing && now.saturating_sub(self.rang_at) < RING_SHOWN_MS => Some(Live::Timer { left: fmt_left(0), label, ringing: true }),
+            None => None,
+        }
     }
 }

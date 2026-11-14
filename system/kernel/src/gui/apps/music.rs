@@ -9,7 +9,7 @@ use crate::gui::gfx::{Canvas, Rect};
 use crate::gui::res;
 use crate::gui::text::{self, Font};
 use crate::gui::ui;
-use crate::gui::wm::{Action, App};
+use crate::gui::wm::{Action, App, Live};
 use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -392,5 +392,12 @@ impl App for Music {
         if self.state().is_some_and(|s| s.2) {
             audio::stop();
         }
+    }
+
+    /// While a song plays: its title and the time played.
+    fn activity(&self) -> Option<Live> {
+        let (pos, _, playing, rate) = self.state()?;
+        let (i, _, _) = self.current.as_ref()?;
+        playing.then(|| Live::Music { title: self.songs[*i].title.clone(), elapsed: mmss(pos / rate.max(1) as u64) })
     }
 }

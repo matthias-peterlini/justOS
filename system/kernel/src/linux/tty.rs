@@ -102,7 +102,7 @@ fn key_bytes(ev: KeyEvent, raw: bool) -> Vec<u8> {
             };
         }
         // Taken by the interface, never typed.
-        Key::PrintScreen | Key::Lock | Key::Overview | Key::PrevDesktop | Key::NextDesktop => b"",
+        Key::PrintScreen | Key::Lock | Key::Overview | Key::PrevDesktop | Key::NextDesktop | Key::VolumeUp | Key::VolumeDown | Key::Mute => b"",
     };
     s.to_vec()
 }

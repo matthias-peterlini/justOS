@@ -86,6 +86,7 @@ const COMMANDS: &[(&str, &str, &str)] = &[
     ("strace", "[on|off] [failed] [n,n…]", "log the system calls of Linux programs (in the journal): only failed ones, only some calls"),
     ("export", "[NAME=value | NAME=]", "environment of the Linux programs started from now on"),
     ("echo", "<text>", "print text"),
+    ("notify", "<title> <text> [icon]", "show a notification on the desktop"),
     ("clear", "", "clear the screen (also: cls)"),
     ("restart", "", "restart the computer (also: reboot)"),
     ("shutdown", "", "turn the computer off (also: off)"),
@@ -1009,6 +1010,11 @@ impl Shell {
                 }
             }
             "echo" => println!("{}", rest.join(" ")),
+            "notify" => match rest[..] {
+                [title, text] => crate::gui::notify(title, text, "info"),
+                [title, text, icon] => crate::gui::notify(title, text, icon),
+                _ => println!("{ERR}usage: notify \"title\" \"text\" [icon]{RESET}"),
+            },
             "clear" | "cls" => crate::console::clear(),
             "restart" | "reboot" => {
                 println!("restarting…");

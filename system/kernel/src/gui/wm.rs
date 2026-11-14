@@ -46,6 +46,16 @@ pub enum Action {
     RedrawAll,
 }
 
+/// What an app is doing that the dock shows while it lasts (see
+/// [`App::activity`]).
+#[derive(Clone, PartialEq, Eq)]
+pub enum Live {
+    /// A song playing: its title and the time played ("1:42").
+    Music { title: String, elapsed: String },
+    /// A timer: the time left ("04:59"), its name, and whether it rings.
+    Timer { left: String, label: String, ringing: bool },
+}
+
 /// The content of a window. Positions handed to it are relative to the
 /// content area unless said otherwise.
 pub trait App {
@@ -135,6 +145,11 @@ pub trait App {
     }
     /// Files changed somewhere (a drop moved or copied some): show them again.
     fn refresh(&mut self) {}
+    /// Something going on that the dock shows (music playing, a timer
+    /// running), asked about ten times a second; None most of the time.
+    fn activity(&self) -> Option<Live> {
+        None
+    }
 }
 
 pub struct Window {
